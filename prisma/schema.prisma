@@ -1,0 +1,103 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model Employee {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  email     String   @unique
+  role      EmployeeRole
+  phone     String?
+  address   String?
+  startDate DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  @@map("employees")
+}
+
+model User {
+  id       String   @id @default(auto()) @map("_id") @db.ObjectId
+  email    String   @unique
+  name     String
+  password String
+  role     UserRole
+  avatar   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  @@map("users")
+}
+
+model Product {
+  id          String         @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  barcode     String         @unique
+  category    ProductCategory
+  price       Float
+  costPrice   Float
+  stock       Int
+  unitOfMeasure UnitOfMeasure
+  image       String
+  description String
+  status      ProductStatus
+  profitMargin Float?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+
+  @@map("products")
+}
+
+model AuditLog {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  entity    String
+  entityId  String
+  action    String
+  userId    String?
+  userEmail String?
+  ipAddress String
+  oldValues Json?
+  newValues Json?
+  timestamp DateTime @default(now())
+
+  @@map("audit_logs")
+}
+
+enum EmployeeRole {
+  cajero
+  gerente
+  mozo
+}
+
+enum UserRole {
+  admin
+  user
+}
+
+enum ProductCategory {
+  organicos
+  aromaticos
+  wellness
+}
+
+enum ProductStatus {
+  active
+  inactive
+  out_of_stock
+}
+
+enum UnitOfMeasure {
+  litro
+  gramo
+} 
