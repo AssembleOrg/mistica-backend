@@ -1,4 +1,10 @@
-onlyBuiltDependencies:
-  - unrs-resolver
 packages:
-- '.'  
+  - 'src/**'
+  - 'test/**'
+  - 'docs/**'
+
+onlyBuiltDependencies:
+  - '@nestjs/core'
+  - '@scarf/scarf'
+  - '@swc/core'
+  - unrs-resolver

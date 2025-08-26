@@ -1,31 +1,51 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { CreateEmployeeDto, UpdateEmployeeDto, PaginationDto } from '../common/dto';
 import { Employee } from '../common/interfaces';
 import { PaginatedResponse } from '../common/interfaces';
 import { EmpleadoNoEncontradoException, EmailYaExisteException } from '../common/exceptions';
+import { EmployeeDocument } from '../common/schemas';
 
 @Injectable()
 export class EmployeesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @InjectModel('Employee') private readonly employeeModel: Model<EmployeeDocument>,
+  ) {}
+
+  private mapToEmployeeResponse(employee: EmployeeDocument): Employee {
+    const employeeObj = employee.toObject();
+    return {
+      id: employeeObj._id.toString(),
+      name: employeeObj.name,
+      email: employeeObj.email,
+      role: employeeObj.role,
+      phone: employeeObj.phone,
+      address: employeeObj.address,
+      startDate: employeeObj.startDate,
+      createdAt: employeeObj.createdAt,
+      updatedAt: employeeObj.updatedAt,
+      deletedAt: employeeObj.deletedAt,
+    };
+  }
 
   async create(createEmployeeDto: CreateEmployeeDto): Promise<Employee> {
-    const existingEmployee = await this.prisma.employee.findUnique({
-      where: { email: createEmployeeDto.email },
-    });
+    const existingEmployee = await this.employeeModel.findOne({
+      email: createEmployeeDto.email.toLowerCase(),
+      deletedAt: { $exists: false }
+    }).exec();
 
     if (existingEmployee) {
       throw new EmailYaExisteException(createEmployeeDto.email);
     }
 
-    const employee = await this.prisma.employee.create({
-      data: {
-        ...createEmployeeDto,
-        startDate: new Date(createEmployeeDto.startDate),
-      },
+    const employee = await this.employeeModel.create({
+      ...createEmployeeDto,
+      email: createEmployeeDto.email.toLowerCase(),
+      startDate: new Date(createEmployeeDto.startDate),
     });
 
-    return employee;
+    return this.mapToEmployeeResponse(employee);
   }
 
   async findAll(paginationDto?: PaginationDto): Promise<PaginatedResponse<Employee>> {
@@ -33,21 +53,18 @@ export class EmployeesService {
     const skip = (page - 1) * limit;
 
     const [employees, total] = await Promise.all([
-      this.prisma.employee.findMany({
-        where: { deletedAt: null },
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-      }),
-      this.prisma.employee.count({
-        where: { deletedAt: null },
-      }),
+      this.employeeModel.find({ deletedAt: { $exists: false } })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.employeeModel.countDocuments({ deletedAt: { $exists: false } }).exec(),
     ]);
 
     const totalPages = Math.ceil(total / limit);
 
     return {
-      data: employees,
+      data: employees.map(employee => this.mapToEmployeeResponse(employee)),
       meta: {
         page,
         limit,
@@ -59,57 +76,92 @@ export class EmployeesService {
     };
   }
 
+  async findWithoutPagination(): Promise<Employee[]> {
+    const employees = await this.employeeModel.find({ 
+      deletedAt: { $exists: false } 
+    }).sort({ createdAt: -1 }).exec();
+
+    return employees.map(employee => this.mapToEmployeeResponse(employee));
+  }
+
   async findOne(id: string): Promise<Employee> {
-    const employee = await this.prisma.employee.findFirst({
-      where: { id, deletedAt: null },
-    });
+    const employee = await this.employeeModel.findOne({
+      _id: id,
+      deletedAt: { $exists: false }
+    }).exec();
 
     if (!employee) {
       throw new EmpleadoNoEncontradoException(id);
     }
 
-    return employee;
+    return this.mapToEmployeeResponse(employee);
   }
 
   async update(id: string, updateEmployeeDto: UpdateEmployeeDto): Promise<Employee> {
     const existingEmployee = await this.findOne(id);
 
     if (updateEmployeeDto.email && updateEmployeeDto.email !== existingEmployee.email) {
-      const emailExists = await this.prisma.employee.findUnique({
-        where: { email: updateEmployeeDto.email },
-      });
+      const emailExists = await this.employeeModel.findOne({
+        email: updateEmployeeDto.email.toLowerCase(),
+        _id: { $ne: id },
+        deletedAt: { $exists: false }
+      }).exec();
 
       if (emailExists) {
         throw new EmailYaExisteException(updateEmployeeDto.email);
       }
     }
 
-    const updateData: any = { ...updateEmployeeDto };
-    if (updateEmployeeDto.startDate) {
-      updateData.startDate = new Date(updateEmployeeDto.startDate);
+    let updateData = { ...updateEmployeeDto };
+    
+    if (updateEmployeeDto.email) {
+      updateData.email = updateEmployeeDto.email.toLowerCase();
     }
 
-    const employee = await this.prisma.employee.update({
-      where: { id },
-      data: updateData,
-    });
+    if (updateEmployeeDto.startDate) {
+      updateData.startDate = new Date(updateEmployeeDto.startDate).toISOString();
+    }
 
-    return employee;
+    const employee = await this.employeeModel.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: true }
+    ).exec();
+
+    if (!employee) {
+      throw new EmpleadoNoEncontradoException(id);
+    }
+
+    return this.mapToEmployeeResponse(employee);
   }
 
   async remove(id: string): Promise<void> {
-    await this.findOne(id);
-
-    await this.prisma.employee.update({
-      where: { id },
-      data: { deletedAt: new Date() },
-    });
+    const employee = await this.findOne(id);
+    
+    await this.employeeModel.findByIdAndUpdate(id, {
+      deletedAt: new Date()
+    }).exec();
   }
 
-  async findWithoutPagination(): Promise<Employee[]> {
-    return this.prisma.employee.findMany({
-      where: { deletedAt: null },
-      orderBy: { name: 'asc' },
-    });
+  async findAllDeleted(): Promise<Employee[]> {
+    const employees = await this.employeeModel.find({
+      deletedAt: { $exists: true }
+    }).exec();
+
+    return employees.map(employee => this.mapToEmployeeResponse(employee));
+  }
+
+  async restore(id: string): Promise<Employee> {
+    const employee = await this.employeeModel.findByIdAndUpdate(
+      id,
+      { $unset: { deletedAt: 1 } },
+      { new: true, runValidators: true }
+    ).exec();
+
+    if (!employee) {
+      throw new EmpleadoNoEncontradoException(id);
+    }
+
+    return this.mapToEmployeeResponse(employee);
   }
 } 

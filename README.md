@@ -1,11 +1,11 @@
 # Mistica Autentica - Backend API
 
-Backend API para la gestión del café bar Mistica Autentica, construido con NestJS, MongoDB, Prisma y JWT.
+Backend API para la gestión del café bar Mistica Autentica, construido con NestJS, MongoDB, Mongoose y JWT.
 
 ## 🚀 Características
 
 - **Arquitectura Limpia**: Implementación de Clean Architecture con separación clara de responsabilidades
-- **Base de Datos**: MongoDB con Prisma ORM para tipado estricto
+- **Base de Datos**: MongoDB con Mongoose ODM para tipado estricto
 - **Autenticación**: JWT con Passport.js
 - **Documentación**: Swagger/OpenAPI con descripciones en español
 - **Auditoría**: Logging automático de todas las operaciones CRUD
@@ -30,7 +30,7 @@ src/
 ├── config/              # Configuración de la aplicación
 ├── employees/           # Gestión de empleados
 ├── products/            # Gestión de productos
-├── prisma/              # Configuración de Prisma
+├── database/            # Configuración de base de datos
 ├── users/               # Gestión de usuarios
 └── main.ts              # Punto de entrada
 ```
@@ -38,7 +38,7 @@ src/
 ## 🛠️ Tecnologías Utilizadas
 
 - **NestJS**: Framework de Node.js para aplicaciones escalables
-- **Prisma**: ORM moderno para TypeScript y Node.js
+- **Mongoose**: ODM moderno para MongoDB y Node.js
 - **MongoDB**: Base de datos NoSQL
 - **JWT**: Autenticación basada en tokens
 - **Passport.js**: Estrategias de autenticación
@@ -81,14 +81,14 @@ src/
    SWAGGER_ENABLED="true"
    ```
 
-4. **Generar cliente Prisma**
+4. **Configurar base de datos**
    ```bash
-   npx prisma generate
+   # No es necesario para Mongoose
    ```
 
 5. **Ejecutar migraciones (opcional para desarrollo)**
    ```bash
-   npx prisma db push
+   # No es necesario para Mongoose
    ```
 
 6. **Iniciar la aplicación**
@@ -232,7 +232,7 @@ pnpm format         # Formatear código
 - `SWAGGER_ENABLED`: Habilitar/deshabilitar Swagger
 
 ### Base de Datos
-La aplicación utiliza MongoDB con Prisma. Para desarrollo local:
+La aplicación utiliza MongoDB con Mongoose. Para desarrollo local:
 1. Instalar MongoDB
 2. Crear base de datos `mistica_autentica`
 3. Configurar `DATABASE_URL` en `.env`

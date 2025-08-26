@@ -1,7 +1,8 @@
-import { EmployeeRole } from '@prisma/client';
+import { EmployeeRole } from '../enums';
 
 export interface Employee {
-  id: string;
+  id?: string; // Optional since Mongoose uses _id
+  _id?: string; // Mongoose ObjectId
   name: string;
   email: string;
   role: EmployeeRole;

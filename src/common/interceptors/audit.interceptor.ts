@@ -8,14 +8,16 @@ import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { Request } from 'express';
-import { PrismaService } from '../../prisma/prisma.service';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { AUDITORY_KEY, AuditoryOptions } from '../decorators';
+import { AuditLogDocument } from '../schemas';
 
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
   constructor(
     private readonly reflector: Reflector,
-    private readonly prisma: PrismaService,
+    @InjectModel('AuditLog') private readonly auditLogModel: Model<AuditLogDocument>,
   ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
@@ -61,17 +63,15 @@ export class AuditInterceptor implements NestInterceptor {
   ): Promise<void> {
     const entityId = this.extractEntityId(data, options.entity);
     
-    await this.prisma.auditLog.create({
-      data: {
-        entity: options.entity,
-        entityId: entityId || 'unknown',
-        action: options.action,
-        userId: user?.id,
-        userEmail: user?.email,
-        ipAddress,
-        newValues: data,
-        timestamp: new Date(),
-      },
+    await this.auditLogModel.create({
+      entity: options.entity,
+      entityId: entityId || 'unknown',
+      action: options.action,
+      userId: user?.id,
+      userEmail: user?.email,
+      ipAddress,
+      newValues: data,
+      timestamp: new Date(),
     });
   }
 

@@ -5,7 +5,18 @@ import { AppModule } from './app.module';
 import { envConfig } from './config/env.config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule); 
+
+  // Global error handling
+  process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    process.exit(1);
+  });
 
   // Enable CORS
   // app.enableCors({
@@ -19,6 +30,13 @@ async function bootstrap() {
     whitelist: true,
     forbidNonWhitelisted: true,
     transform: true,
+    transformOptions: {
+      enableImplicitConversion: true,
+    },
+    validationError: {
+      target: false,
+      value: false,
+    },
   }));
 
   // Swagger configuration (only in development)
@@ -46,4 +64,8 @@ async function bootstrap() {
     console.log(`📚 Documentación Swagger disponible en http://localhost:${port}/api`);
   }
 }
-bootstrap();
+
+bootstrap().catch((error) => {
+  console.error('Error starting application:', error);
+  process.exit(1);
+});

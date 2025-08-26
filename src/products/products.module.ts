@@ -1,10 +1,15 @@
 import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
 import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
-import { PrismaModule } from '../prisma/prisma.module';
+import { Product, ProductSchema } from '../common/schemas';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [
+    MongooseModule.forFeature([
+      { name: Product.name, schema: ProductSchema }
+    ])
+  ],
   controllers: [ProductsController],
   providers: [ProductsService],
   exports: [ProductsService],

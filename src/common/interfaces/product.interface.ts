@@ -1,7 +1,8 @@
-import { ProductCategory, ProductStatus, UnitOfMeasure } from '@prisma/client';
+import { ProductCategory, ProductStatus, UnitOfMeasure } from '../enums';
 
 export interface Product {
-  id: string;
+  id?: string; // Optional since Mongoose uses _id
+  _id?: string; // Mongoose ObjectId
   name: string;
   barcode: string;
   category: ProductCategory;
@@ -15,5 +16,5 @@ export interface Product {
   profitMargin: number | null;
   createdAt: Date;
   updatedAt: Date;
-  deletedAt: Date | null;
+  deletedAt?: Date;
 } 

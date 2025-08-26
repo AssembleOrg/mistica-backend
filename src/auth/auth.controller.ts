@@ -27,6 +27,7 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   @ApiResponse({ status: 409, description: 'Email ya registrado' })
   async register(@Body() createUserDto: CreateUserDto) {
+    console.table(process.env)
     return this.authService.register(createUserDto);
   }
 
