@@ -34,9 +34,10 @@ export class CreateProductDto {
   @IsEnum(UnitOfMeasure)
   unitOfMeasure: UnitOfMeasure;
 
-  @ApiProperty({ description: 'URL de la imagen del producto' })
+  @ApiPropertyOptional({ description: 'URL de la imagen del producto' })
+  @IsOptional()
   @IsString()
-  image: string;
+  image?: string;
 
   @ApiProperty({ description: 'Descripción del producto' })
   @IsString()
