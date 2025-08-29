@@ -19,11 +19,11 @@ async function bootstrap() {
   });
 
   // Enable CORS
-  // app.enableCors({
-  //   origin: ['http://localhost:3000', 'http://localhost:3001'], 
-  //   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-  //   credentials: true,
-  // });
+//   app.enableCors({
+//     origin: ['http://localhost:3000', 'http://localhost:3001'], 
+//     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+//      credentials: true,
+//    });
 
   // Global validation pipe
   app.useGlobalPipes(new ValidationPipe({

@@ -35,7 +35,7 @@ export class CreateProductDto {
   unitOfMeasure: UnitOfMeasure;
 
   @ApiProperty({ description: 'URL de la imagen del producto' })
-  @IsUrl()
+  @IsString()
   image: string;
 
   @ApiProperty({ description: 'Descripción del producto' })
@@ -93,7 +93,7 @@ export class UpdateProductDto {
 
   @ApiPropertyOptional({ description: 'URL de la imagen del producto' })
   @IsOptional()
-  @IsUrl()
+  @IsString()
   image?: string;
 
   @ApiPropertyOptional({ description: 'Descripción del producto' })
