@@ -6,6 +6,7 @@ import { envConfig } from './config/env.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule); 
+  app.setGlobalPrefix('api');
 
   // Global error handling
   process.on('uncaughtException', (error) => {
@@ -19,11 +20,11 @@ async function bootstrap() {
   });
 
   // Enable CORS
-  // app.enableCors({
-  //   origin: ['http://localhost:3000', 'http://localhost:3001'], 
-  //   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-  //   credentials: true,
-  // });
+  app.enableCors({
+    origin: ['http://localhost:3000', 'http://localhost:3001', 'https://frontend-mistica-production.up.railway.app'], 
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true,
+  });
 
   // Global validation pipe
   app.useGlobalPipes(new ValidationPipe({
@@ -50,6 +51,9 @@ async function bootstrap() {
       .addTag('Empleados', 'Gestión de empleados del café')
       .addTag('Usuarios', 'Gestión de usuarios del sistema')
       .addTag('Productos', 'Gestión de productos del café')
+      .addTag('Ventas', 'Gestión de ventas del café')
+      .addTag('Clientes', 'Gestión de clientes del café')
+      .addTag('Prepaids', 'Gestión de prepaids de clientes')
       .build();
 
     const document = SwaggerModule.createDocument(app, config);

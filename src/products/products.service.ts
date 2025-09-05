@@ -33,6 +33,7 @@ export class ProductsService {
       description: productObj.description,
       status: productObj.status,
       profitMargin: productObj.profitMargin,
+      specialProduct: productObj.specialProduct,
       createdAt: productObj.createdAt,
       updatedAt: productObj.updatedAt,
       deletedAt: productObj.deletedAt,

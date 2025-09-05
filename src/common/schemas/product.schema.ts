@@ -42,6 +42,9 @@ export class Product {
   @Prop({ min: 0 })
   profitMargin?: number;
 
+  @Prop({ type: Boolean, default: false })
+  specialProduct: boolean;
+
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
 

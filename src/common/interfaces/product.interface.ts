@@ -14,6 +14,7 @@ export interface Product {
   description: string;
   status: ProductStatus;
   profitMargin: number | null;
+  specialProduct: boolean;
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date;
