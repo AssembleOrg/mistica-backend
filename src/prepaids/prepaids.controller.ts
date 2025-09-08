@@ -45,6 +45,9 @@ export class PrepaidsController {
   @ApiOperation({ summary: 'Obtener todos los prepaids con paginación' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Número de página' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Límite por página' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Término de búsqueda' })
+  @ApiQuery({ name: 'from', required: false, type: String, description: 'Fecha de inicio (YYYY-MM-DD)', format: 'date' })
+  @ApiQuery({ name: 'to', required: false, type: String, description: 'Fecha de fin (YYYY-MM-DD)', format: 'date' })
   @ApiQuery({ name: 'status', required: false, enum: ['PENDING', 'CONSUMED'], description: 'Filtrar por status' })
   @ApiResponse({ status: 200, description: 'Lista de prepaids obtenida exitosamente' })
   async findAllPaginated(@Query() paginationDto: PrepaidPaginationDto): Promise<{ success: boolean; message: string; data: PaginatedResponse<Prepaid> }> {
@@ -73,6 +76,9 @@ export class PrepaidsController {
   @ApiQuery({ name: 'status', required: true, enum: ['PENDING', 'CONSUMED'], description: 'Status del prepaid' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Número de página' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Límite por página' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Término de búsqueda' })
+  @ApiQuery({ name: 'from', required: false, type: String, description: 'Fecha de inicio (YYYY-MM-DD)', format: 'date' })
+  @ApiQuery({ name: 'to', required: false, type: String, description: 'Fecha de fin (YYYY-MM-DD)', format: 'date' })
   @ApiResponse({ status: 200, description: 'Prepaids filtrados por status obtenidos exitosamente' })
   @ApiResponse({ status: 400, description: 'Status requerido' })
   async findByStatus(@Query() paginationDto: PrepaidPaginationDto): Promise<{ success: boolean; message: string; data: PaginatedResponse<Prepaid> }> {

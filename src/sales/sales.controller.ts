@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { SalesService } from './sales.service';
-import { CreateSaleDto, UpdateSaleDto, PaginationDto, DailySalesQueryDto } from '../common/dto';
+import { CreateSaleDto, UpdateSaleDto, SalesPaginatedFilterDto, DailySalesQueryDto } from '../common/dto';
 import { Sale, PaginatedResponse, DailySalesResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Auditory } from '../common/decorators';
@@ -42,8 +42,12 @@ export class SalesController {
   @ApiOperation({ summary: 'Obtener todas las ventas con paginación' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Número de página' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Límite por página' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Término de búsqueda' })
+  @ApiQuery({ name: 'from', required: false, type: String, description: 'Fecha de inicio (YYYY-MM-DD)', format: 'date' })
+  @ApiQuery({ name: 'to', required: false, type: String, description: 'Fecha de fin (YYYY-MM-DD)', format: 'date' })
+  @ApiQuery({ name: 'status', required: false, enum: ['PENDING', 'COMPLETED', 'CANCELLED'], description: 'Filtrar por status de la venta' })
   @ApiResponse({ status: 200, description: 'Lista de ventas obtenida exitosamente' })
-  async findAllPaginated(@Query() paginationDto: PaginationDto): Promise<{ success: boolean; message: string; data: PaginatedResponse<Sale> }> {
+  async findAllPaginated(@Query() paginationDto: SalesPaginatedFilterDto): Promise<{ success: boolean; message: string; data: PaginatedResponse<Sale> }> {
     const result = await this.salesService.findAll(paginationDto);
     return {
       success: true,

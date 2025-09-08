@@ -11,6 +11,7 @@ import {
   ClienteNoEncontradoException
 } from '../common/exceptions';
 import { PrepaidDocument, ClientDocument } from '../common/schemas';
+import { buildDateFilter } from '../common/utils';
 import { PrepaidStatus } from '../common/enums';
 
 @Injectable()
@@ -85,7 +86,7 @@ export class PrepaidsService {
   }
 
   async findAll(paginationDto?: PrepaidPaginationDto): Promise<PaginatedResponse<Prepaid>> {
-    const { page = 1, limit = 10, status } = paginationDto || {};
+    const { page = 1, limit = 10, status, search, from, to } = paginationDto || {};
     const skip = (page - 1) * limit;
 
     // Construir filtro
@@ -94,15 +95,68 @@ export class PrepaidsService {
     if (status) {
       filter.status = status;
     }
-
-    const [prepaids, total] = await Promise.all([
-      this.prepaidModel.find(filter)
+    
+    // Filtros de fecha
+    const dateFilter = buildDateFilter(from, to);
+    Object.assign(filter, dateFilter);
+    
+    // Para búsqueda por cliente, necesitamos hacer una agregación más compleja
+    let query;
+    if (search && search.trim()) {
+      query = this.prepaidModel.aggregate([
+        {
+          $lookup: {
+            from: 'clients',
+            localField: 'clientId',
+            foreignField: '_id',
+            as: 'client'
+          }
+        },
+        {
+          $match: {
+            ...filter,
+            $or: [
+              { 'client.fullName': { $regex: search.trim(), $options: 'i' } },
+              { 'client.email': { $regex: search.trim(), $options: 'i' } }
+            ]
+          }
+        },
+        { $sort: { createdAt: -1 } },
+        { $skip: skip },
+        { $limit: limit }
+      ]);
+    } else {
+      query = this.prepaidModel.find(filter)
         .populate('clientId', 'fullName email')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(limit)
-        .exec(),
-      this.prepaidModel.countDocuments(filter).exec(),
+        .limit(limit);
+    }
+
+    const [prepaids, total] = await Promise.all([
+      query.exec(),
+      search && search.trim() 
+        ? this.prepaidModel.aggregate([
+            {
+              $lookup: {
+                from: 'clients',
+                localField: 'clientId',
+                foreignField: '_id',
+                as: 'client'
+              }
+            },
+            {
+              $match: {
+                ...filter,
+                $or: [
+                  { 'client.fullName': { $regex: search.trim(), $options: 'i' } },
+                  { 'client.email': { $regex: search.trim(), $options: 'i' } }
+                ]
+              }
+            },
+            { $count: 'total' }
+          ]).then(result => result[0]?.total || 0)
+        : this.prepaidModel.countDocuments(filter).exec(),
     ]);
 
     const totalPages = Math.ceil(total / limit);
@@ -129,26 +183,79 @@ export class PrepaidsService {
   }
 
   async findByStatus(paginationDto: PrepaidPaginationDto): Promise<PaginatedResponse<Prepaid>> {
-    const { page = 1, limit = 10, status } = paginationDto;
+    const { page = 1, limit = 10, status, search, from, to } = paginationDto;
     const skip = (page - 1) * limit;
 
     if (!status) {
       throw new BadRequestException('El status es requerido para filtrar prepaids');
     }
 
-    const filter = { 
+    const filter: any = { 
       deletedAt: { $exists: false },
       status: status
     };
-
-    const [prepaids, total] = await Promise.all([
-      this.prepaidModel.find(filter)
+    
+    // Filtros de fecha
+    const dateFilter = buildDateFilter(from, to);
+    Object.assign(filter, dateFilter);
+    
+    // Para búsqueda por cliente, necesitamos hacer una agregación más compleja
+    let query;
+    if (search && search.trim()) {
+      query = this.prepaidModel.aggregate([
+        {
+          $lookup: {
+            from: 'clients',
+            localField: 'clientId',
+            foreignField: '_id',
+            as: 'client'
+          }
+        },
+        {
+          $match: {
+            ...filter,
+            $or: [
+              { 'client.fullName': { $regex: search.trim(), $options: 'i' } },
+              { 'client.email': { $regex: search.trim(), $options: 'i' } }
+            ]
+          }
+        },
+        { $sort: { createdAt: -1 } },
+        { $skip: skip },
+        { $limit: limit }
+      ]);
+    } else {
+      query = this.prepaidModel.find(filter)
         .populate('clientId', 'fullName email')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(limit)
-        .exec(),
-      this.prepaidModel.countDocuments(filter).exec(),
+        .limit(limit);
+    }
+
+    const [prepaids, total] = await Promise.all([
+      query.exec(),
+      search && search.trim() 
+        ? this.prepaidModel.aggregate([
+            {
+              $lookup: {
+                from: 'clients',
+                localField: 'clientId',
+                foreignField: '_id',
+                as: 'client'
+              }
+            },
+            {
+              $match: {
+                ...filter,
+                $or: [
+                  { 'client.fullName': { $regex: search.trim(), $options: 'i' } },
+                  { 'client.email': { $regex: search.trim(), $options: 'i' } }
+                ]
+              }
+            },
+            { $count: 'total' }
+          ]).then(result => result[0]?.total || 0)
+        : this.prepaidModel.countDocuments(filter).exec(),
     ]);
 
     const totalPages = Math.ceil(total / limit);

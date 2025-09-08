@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { ClientsService } from './clients.service';
-import { CreateClientDto, UpdateClientDto, PaginationDto } from '../common/dto';
+import { CreateClientDto, UpdateClientDto, PaginatedDateFilterDto } from '../common/dto';
 import { Client, ClientWithPrepaids, PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Auditory } from '../common/decorators';
@@ -42,8 +42,11 @@ export class ClientsController {
   @ApiOperation({ summary: 'Obtener todos los clientes con paginación' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Número de página' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Límite por página' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Término de búsqueda' })
+  @ApiQuery({ name: 'from', required: false, type: String, description: 'Fecha de inicio (YYYY-MM-DD)', format: 'date' })
+  @ApiQuery({ name: 'to', required: false, type: String, description: 'Fecha de fin (YYYY-MM-DD)', format: 'date' })
   @ApiResponse({ status: 200, description: 'Lista de clientes obtenida exitosamente' })
-  async findAllPaginated(@Query() paginationDto: PaginationDto): Promise<{ success: boolean; message: string; data: PaginatedResponse<Client> }> {
+  async findAllPaginated(@Query() paginationDto: PaginatedDateFilterDto): Promise<{ success: boolean; message: string; data: PaginatedResponse<Client> }> {
     const result = await this.clientsService.findAll(paginationDto);
     return {
       success: true,

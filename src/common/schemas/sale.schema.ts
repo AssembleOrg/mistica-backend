@@ -51,11 +51,14 @@ export class Sale {
   @Prop({ required: true, min: 0 })
   subtotal: number;
 
-  @Prop({ min: 0, default: 0 })
-  tax: number;
+  @Prop({ min: 0, max: 100, default: 0 })
+  tax: number; // Porcentaje de impuesto (0-100)
+
+  @Prop({ min: 0, max: 100, default: 0 })
+  discount: number; // Porcentaje de descuento (0-100)
 
   @Prop({ min: 0, default: 0 })
-  discount: number;
+  prepaidUsed: number; // Monto en dinero usado de prepaid
 
   @Prop({ type: Types.ObjectId, ref: 'Prepaid' })
   prepaidId?: Types.ObjectId;

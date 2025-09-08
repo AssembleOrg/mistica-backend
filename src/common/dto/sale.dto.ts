@@ -8,6 +8,7 @@ import {
   IsNotEmpty, 
   IsBoolean,
   Min, 
+  Max,
   MaxLength, 
   ValidateNested, 
   ArrayMinSize,
@@ -83,6 +84,40 @@ export class CreateSaleDto {
   notes?: string;
 
   @ApiPropertyOptional({ 
+    description: 'Porcentaje de impuesto a aplicar (0-100)',
+    minimum: 0,
+    maximum: 100,
+    default: 0
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'El impuesto debe ser un número' })
+  @Min(0, { message: 'El impuesto debe ser mayor o igual a 0' })
+  @Max(100, { message: 'El impuesto no puede ser mayor a 100' })
+  tax?: number;
+
+  @ApiPropertyOptional({ 
+    description: 'Porcentaje de descuento a aplicar (0-100)',
+    minimum: 0,
+    maximum: 100,
+    default: 0
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'El descuento debe ser un número' })
+  @Min(0, { message: 'El descuento debe ser mayor o igual a 0' })
+  @Max(100, { message: 'El descuento no puede ser mayor a 100' })
+  discount?: number;
+
+  @ApiPropertyOptional({ 
+    description: 'Monto en dinero usado de prepaid',
+    minimum: 0,
+    default: 0
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'El monto de prepaid usado debe ser un número' })
+  @Min(0, { message: 'El monto de prepaid usado debe ser mayor o igual a 0' })
+  prepaidUsed?: number;
+
+  @ApiPropertyOptional({ 
     description: 'ID del prepaid a consumir',
     example: '68ba80bd888b3960426b7f55'
   })
@@ -156,6 +191,37 @@ export class UpdateSaleDto {
   @IsString({ message: 'Las notas deben ser una cadena de texto' })
   @MaxLength(500, { message: 'Las notas no pueden exceder 500 caracteres' })
   notes?: string;
+
+  @ApiPropertyOptional({ 
+    description: 'Porcentaje de impuesto a aplicar (0-100)',
+    minimum: 0,
+    maximum: 100
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'El impuesto debe ser un número' })
+  @Min(0, { message: 'El impuesto debe ser mayor o igual a 0' })
+  @Max(100, { message: 'El impuesto no puede ser mayor a 100' })
+  tax?: number;
+
+  @ApiPropertyOptional({ 
+    description: 'Porcentaje de descuento a aplicar (0-100)',
+    minimum: 0,
+    maximum: 100
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'El descuento debe ser un número' })
+  @Min(0, { message: 'El descuento debe ser mayor o igual a 0' })
+  @Max(100, { message: 'El descuento no puede ser mayor a 100' })
+  discount?: number;
+
+  @ApiPropertyOptional({ 
+    description: 'Monto en dinero usado de prepaid',
+    minimum: 0
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'El monto de prepaid usado debe ser un número' })
+  @Min(0, { message: 'El monto de prepaid usado debe ser mayor o igual a 0' })
+  prepaidUsed?: number;
 
   @ApiPropertyOptional({ 
     description: 'ID del prepaid a consumir',

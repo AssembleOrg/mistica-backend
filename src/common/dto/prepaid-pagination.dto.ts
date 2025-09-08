@@ -1,18 +1,9 @@
-import { IsOptional, IsNumber, IsString, MaxLength, IsEnum } from 'class-validator';
+import { IsOptional, IsEnum } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PrepaidStatus } from '../enums';
+import { PaginatedDateFilterDto } from './paginated-date-filter.dto';
 
-export class PrepaidPaginationDto {
-  @ApiPropertyOptional({ description: 'Número de página', default: 1 })
-  @IsOptional()
-  @IsNumber()
-  page?: number = 1;
-
-  @ApiPropertyOptional({ description: 'Límite de elementos por página', default: 10 })
-  @IsOptional()
-  @IsNumber()
-  limit?: number = 10;
-
+export class PrepaidPaginationDto extends PaginatedDateFilterDto {
   @ApiPropertyOptional({ 
     description: 'Filtrar por status del prepaid',
     enum: PrepaidStatus,

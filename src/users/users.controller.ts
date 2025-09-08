@@ -11,11 +11,12 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UsersService } from './users.service';
-import { CreateUserDto, UpdateUserDto, PaginationDto } from '../common/dto';
+import { CreateUserDto, UpdateUserDto, PaginatedDateFilterDto } from '../common/dto';
 import { UserResponse } from '../common/interfaces';
 import { PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Auditory } from '../common/decorators';
+import { SaleStatus } from 'src/common/enums';
 
 @ApiTags('Usuarios')
 @Controller('users')
@@ -38,8 +39,12 @@ export class UsersController {
   @ApiOperation({ summary: 'Obtener todos los usuarios con paginación' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Número de página' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Límite por página' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Término de búsqueda' })
+  @ApiQuery({ name: 'from', required: false, type: String, description: 'Fecha de inicio (YYYY-MM-DD)', format: 'date' })
+  @ApiQuery({ name: 'to', required: false, type: String, description: 'Fecha de fin (YYYY-MM-DD)', format: 'date' })
+  @ApiQuery({ name: 'status', required: false, enum: SaleStatus, description: 'Filtrar por estado' })
   @ApiResponse({ status: 200, description: 'Lista de usuarios obtenida exitosamente' })
-  async findAll(@Query() paginationDto: PaginationDto): Promise<PaginatedResponse<UserResponse>> {
+  async findAll(@Query() paginationDto: PaginatedDateFilterDto): Promise<PaginatedResponse<UserResponse>> {
     return this.usersService.findAll(paginationDto);
   }
 

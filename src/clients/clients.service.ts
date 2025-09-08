@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { CreateClientDto, UpdateClientDto, PaginationDto } from '../common/dto';
+import { CreateClientDto, UpdateClientDto, PaginatedDateFilterDto } from '../common/dto';
 import { Client, ClientWithPrepaids, Prepaid, PaginatedResponse } from '../common/interfaces';
 import { 
   ClienteNoEncontradoException, 
@@ -9,6 +9,7 @@ import {
   CuitClienteYaExisteException
 } from '../common/exceptions';
 import { ClientDocument, PrepaidDocument } from '../common/schemas';
+import { buildDateFilter } from '../common/utils';
 import { PrepaidStatus } from '../common/enums';
 
 @Injectable()
@@ -126,8 +127,8 @@ export class ClientsService {
     }
   }
 
-  async findAll(paginationDto?: PaginationDto): Promise<PaginatedResponse<Client>> {
-    const { page = 1, limit = 10, search } = paginationDto || {};
+  async findAll(paginationDto?: PaginatedDateFilterDto): Promise<PaginatedResponse<Client>> {
+    const { page = 1, limit = 10, search, from, to } = paginationDto || {};
     const skip = (page - 1) * limit;
 
     // Construir filtro de búsqueda
@@ -141,6 +142,10 @@ export class ClientsService {
         { cuit: { $regex: search.trim(), $options: 'i' } }
       ];
     }
+    
+    // Filtros de fecha
+    const dateFilter = buildDateFilter(from, to);
+    Object.assign(filter, dateFilter);
 
     const [clients, total] = await Promise.all([
       this.clientModel.find(filter)

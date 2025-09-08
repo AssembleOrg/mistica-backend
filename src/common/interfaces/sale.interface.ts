@@ -17,8 +17,9 @@ export interface Sale {
   customerPhone?: string;
   items: SaleItem[];
   subtotal: number;
-  tax: number;
-  discount: number;
+  tax: number; // Porcentaje de impuesto (0-100)
+  discount: number; // Porcentaje de descuento (0-100)
+  prepaidUsed: number; // Monto en dinero usado de prepaid
   prepaidId?: string;
   total: number;
   paymentMethod: PaymentMethod;
