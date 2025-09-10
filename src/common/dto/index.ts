@@ -6,4 +6,7 @@ export * from './paginated-date-filter.dto';
 export * from './sales-paginated-filter.dto';
 export * from './sale.dto';
 export * from './client.dto';
-export * from './prepaid-pagination.dto'; 
+export * from './prepaid-pagination.dto';
+export * from './create-egress.dto';
+export * from './update-egress.dto';
+export * from './egress-paginated-filter.dto'; 

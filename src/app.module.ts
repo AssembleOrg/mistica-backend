@@ -10,6 +10,7 @@ import { ProductsModule } from './products/products.module';
 import { SalesModule } from './sales/sales.module';
 import { ClientsModule } from './clients/clients.module';
 import { PrepaidsModule } from './prepaids/prepaids.module';
+import { EgressesModule } from './egresses/egresses.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { PrepaidsModule } from './prepaids/prepaids.module';
     SalesModule,
     ClientsModule,
     PrepaidsModule,
+    EgressesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

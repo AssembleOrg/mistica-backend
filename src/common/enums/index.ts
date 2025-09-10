@@ -4,4 +4,6 @@ export * from './product-category.enum';
 export * from './product-status.enum';
 export * from './unit-of-measure.enum';
 export * from './sale.enum';
-export * from './prepaid.enum'; 
+export * from './prepaid.enum';
+export * from './currency.enum';
+export * from './egress.enum'; 
