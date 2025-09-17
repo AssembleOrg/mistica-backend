@@ -1,4 +1,4 @@
-import { IsOptional, IsNumber } from 'class-validator';
+import { IsOptional, IsNumber, IsString, MaxLength } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class PaginationDto {
@@ -11,4 +11,13 @@ export class PaginationDto {
   @IsOptional()
   @IsNumber()
   limit?: number = 10;
+
+  @ApiPropertyOptional({ 
+    description: 'Término de búsqueda para filtrar por nombre',
+    maxLength: 100
+  })
+  @IsOptional()
+  @IsString({ message: 'El término de búsqueda debe ser una cadena de texto' })
+  @MaxLength(100, { message: 'El término de búsqueda no puede exceder 100 caracteres' })
+  search?: string;
 } 

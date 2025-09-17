@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
-import { CreateProductDto, UpdateProductDto, PaginationDto } from '../common/dto';
+import { CreateProductDto, UpdateProductDto, PaginatedDateFilterDto } from '../common/dto';
 import { Product } from '../common/interfaces';
 import { PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -38,8 +38,11 @@ export class ProductsController {
   @ApiOperation({ summary: 'Obtener todos los productos con paginación' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Número de página' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Límite por página' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Término de búsqueda' })
+  @ApiQuery({ name: 'from', required: false, type: String, description: 'Fecha de inicio (YYYY-MM-DD)', format: 'date' })
+  @ApiQuery({ name: 'to', required: false, type: String, description: 'Fecha de fin (YYYY-MM-DD)', format: 'date' })
   @ApiResponse({ status: 200, description: 'Lista de productos obtenida exitosamente' })
-  async findAll(@Query() paginationDto: PaginationDto): Promise<PaginatedResponse<Product>> {
+  async findAll(@Query() paginationDto: PaginatedDateFilterDto): Promise<PaginatedResponse<Product>> {
     return this.productsService.findAll(paginationDto);
   }
 
@@ -58,7 +61,7 @@ export class ProductsController {
   @ApiResponse({ status: 200, description: 'Lista de productos por categoría obtenida exitosamente' })
   async findByCategory(
     @Param('category') category: string,
-    @Query() paginationDto: PaginationDto,
+    @Query() paginationDto: PaginatedDateFilterDto,
   ): Promise<PaginatedResponse<Product>> {
     return this.productsService.findByCategory(category, paginationDto);
   }

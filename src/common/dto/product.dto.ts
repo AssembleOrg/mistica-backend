@@ -1,4 +1,4 @@
-import { IsString, IsEnum, IsOptional, IsNumber, IsUrl, Min } from 'class-validator';
+import { IsString, IsEnum, IsOptional, IsNumber, IsUrl, Min, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProductCategory, ProductStatus, UnitOfMeasure } from '../enums';
 
@@ -50,6 +50,11 @@ export class CreateProductDto {
   @IsOptional()
   @IsNumber()
   profitMargin?: number;
+
+  @ApiPropertyOptional({ description: 'Producto especial', default: false })
+  @IsOptional()
+  @IsBoolean()
+  specialProduct?: boolean;
 }
 
 export class UpdateProductDto {
@@ -110,4 +115,9 @@ export class UpdateProductDto {
   @IsOptional()
   @IsNumber()
   profitMargin?: number;
+
+  @ApiPropertyOptional({ description: 'Producto especial' })
+  @IsOptional()
+  @IsBoolean()
+  specialProduct?: boolean;
 } 

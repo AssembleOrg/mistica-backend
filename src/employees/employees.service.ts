@@ -1,11 +1,12 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { CreateEmployeeDto, UpdateEmployeeDto, PaginationDto } from '../common/dto';
+import { CreateEmployeeDto, UpdateEmployeeDto, PaginatedDateFilterDto } from '../common/dto';
 import { Employee } from '../common/interfaces';
 import { PaginatedResponse } from '../common/interfaces';
 import { EmpleadoNoEncontradoException, EmailYaExisteException } from '../common/exceptions';
 import { EmployeeDocument } from '../common/schemas';
+import { buildDateFilter } from '../common/utils';
 
 @Injectable()
 export class EmployeesService {
@@ -48,17 +49,33 @@ export class EmployeesService {
     return this.mapToEmployeeResponse(employee);
   }
 
-  async findAll(paginationDto?: PaginationDto): Promise<PaginatedResponse<Employee>> {
-    const { page = 1, limit = 10 } = paginationDto || {};
+  async findAll(paginationDto?: PaginatedDateFilterDto): Promise<PaginatedResponse<Employee>> {
+    const { page = 1, limit = 10, search, from, to } = paginationDto || {};
     const skip = (page - 1) * limit;
 
+    // Construir filtros
+    const filters: any = { deletedAt: { $exists: false } };
+    
+    // Filtro de búsqueda por nombre, email o documento
+    if (search) {
+      filters.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { document: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Filtros de fecha
+    const dateFilter = buildDateFilter(from, to);
+    Object.assign(filters, dateFilter);
+
     const [employees, total] = await Promise.all([
-      this.employeeModel.find({ deletedAt: { $exists: false } })
+      this.employeeModel.find(filters)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .exec(),
-      this.employeeModel.countDocuments({ deletedAt: { $exists: false } }).exec(),
+      this.employeeModel.countDocuments(filters).exec(),
     ]);
 
     const totalPages = Math.ceil(total / limit);

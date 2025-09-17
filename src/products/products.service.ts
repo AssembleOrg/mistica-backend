@@ -1,7 +1,7 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { CreateProductDto, UpdateProductDto, PaginationDto } from '../common/dto';
+import { CreateProductDto, UpdateProductDto, PaginatedDateFilterDto } from '../common/dto';
 import { Product } from '../common/interfaces';
 import { PaginatedResponse } from '../common/interfaces';
 import { 
@@ -11,6 +11,7 @@ import {
   StockInsuficienteException
 } from '../common/exceptions';
 import { ProductDocument } from '../common/schemas';
+import { buildDateFilter } from '../common/utils';
 
 @Injectable()
 export class ProductsService {
@@ -33,6 +34,7 @@ export class ProductsService {
       description: productObj.description,
       status: productObj.status,
       profitMargin: productObj.profitMargin,
+      specialProduct: productObj.specialProduct,
       createdAt: productObj.createdAt,
       updatedAt: productObj.updatedAt,
       deletedAt: productObj.deletedAt,
@@ -63,17 +65,32 @@ export class ProductsService {
     return this.mapToProductResponse(product);
   }
 
-  async findAll(paginationDto?: PaginationDto): Promise<PaginatedResponse<Product>> {
-    const { page = 1, limit = 10 } = paginationDto || {};
+  async findAll(paginationDto?: PaginatedDateFilterDto): Promise<PaginatedResponse<Product>> {
+    const { page = 1, limit = 10, search, from, to } = paginationDto || {};
     const skip = (page - 1) * limit;
 
+    // Construir filtros
+    const filters: any = { deletedAt: { $exists: false } };
+    
+    // Filtro de búsqueda por nombre o código de barras
+    if (search) {
+      filters.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { barcode: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Filtros de fecha
+    const dateFilter = buildDateFilter(from, to);
+    Object.assign(filters, dateFilter);
+
     const [products, total] = await Promise.all([
-      this.productModel.find({ deletedAt: { $exists: false } })
+      this.productModel.find(filters)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .exec(),
-      this.productModel.countDocuments({ deletedAt: { $exists: false } }).exec(),
+      this.productModel.countDocuments(filters).exec(),
     ]);
 
     const totalPages = Math.ceil(total / limit);
@@ -99,23 +116,35 @@ export class ProductsService {
     return products.map(product => this.mapToProductResponse(product));
   }
 
-  async findByCategory(category: string, paginationDto?: PaginationDto): Promise<PaginatedResponse<Product>> {
-    const { page = 1, limit = 10 } = paginationDto || {};
+  async findByCategory(category: string, paginationDto?: PaginatedDateFilterDto): Promise<PaginatedResponse<Product>> {
+    const { page = 1, limit = 10, search, from, to } = paginationDto || {};
     const skip = (page - 1) * limit;
 
+    // Construir filtros
+    const filters: any = {
+      category,
+      deletedAt: { $exists: false }
+    };
+    
+    // Filtro de búsqueda por nombre o código de barras
+    if (search) {
+      filters.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { barcode: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Filtros de fecha
+    const dateFilter = buildDateFilter(from, to);
+    Object.assign(filters, dateFilter);
+
     const [products, total] = await Promise.all([
-      this.productModel.find({
-        category,
-        deletedAt: { $exists: false }
-      })
+      this.productModel.find(filters)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .exec(),
-      this.productModel.countDocuments({
-        category,
-        deletedAt: { $exists: false }
-      }).exec(),
+      this.productModel.countDocuments(filters).exec(),
     ]);
 
     const totalPages = Math.ceil(total / limit);

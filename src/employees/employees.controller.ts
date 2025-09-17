@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { EmployeesService } from './employees.service';
-import { CreateEmployeeDto, UpdateEmployeeDto, PaginationDto } from '../common/dto';
+import { CreateEmployeeDto, UpdateEmployeeDto, PaginatedDateFilterDto } from '../common/dto';
 import { Employee } from '../common/interfaces';
 import { PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -38,8 +38,11 @@ export class EmployeesController {
   @ApiOperation({ summary: 'Obtener todos los empleados con paginación' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Número de página' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Límite por página' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Término de búsqueda' })
+  @ApiQuery({ name: 'from', required: false, type: String, description: 'Fecha de inicio (YYYY-MM-DD)', format: 'date' })
+  @ApiQuery({ name: 'to', required: false, type: String, description: 'Fecha de fin (YYYY-MM-DD)', format: 'date' })
   @ApiResponse({ status: 200, description: 'Lista de empleados obtenida exitosamente' })
-  async findAll(@Query() paginationDto: PaginationDto): Promise<PaginatedResponse<Employee>> {
+  async findAll(@Query() paginationDto: PaginatedDateFilterDto): Promise<PaginatedResponse<Employee>> {
     return this.employeesService.findAll(paginationDto);
   }
 

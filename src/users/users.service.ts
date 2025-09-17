@@ -1,10 +1,11 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { CreateUserDto, UpdateUserDto, PaginationDto } from '../common/dto';
+import { CreateUserDto, UpdateUserDto, PaginatedDateFilterDto } from '../common/dto';
 import { User, UserResponse, PaginatedResponse } from '../common/interfaces';
 import { UsuarioNoEncontradoException, EmailYaExisteException } from '../common/exceptions';
 import { UserDocument } from '../common/schemas';
+import { buildDateFilter } from '../common/utils';
 import * as bcrypt from 'bcryptjs';
 
 @Injectable()
@@ -48,18 +49,34 @@ export class UsersService {
     return this.mapToUserResponse(user);
   }
 
-  async findAll(paginationDto?: PaginationDto): Promise<PaginatedResponse<UserResponse>> {
-    const { page = 1, limit = 10 } = paginationDto || {};
+  async findAll(paginationDto?: PaginatedDateFilterDto): Promise<PaginatedResponse<UserResponse>> {
+    const { page = 1, limit = 10, search, from, to } = paginationDto || {};
     const skip = (page - 1) * limit;
 
+    // Construir filtros
+    const filters: any = { deletedAt: { $exists: false } };
+    
+    // Filtro de búsqueda por nombre, email o username
+    if (search) {
+      filters.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { username: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Filtros de fecha
+    const dateFilter = buildDateFilter(from, to);
+    Object.assign(filters, dateFilter);
+
     const [users, total] = await Promise.all([
-      this.userModel.find({ deletedAt: { $exists: false } })
+      this.userModel.find(filters)
         .select('-password')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .exec(),
-      this.userModel.countDocuments({ deletedAt: { $exists: false } }).exec(),
+      this.userModel.countDocuments(filters).exec(),
     ]);
 
     const totalPages = Math.ceil(total / limit);
