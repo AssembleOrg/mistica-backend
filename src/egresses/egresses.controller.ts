@@ -47,7 +47,7 @@ export class EgressesController {
     return this.egressesService.create(createEgressDto);
   }
 
-  @Get()
+  @Get('all')
   @ApiOperation({ summary: 'Obtener lista paginada de egresos con filtros' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Número de página' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Límite de elementos por página' })

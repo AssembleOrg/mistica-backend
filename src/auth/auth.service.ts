@@ -6,22 +6,27 @@ import * as bcrypt from 'bcryptjs';
 import { CreateUserDto, LoginUserDto } from '../common/dto';
 import { UserRole } from '../common/enums';
 import { User, UserDocument } from '../common/schemas';
+import { Logger } from '@nestjs/common';
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     private readonly jwtService: JwtService,
+    private readonly logger: Logger,
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
+    this.logger.log('Validating user', email);
+    this.logger.log('Password', password, 'length', password.length, 'type', typeof password);
     if (!email || !password) {
+      this.logger.log('Invalid email or password', email, password);
       return null;
     }
 
     try {
       const user = await this.userModel.findOne({ 
-        email: email.toLowerCase(),
+        email: { $regex: new RegExp(`^${email}$`, 'i') },
         deletedAt: { $exists: false }
       }).exec();
 
@@ -37,6 +42,7 @@ export class AuthService {
   }
 
   async login(loginUserDto: LoginUserDto) {
+    this.logger.log('Login request received', loginUserDto);
     if (!loginUserDto.email || !loginUserDto.password) {
       throw new BadRequestException('Email y contraseña son requeridos');
     }
@@ -73,7 +79,7 @@ export class AuthService {
 
     try {
       const existingUser = await this.userModel.findOne({ 
-        email: createUserDto.email.toLowerCase(),
+        email: { $regex: new RegExp(`^${createUserDto.email}$`, 'i') },
         deletedAt: { $exists: false }
       }).exec();
 
@@ -113,7 +119,7 @@ export class AuthService {
 
     try {
       const existingUser = await this.userModel.findOne({ 
-        email: createUserDto.email.toLowerCase(),
+        email: { $regex: new RegExp(`^${createUserDto.email}$`, 'i') },
         deletedAt: { $exists: false }
       }).exec();
 

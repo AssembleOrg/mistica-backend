@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { Currency, EgressType, EgressStatus } from '../enums';
+import { Currency, EgressType, EgressStatus, PaymentMethod } from '../enums';
 
 export interface IEgress {
   _id?: Types.ObjectId;
@@ -8,6 +8,7 @@ export interface IEgress {
   amount: number;
   currency: Currency;
   type: EgressType;
+  paymentMethod: PaymentMethod;
   status: EgressStatus;
   notes?: string;
   authorizedBy?: string;

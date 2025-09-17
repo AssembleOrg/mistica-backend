@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { Currency, EgressType, EgressStatus } from '../enums';
+import { Currency, EgressType, EgressStatus, PaymentMethod } from '../enums';
 
 export type EgressDocument = Egress & Document;
 
@@ -17,6 +17,9 @@ export class Egress {
 
   @Prop({ required: true, min: 0 })
   amount: number; // Monto
+
+  @Prop({ required: true, enum: PaymentMethod })
+  paymentMethod: PaymentMethod;
 
   @Prop({ required: true, enum: Currency, default: Currency.USD })
   currency: Currency;

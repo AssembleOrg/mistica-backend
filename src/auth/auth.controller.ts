@@ -12,11 +12,11 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
-  @UseGuards(LocalAuthGuard)
   @Post('login')
   @ApiOperation({ summary: 'Iniciar sesión' })
   @ApiResponse({ status: 200, description: 'Login exitoso' })
   @ApiResponse({ status: 401, description: 'Credenciales inválidas' })
+  @Public()
   async login(@Request() req, @Body() loginUserDto: LoginUserDto) {
     return this.authService.login(loginUserDto);
   }

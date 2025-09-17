@@ -11,18 +11,19 @@ import {
   EgressCannotBeDeletedException,
   InvalidEgressDataException
 } from '../common/exceptions';
-import { EgressDocument } from '../common/schemas';
+import { Egress, EgressDocument } from '../common/schemas';
 import { EgressStatus } from '../common/enums';
 import { buildDateFilter } from '../common/utils';
 
 @Injectable()
 export class EgressesService {
   constructor(
-    @InjectModel('Egress') private readonly egressModel: Model<EgressDocument>,
+    @InjectModel(Egress.name) private readonly egressModel: Model<EgressDocument>,
   ) {}
 
-  private mapToEgressResponse(egress: EgressDocument): IEgress {
-    const egressObj = egress.toObject();
+  private mapToEgressResponse(egress: EgressDocument | any): IEgress {
+    // Handle both Mongoose documents and plain objects (from .lean())
+    const egressObj = egress.toObject ? egress.toObject() : egress;
     return {
       _id: egressObj._id,
       egressNumber: egressObj.egressNumber,
@@ -32,6 +33,7 @@ export class EgressesService {
       type: egressObj.type,
       status: egressObj.status,
       notes: egressObj.notes,
+      paymentMethod: egressObj.paymentMethod,
       authorizedBy: egressObj.authorizedBy,
       userId: egressObj.userId,
       createdAt: egressObj.createdAt,
@@ -85,8 +87,10 @@ export class EgressesService {
     const { page = 1, limit = 10, search, from, to, status, type, currency } = filterDto;
     const skip = (page - 1) * limit;
 
+    // Build the filter - remove deletedAt filter temporarily
+
     // Build the filter
-    const filter: any = { deletedAt: null };
+    const filter: any = { deletedAt: { $exists: false } };
 
     // Search filter (by concept)
     if (search) {
@@ -99,8 +103,8 @@ export class EgressesService {
 
     // Date filter
     const dateFilter = buildDateFilter(from, to);
-    if (dateFilter) {
-      filter.createdAt = dateFilter;
+    if (dateFilter && Object.keys(dateFilter).length > 0) {
+      filter.createdAt = dateFilter.createdAt;
     }
 
     // Status filter
@@ -129,6 +133,10 @@ export class EgressesService {
         .lean(),
       this.egressModel.countDocuments(filter),
     ]);
+
+    // Debug: Log the results
+    console.log('Found egresses:', egresses.length, 'Total with filter:', total);
+    console.log('Raw egresses:', JSON.stringify(egresses, null, 2));
 
     const mappedEgresses = egresses.map(egress => this.mapToEgressResponse(egress as EgressDocument));
 
@@ -247,11 +255,11 @@ export class EgressesService {
 
   // Statistics methods
   async getTotalByPeriod(from?: string, to?: string): Promise<{ total: number; currency: string }[]> {
-    const filter: any = { deletedAt: null, status: EgressStatus.COMPLETED };
+    const filter: any = { deletedAt: { $exists: false }, status: EgressStatus.COMPLETED };
 
     const dateFilter = buildDateFilter(from, to);
-    if (dateFilter) {
-      filter.createdAt = dateFilter;
+    if (dateFilter && Object.keys(dateFilter).length > 0) {
+      filter.createdAt = dateFilter.createdAt;
     }
 
     const result = await this.egressModel.aggregate([

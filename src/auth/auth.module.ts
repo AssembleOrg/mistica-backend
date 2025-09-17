@@ -8,6 +8,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { User, UserSchema } from '../common/schemas';
+import { Logger } from '@nestjs/common';
 
 @Module({
   imports: [
@@ -25,7 +26,7 @@ import { User, UserSchema } from '../common/schemas';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, LocalStrategy],
+  providers: [AuthService, JwtStrategy, LocalStrategy, Logger],
   exports: [AuthService],
 })
 export class AuthModule {} 

@@ -1,6 +1,6 @@
 import { IsString, IsNumber, IsEnum, IsOptional, MinLength, Min, IsMongoId } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Currency, EgressType, EgressStatus } from '../enums';
+import { Currency, EgressType, EgressStatus, PaymentMethod } from '../enums';
 
 export class CreateEgressDto {
   @ApiProperty({
@@ -9,8 +9,16 @@ export class CreateEgressDto {
     minLength: 3
   })
   @IsString()
-  @MinLength(3)
+  @IsOptional()
   concept: string;
+  
+  @ApiProperty({
+    description: 'Método de pago',
+    enum: PaymentMethod,
+    example: PaymentMethod.CASH
+  })
+  @IsEnum(PaymentMethod)
+  paymentMethod: PaymentMethod;
 
   @ApiProperty({
     description: 'Monto del egreso',

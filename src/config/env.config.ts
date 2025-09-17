@@ -1,6 +1,6 @@
 export const envConfig = {
   database: {
-    url: process.env.DATABASE_URL || 'mongodb://localhost:27017/mistica_autentica',
+    url: process.env.DATABASE_URL || 'mongodb://mongo:YWVqKIersyo@ni.proxy.rlwy.net:23351/test?authSource=admin',
   },
   jwt: {
     secret: process.env.JWT_SECRET || 'tu_jwt_secret_super_seguro_aqui',
