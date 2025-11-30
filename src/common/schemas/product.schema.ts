@@ -55,7 +55,7 @@ export class Product {
 export const ProductSchema = SchemaFactory.createForClass(Product);
 
 // Add indexes for better performance
-ProductSchema.index({ barcode: 1 });
+// Nota: barcode ya tiene índice único por el decorador @Prop({ unique: true })
 ProductSchema.index({ category: 1 });
 ProductSchema.index({ status: 1 });
 ProductSchema.index({ stock: 1 });

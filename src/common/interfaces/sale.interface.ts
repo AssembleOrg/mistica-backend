@@ -25,6 +25,9 @@ export interface Sale {
   paymentMethod: PaymentMethod;
   status: SaleStatus;
   notes?: string;
+  afipCae?: string; // Código de Autorización Electrónico
+  afipNumero?: number; // Número de comprobante AFIP
+  afipFechaVto?: string; // Fecha de vencimiento del CAE (YYYYMMDD)
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date;

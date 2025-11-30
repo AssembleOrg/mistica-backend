@@ -52,7 +52,7 @@ export class Egress {
 export const EgressSchema = SchemaFactory.createForClass(Egress);
 
 // Add indexes for better performance
-EgressSchema.index({ egressNumber: 1 });
+// Nota: egressNumber ya tiene índice único por el decorador @Prop({ unique: true })
 EgressSchema.index({ concept: 'text' });
 EgressSchema.index({ status: 1 });
 EgressSchema.index({ type: 1 });

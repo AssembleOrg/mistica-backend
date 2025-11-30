@@ -73,7 +73,17 @@ export class Sale {
   status: SaleStatus;
 
   @Prop({ trim: true })
-  notes?: string;
+  notes?: string; 
+
+  // Campos de facturación AFIP
+  @Prop({ trim: true })
+  afipCae?: string; // Código de Autorización Electrónico
+
+  @Prop({ min: 0 })
+  afipNumero?: number; // Número de comprobante AFIP
+
+  @Prop({ trim: true })
+  afipFechaVto?: string; // Fecha de vencimiento del CAE (YYYYMMDD)
 
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
@@ -88,10 +98,13 @@ export class Sale {
 export const SaleSchema = SchemaFactory.createForClass(Sale);
 
 // Add indexes for better performance
-SaleSchema.index({ saleNumber: 1 });
+// Nota: saleNumber ya tiene índice único por el decorador @Prop({ unique: true })
 SaleSchema.index({ customerEmail: 1 });
 SaleSchema.index({ status: 1 });
 SaleSchema.index({ paymentMethod: 1 });
 SaleSchema.index({ createdAt: -1 });
 SaleSchema.index({ deletedAt: 1 });
 SaleSchema.index({ 'items.productId': 1 });
+// Índices para campos de facturación AFIP
+SaleSchema.index({ afipCae: 1 });
+SaleSchema.index({ afipNumero: 1 });

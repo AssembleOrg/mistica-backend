@@ -55,6 +55,9 @@ export class SalesService {
       paymentMethod: saleObj.paymentMethod,
       status: saleObj.status,
       notes: saleObj.notes,
+      afipCae: saleObj.afipCae,
+      afipNumero: saleObj.afipNumero,
+      afipFechaVto: saleObj.afipFechaVto,
       createdAt: saleObj.createdAt,
       updatedAt: saleObj.updatedAt,
       deletedAt: saleObj.deletedAt,
@@ -155,6 +158,124 @@ export class SalesService {
     const maxTotal = subtotal + (subtotal * taxPercent / 100) - (subtotal * discountPercent / 100);
     if (prepaidUsed > maxTotal) {
       throw new BadRequestException(`El monto de prepaid usado (${prepaidUsed}) no puede ser mayor al total de la venta (${maxTotal})`);
+    }
+  }
+
+  /**
+   * Genera una factura electrónica tipo C en AFIP
+   */
+  private async generateAfipInvoice(sale: Sale): Promise<{ cae: string; numeroComprobante: number; caeFchVto: string } | null> {
+    try {
+      // Obtener configuración AFIP desde variables de entorno
+      const afipApiUrl = process.env.AFIP_API_URL || 'https://api.afip-hub.com/api';
+      const certificateApiUrl = process.env.AFIP_CERTIFICATE_API_URL || 'https://afip-facturacion-production.up.railway.app/api';
+      const certificateId = process.env.AFIP_CERTIFICATE_ID || '154';
+      const cuitEmisor = process.env.AFIP_CUIT || '';
+      const puntoVenta = parseInt(process.env.AFIP_PUNTO_VENTA || '1', 10);
+
+      if (!cuitEmisor || !certificateId) {
+        console.warn('⚠️ Configuración AFIP incompleta. No se generará factura.');
+        return null;
+      }
+
+      // 1. Obtener certificado y clave privada desde el endpoint
+      console.log('📄 Obteniendo certificado desde endpoint...');
+      const certificateResponse = await fetch(`${certificateApiUrl}/get-certificate/${certificateId}`);
+      if (!certificateResponse.ok) {
+        throw new Error(`Error al obtener certificado: ${certificateResponse.statusText}`);
+      }
+      const certificateData = await certificateResponse.json();
+      const { cert: certificado, key: clavePrivada } = certificateData;
+
+      // 2. Consultar último comprobante autorizado
+      console.log('📄 Consultando último comprobante autorizado...');
+      const ultimoAutorizadoResponse = await fetch(`${afipApiUrl}/afip/ultimo-autorizado`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          puntoVenta,
+          tipoComprobante: 11, // Factura C
+          cuitEmisor,
+          certificado,
+          clavePrivada,
+        }),
+      });
+
+      if (!ultimoAutorizadoResponse.ok) {
+        throw new Error(`Error al consultar último comprobante: ${ultimoAutorizadoResponse.statusText}`);
+      }
+
+      const ultimoAutorizadoData = await ultimoAutorizadoResponse.json();
+      if (!ultimoAutorizadoData.success) {
+        throw new Error(ultimoAutorizadoData.message || 'Error al consultar último comprobante');
+      }
+
+      const proximoNumero = ultimoAutorizadoData.data.proximoNumero;
+
+      // 3. Formatear fecha (YYYYMMDD)
+      const fecha = DateTime.now().setZone('America/Argentina/Buenos_Aires');
+      const fechaComprobante = fecha.toFormat('yyyyMMdd');
+
+      // 4. Calcular importes para factura C (consumidor final, no discrimina IVA)
+      const importeNetoGravado = sale.subtotal;
+      const importeIva = 0; // Factura C no discrimina IVA
+      const importeTotal = sale.total;
+
+      // 5. Crear factura
+      console.log('📄 Generando factura tipo C en AFIP...');
+      const invoiceResponse = await fetch(`${afipApiUrl}/afip/invoice`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          puntoVenta,
+          tipoComprobante: 11, // Factura C
+          numeroComprobante: proximoNumero,
+          fechaComprobante,
+          cuitCliente: '0', // Consumidor final
+          tipoDocumento: 99, // Consumidor final
+          importeNetoGravado,
+          importeIva,
+          importeTotal,
+          concepto: 1, // Productos
+          monedaId: 'PES',
+          cotizacionMoneda: 1,
+          cuitEmisor,
+          certificado,
+          clavePrivada,
+        }),
+      });
+
+      if (!invoiceResponse.ok) {
+        throw new Error(`Error al crear factura: ${invoiceResponse.statusText}`);
+      }
+
+      const invoiceData = await invoiceResponse.json();
+      if (!invoiceData.success) {
+        throw new Error(invoiceData.message || 'Error al crear factura');
+      }
+
+      if (invoiceData.data.resultado === 'A') {
+        console.log('✅ Factura AFIP aprobada:', {
+          cae: invoiceData.data.cae,
+          numero: invoiceData.data.numeroComprobante,
+          vto: invoiceData.data.caeFchVto,
+        });
+        return {
+          cae: invoiceData.data.cae,
+          numeroComprobante: invoiceData.data.numeroComprobante,
+          caeFchVto: invoiceData.data.caeFchVto,
+        };
+      } else {
+        const observaciones = invoiceData.data.observaciones || invoiceData.data.observacionesDetalladas || [];
+        const mensajeObservaciones = Array.isArray(observaciones) 
+          ? observaciones.map((obs: any) => typeof obs === 'string' ? obs : obs.msg || obs.code).join(', ')
+          : 'Factura rechazada por AFIP';
+        throw new BadRequestException(`La factura fue rechazada por AFIP: ${mensajeObservaciones}`);
+      }
+    } catch (error) {
+      console.error('Error al generar factura AFIP:', error);
+      // Re-lanzar el error para que se propague y no se complete la venta
+      throw error;
     }
   }
 
@@ -491,6 +612,37 @@ export class SalesService {
         updateData.customerEmail = updateSaleDto.customerEmail.toLowerCase();
       }
 
+      // Manejar facturación AFIP si se solicita al completar la venta
+      // IMPORTANTE: Si shouldInvoice es true, la facturación DEBE ser exitosa para completar la venta
+      if (updateSaleDto.shouldInvoice && updateSaleDto.status === SaleStatus.COMPLETED) {
+        try {
+          const invoiceData = await this.generateAfipInvoice(existingSale);
+          if (!invoiceData) {
+            throw new BadRequestException('No se pudo generar la factura electrónica. La venta no se completará.');
+          }
+          // Si la factura se generó exitosamente, guardar los datos en la venta
+          updateData.afipCae = invoiceData.cae;
+          updateData.afipNumero = invoiceData.numeroComprobante;
+          updateData.afipFechaVto = invoiceData.caeFchVto;
+          
+          console.log('💾 Guardando datos de factura AFIP en la venta:', {
+            saleNumber: existingSale.saleNumber,
+            afipCae: invoiceData.cae,
+            afipNumero: invoiceData.numeroComprobante,
+            afipFechaVto: invoiceData.caeFchVto,
+          });
+        } catch (error) { 
+          // Si falla la facturación y shouldInvoice es true, NO completar la venta
+          console.error('Error al generar factura AFIP:', error);
+          if (error instanceof BadRequestException) {
+            throw error; // Re-lanzar BadRequestException tal cual
+          }
+          // Para otros errores, crear un BadRequestException con el mensaje del error
+          const errorMessage = error instanceof Error ? error.message : 'Error desconocido al generar factura';
+          throw new BadRequestException(`Error al generar factura electrónica: ${errorMessage}. La venta no se completará.`);
+        }
+      }
+
       const sale = await this.saleModel.findByIdAndUpdate(
         id,
         updateData,
@@ -499,6 +651,16 @@ export class SalesService {
 
       if (!sale) {
         throw new VentaNoEncontradaException(id);
+      }
+
+      // Log para confirmar que los datos de AFIP se guardaron
+      if (updateData.afipCae) {
+        console.log('✅ Datos de factura AFIP guardados exitosamente en la venta:', {
+          saleNumber: sale.saleNumber,
+          afipCae: sale.afipCae,
+          afipNumero: sale.afipNumero,
+          afipFechaVto: sale.afipFechaVto,
+        });
       }
 
       return this.mapToSaleResponse(sale);

@@ -40,7 +40,7 @@ export class Employee {
 export const EmployeeSchema = SchemaFactory.createForClass(Employee);
 
 // Add indexes for better performance
-EmployeeSchema.index({ email: 1 });
+// Nota: email ya tiene índice único por el decorador @Prop({ unique: true })
 EmployeeSchema.index({ role: 1 });
 EmployeeSchema.index({ deletedAt: 1 });
 EmployeeSchema.index({ startDate: 1 });

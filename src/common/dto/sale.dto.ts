@@ -239,6 +239,15 @@ export class UpdateSaleDto {
   @IsOptional()
   @IsBoolean({ message: 'El campo consumedPrepaid debe ser un booleano' })
   consumedPrepaid?: boolean;
+
+  @ApiPropertyOptional({ 
+    description: 'Indica si se debe generar factura electrónica AFIP al completar la venta',
+    default: false,
+    example: true
+  })
+  @IsOptional()
+  @IsBoolean({ message: 'El campo shouldInvoice debe ser un booleano' })
+  shouldInvoice?: boolean;
 }
 
 export class DailySalesQueryDto {
