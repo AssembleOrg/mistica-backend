@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Strategy, JwtFromRequestFunction } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
+import type { Request } from 'express';
+
+export const ACCESS_TOKEN_COOKIE = 'access_token';
+
+const fromCookie: JwtFromRequestFunction = (req: Request) => {
+  return req?.cookies?.[ACCESS_TOKEN_COOKIE] ?? null;
+};
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -10,9 +17,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!jwtSecret) {
       throw new Error('JWT_SECRET is not defined');
     }
-    
+
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: fromCookie,
       ignoreExpiration: false,
       secretOrKey: jwtSecret,
     });
@@ -25,4 +32,4 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: payload.role,
     };
   }
-} 
+}
