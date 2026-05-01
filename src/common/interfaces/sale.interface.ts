@@ -8,6 +8,16 @@ export interface SaleItem {
   subtotal: number;
 }
 
+export interface SalePayment {
+  method: PaymentMethod;
+  /** Monto imputado a este método (lo que cuenta para la reportería). */
+  amount: number;
+  /** Sólo CASH: lo que entregó el cliente físicamente (≥ amount). */
+  receivedAmount?: number;
+  /** Sólo CASH: vuelto entregado al cliente (= receivedAmount - amount). */
+  changeGiven?: number;
+}
+
 export interface Sale {
   id: string;
   saleNumber: string;
@@ -22,7 +32,7 @@ export interface Sale {
   prepaidUsed: number; // Monto en dinero usado de prepaid
   prepaidId?: string;
   total: number;
-  paymentMethod: PaymentMethod;
+  payments: SalePayment[];
   status: SaleStatus;
   notes?: string;
   afipCae?: string; // Código de Autorización Electrónico
@@ -42,7 +52,10 @@ export interface CreateSaleItemDto {
 export interface DailySalesSummary {
   totalSales: number;
   totalAmount: number;
+  /** Total cobrado por cada método (suma de `payments[].amount`). */
   totalByPaymentMethod: Record<PaymentMethod, number>;
+  /** Total entregado de vuelto en cash (sale physical de la caja). */
+  totalCashChange: number;
   totalByStatus: Record<SaleStatus, number>;
 }
 
@@ -54,7 +67,7 @@ export interface DailySalesResponse {
     saleNumber: string;
     customerName?: string;
     total: number;
-    paymentMethod: PaymentMethod;
+    payments: SalePayment[];
     status: SaleStatus;
     createdAt: Date;
   }>;

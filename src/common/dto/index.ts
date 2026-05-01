@@ -9,4 +9,7 @@ export * from './client.dto';
 export * from './prepaid-pagination.dto';
 export * from './create-egress.dto';
 export * from './update-egress.dto';
-export * from './egress-paginated-filter.dto'; 
+export * from './egress-paginated-filter.dto';
+export * from './cash-session.dto';
+export * from './finance-summary.dto';
+export * from './credit-note.dto';

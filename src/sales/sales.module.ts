@@ -6,6 +6,7 @@ import { Sale, SaleSchema } from '../common/schemas/sale.schema';
 import { Product, ProductSchema } from '../common/schemas/product.schema';
 import { Client, ClientSchema } from '../common/schemas/client.schema';
 import { PrepaidsModule } from '../prepaids/prepaids.module';
+import { CashboxModule } from '../cashbox/cashbox.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { PrepaidsModule } from '../prepaids/prepaids.module';
       { name: Client.name, schema: ClientSchema },
     ]),
     PrepaidsModule,
+    CashboxModule,
   ],
   controllers: [SalesController],
   providers: [SalesService],

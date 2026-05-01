@@ -11,6 +11,9 @@ import { SalesModule } from './sales/sales.module';
 import { ClientsModule } from './clients/clients.module';
 import { PrepaidsModule } from './prepaids/prepaids.module';
 import { EgressesModule } from './egresses/egresses.module';
+import { CashboxModule } from './cashbox/cashbox.module';
+import { FinanceModule } from './finance/finance.module';
+import { CreditNotesModule } from './credit-notes/credit-notes.module';
 
 @Module({
   imports: [
@@ -26,6 +29,9 @@ import { EgressesModule } from './egresses/egresses.module';
     ClientsModule,
     PrepaidsModule,
     EgressesModule,
+    CashboxModule,
+    FinanceModule,
+    CreditNotesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

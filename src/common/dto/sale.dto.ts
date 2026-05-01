@@ -35,6 +35,40 @@ export class CreateSaleItemDto {
   unitPrice: number;
 }
 
+/**
+ * Línea de pago de una venta. Una venta puede tener varias (efectivo +
+ * tarjeta + transferencia, en cualquier combinación). Se permite una sola
+ * entrada por método: si el cliente pone "$5 cash + $3 cash" se suma como
+ * un solo CASH de $8.
+ *
+ * Para CASH se acepta `receivedAmount` (lo que efectivamente entregó el
+ * cliente). Si es mayor a `amount`, la diferencia es el vuelto y se guarda
+ * en `changeGiven`. Para los demás métodos `receivedAmount` no aplica.
+ */
+export class CreateSalePaymentDto {
+  @ApiProperty({ description: 'Método de pago', enum: PaymentMethod })
+  @IsEnum(PaymentMethod, { message: 'El método de pago debe ser válido' })
+  method: PaymentMethod;
+
+  @ApiProperty({
+    description: 'Monto que se imputa a este método',
+    minimum: 0,
+  })
+  @IsNumber({}, { message: 'El monto debe ser un número' })
+  @Min(0, { message: 'El monto debe ser mayor o igual a 0' })
+  amount: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Sólo CASH: lo que entregó el cliente físicamente. Debe ser ≥ amount; la diferencia queda como vuelto.',
+    minimum: 0,
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'receivedAmount debe ser un número' })
+  @Min(0, { message: 'receivedAmount debe ser mayor o igual a 0' })
+  receivedAmount?: number;
+}
+
 export class CreateSaleDto {
   @ApiPropertyOptional({ description: 'ID del cliente' })
   @IsOptional()
@@ -59,10 +93,10 @@ export class CreateSaleDto {
   @MaxLength(20, { message: 'El teléfono no puede exceder 20 caracteres' })
   customerPhone?: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Items de la venta',
     type: [CreateSaleItemDto],
-    minItems: 1
+    minItems: 1,
   })
   @IsArray({ message: 'Los items deben ser un array' })
   @ArrayMinSize(1, { message: 'La venta debe tener al menos un producto' })
@@ -70,12 +104,17 @@ export class CreateSaleDto {
   @Type(() => CreateSaleItemDto)
   items: CreateSaleItemDto[];
 
-  @ApiProperty({ 
-    description: 'Método de pago',
-    enum: PaymentMethod
+  @ApiProperty({
+    description:
+      'Pagos de la venta. La suma de `amount` debe igualar el `total` calculado. Sólo se permite una entrada por método.',
+    type: [CreateSalePaymentDto],
+    minItems: 1,
   })
-  @IsEnum(PaymentMethod, { message: 'El método de pago debe ser válido' })
-  paymentMethod: PaymentMethod;
+  @IsArray({ message: 'Los pagos deben ser un array' })
+  @ArrayMinSize(1, { message: 'La venta debe tener al menos un pago' })
+  @ValidateNested({ each: true })
+  @Type(() => CreateSalePaymentDto)
+  payments: CreateSalePaymentDto[];
 
   @ApiPropertyOptional({ description: 'Notas adicionales' })
   @IsOptional()
@@ -159,9 +198,9 @@ export class UpdateSaleDto {
   @MaxLength(20, { message: 'El teléfono no puede exceder 20 caracteres' })
   customerPhone?: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Items de la venta',
-    type: [CreateSaleItemDto]
+    type: [CreateSaleItemDto],
   })
   @IsOptional()
   @IsArray({ message: 'Los items deben ser un array' })
@@ -170,17 +209,20 @@ export class UpdateSaleDto {
   @Type(() => CreateSaleItemDto)
   items?: CreateSaleItemDto[];
 
-  @ApiPropertyOptional({ 
-    description: 'Método de pago',
-    enum: PaymentMethod
+  @ApiPropertyOptional({
+    description: 'Pagos de la venta (reemplaza el set previo si se envía)',
+    type: [CreateSalePaymentDto],
   })
   @IsOptional()
-  @IsEnum(PaymentMethod, { message: 'El método de pago debe ser válido' })
-  paymentMethod?: PaymentMethod;
+  @IsArray({ message: 'Los pagos deben ser un array' })
+  @ArrayMinSize(1, { message: 'La venta debe tener al menos un pago' })
+  @ValidateNested({ each: true })
+  @Type(() => CreateSalePaymentDto)
+  payments?: CreateSalePaymentDto[];
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Estado de la venta',
-    enum: SaleStatus
+    enum: SaleStatus,
   })
   @IsOptional()
   @IsEnum(SaleStatus, { message: 'El estado debe ser válido' })

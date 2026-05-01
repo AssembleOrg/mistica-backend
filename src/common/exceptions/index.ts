@@ -4,4 +4,5 @@ export * from './product.exceptions';
 export * from './auth.exceptions';
 export * from './sale.exceptions';
 export * from './client.exceptions';
-export * from './egress.exceptions'; 
+export * from './egress.exceptions';
+export * from './cash-session.exceptions';

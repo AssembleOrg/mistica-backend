@@ -4,8 +4,8 @@ import { Model } from 'mongoose';
 import { DateTime } from 'luxon';
 import { CreateSaleDto, UpdateSaleDto, SalesPaginatedFilterDto, DailySalesQueryDto } from '../common/dto';
 import { Sale, SaleItem, DailySalesResponse, DailySalesSummary, PaginatedResponse } from '../common/interfaces';
-import { 
-  VentaNoEncontradaException, 
+import {
+  VentaNoEncontradaException,
   NumeroVentaYaExisteException,
   ProductoNoEncontradoEnVentaException,
   StockInsuficienteEnVentaException,
@@ -14,11 +14,13 @@ import {
   ClienteNoEncontradoException,
   PrepaidInsuficienteException,
   PrepaidNoEncontradoException,
-  PrepaidYaConsumidoException
+  PrepaidYaConsumidoException,
+  CajaNoAbiertaException,
 } from '../common/exceptions';
 import { SaleDocument, ProductDocument, ClientDocument } from '../common/schemas';
 import { PaymentMethod, PrepaidStatus, SaleStatus } from '../common/enums';
 import { PrepaidsService } from '../prepaids/prepaids.service';
+import { CashboxService } from '../cashbox/cashbox.service';
 import { buildDateFilter } from '../common/utils';
 
 @Injectable()
@@ -28,6 +30,7 @@ export class SalesService {
     @InjectModel('Product') private readonly productModel: Model<ProductDocument>,
     @InjectModel('Client') private readonly clientModel: Model<ClientDocument>,
     private readonly prepaidsService: PrepaidsService,
+    private readonly cashboxService: CashboxService,
   ) {}
 
   private mapToSaleResponse(sale: SaleDocument): Sale {
@@ -52,7 +55,12 @@ export class SalesService {
       prepaidUsed: saleObj.prepaidUsed || 0,
       prepaidId: saleObj.prepaidId?.toString(),
       total: saleObj.total,
-      paymentMethod: saleObj.paymentMethod,
+      payments: (saleObj.payments || []).map((p) => ({
+        method: p.method,
+        amount: p.amount,
+        receivedAmount: p.receivedAmount,
+        changeGiven: p.changeGiven,
+      })),
       status: saleObj.status,
       notes: saleObj.notes,
       afipCae: saleObj.afipCae,
@@ -62,6 +70,77 @@ export class SalesService {
       updatedAt: saleObj.updatedAt,
       deletedAt: saleObj.deletedAt,
     };
+  }
+
+  /**
+   * Valida `payments[]` contra `total`:
+   *  - Suma de amounts = total (aceptamos ±0.01 de redondeo).
+   *  - Una sola entrada por método (si pasan dos CASH, error: deben sumar a uno).
+   *  - Sólo CASH puede traer `receivedAmount > amount`. La diferencia se
+   *    devuelve como vuelto y se persiste en `changeGiven`.
+   *  - Para no-CASH, `receivedAmount` se ignora.
+   * Devuelve el array normalizado listo para guardar.
+   */
+  private buildSalePayments(
+    payments: Array<{
+      method: PaymentMethod;
+      amount: number;
+      receivedAmount?: number;
+    }>,
+    total: number,
+  ): Array<{
+    method: PaymentMethod;
+    amount: number;
+    receivedAmount?: number;
+    changeGiven?: number;
+  }> {
+    if (!payments || payments.length === 0) {
+      throw new BadRequestException('La venta debe tener al menos un pago');
+    }
+
+    const seen = new Set<PaymentMethod>();
+    const normalized = payments.map((p) => {
+      if (seen.has(p.method)) {
+        throw new BadRequestException(
+          `Hay más de un pago con el mismo método (${p.method}). Combinálos en uno solo.`,
+        );
+      }
+      seen.add(p.method);
+
+      if (p.amount <= 0) {
+        throw new BadRequestException(
+          `El monto del pago en ${p.method} debe ser mayor a 0`,
+        );
+      }
+
+      if (p.method === PaymentMethod.CASH) {
+        const received = p.receivedAmount ?? p.amount;
+        if (received < p.amount) {
+          throw new BadRequestException(
+            `El efectivo recibido (${received}) no puede ser menor al monto a cobrar (${p.amount})`,
+          );
+        }
+        const change = Number((received - p.amount).toFixed(2));
+        return {
+          method: p.method,
+          amount: p.amount,
+          receivedAmount: received,
+          changeGiven: change,
+        };
+      }
+
+      // Para no-CASH ignoramos receivedAmount/changeGiven
+      return { method: p.method, amount: p.amount };
+    });
+
+    const sum = normalized.reduce((acc, p) => acc + p.amount, 0);
+    if (Math.abs(sum - total) > 0.01) {
+      throw new BadRequestException(
+        `La suma de los pagos (${sum.toFixed(2)}) no coincide con el total (${total.toFixed(2)}).`,
+      );
+    }
+
+    return normalized;
   }
 
   private async generateSaleNumber(): Promise<string> {
@@ -314,9 +393,14 @@ export class SalesService {
 
   async create(createSaleDto: CreateSaleDto): Promise<Sale> {
     try {
+      // Bloqueo: no se puede vender sin caja abierta.
+      const openSession = await this.cashboxService.findOpenSession();
+      if (!openSession) {
+        throw new CajaNoAbiertaException();
+      }
+
       // Validar que el cliente existe solo si se proporciona clientId
       let client: ClientDocument | null = null;
-      console.table(createSaleDto);
       if (createSaleDto.clientId) {
         client = await this.clientModel.findOne({
           _id: createSaleDto.clientId,
@@ -357,18 +441,6 @@ export class SalesService {
           }
           throw new BadRequestException('Error al consumir el prepaid especificado');
         }
-      } else if (createSaleDto.clientId && createSaleDto.paymentMethod === PaymentMethod.CASH && !createSaleDto.prepaidUsed) {
-        // Consumo automático por monto total (lógica anterior) solo si no se especificó prepaidUsed manualmente
-        try {
-          const tempTotal = this.calculateTotal(subtotal, taxPercent, discountPercent, 0).total;
-          const prepaidResult = await this.prepaidsService.consumePrepaidAmount(createSaleDto.clientId, tempTotal);
-          prepaidUsed = prepaidResult.consumed;
-        } catch (prepaidError) {
-          if (prepaidError instanceof PrepaidInsuficienteException) {
-            throw prepaidError;
-          }
-          // Si no hay prepaids suficientes, continuar con el método de pago original
-        }
       }
 
       // Validar que prepaidUsed no sea mayor al total
@@ -376,6 +448,10 @@ export class SalesService {
 
       // Calcular totales finales
       const totals = this.calculateTotal(subtotal, taxPercent, discountPercent, prepaidUsed);
+
+      // Validar payments contra el total (1 entrada por método; suma === total;
+      // vuelto sólo en CASH).
+      const payments = this.buildSalePayments(createSaleDto.payments, totals.total);
 
       // Crear la venta
       const sale = await this.saleModel.create({
@@ -391,7 +467,7 @@ export class SalesService {
         prepaidUsed,
         prepaidId: prepaidId,
         total: totals.total,
-        paymentMethod: createSaleDto.paymentMethod,
+        payments,
         status: SaleStatus.PENDING,
         notes: createSaleDto.notes,
       });
@@ -405,10 +481,11 @@ export class SalesService {
 
       return this.mapToSaleResponse(sale);
     } catch (error) {
-      if (error instanceof ClienteNoEncontradoException || 
-          error instanceof ProductoNoEncontradoEnVentaException || 
+      if (error instanceof ClienteNoEncontradoException ||
+          error instanceof ProductoNoEncontradoEnVentaException ||
           error instanceof StockInsuficienteEnVentaException ||
           error instanceof PrepaidInsuficienteException ||
+          error instanceof CajaNoAbiertaException ||
           error instanceof BadRequestException) {
         throw error;
       }
@@ -605,6 +682,20 @@ export class SalesService {
         // Calcular nuevo total
         const totals = this.calculateTotal(currentSubtotal, currentTaxPercent, currentDiscountPercent, currentPrepaidUsed);
         updateData.total = totals.total;
+
+        // Si cambió el total, los pagos vigentes ya no cuadran. Exigimos que
+        // el caller reenvíe `payments` con la nueva distribución.
+        if (totals.total !== existingSale.total && !updateSaleDto.payments) {
+          throw new BadRequestException(
+            'Cambió el total de la venta. Reenvía `payments` con la nueva distribución por método de pago.',
+          );
+        }
+      }
+
+      // Si se envían payments (sea por re-cálculo o explícito), validamos.
+      if (updateSaleDto.payments) {
+        const totalForPayments = updateData.total ?? existingSale.total;
+        updateData.payments = this.buildSalePayments(updateSaleDto.payments, totalForPayments);
       }
 
       // Normalizar email si se proporciona
@@ -717,7 +808,7 @@ export class SalesService {
         deletedAt: { $exists: false }
       }).sort({ createdAt: -1 }).exec();
 
-      // Calcular resumen
+      // Calcular resumen: cada `payment.amount` se acumula al método correspondiente.
       const summary: DailySalesSummary = {
         totalSales: sales.length,
         totalAmount: sales.reduce((sum, sale) => sum + sale.total, 0),
@@ -726,6 +817,7 @@ export class SalesService {
           [PaymentMethod.CARD]: 0,
           [PaymentMethod.TRANSFER]: 0,
         },
+        totalCashChange: 0,
         totalByStatus: {
           [SaleStatus.PENDING]: 0,
           [SaleStatus.COMPLETED]: 0,
@@ -733,20 +825,31 @@ export class SalesService {
         },
       };
 
-      sales.forEach(sale => {
-        summary.totalByPaymentMethod[sale.paymentMethod] += sale.total;
+      for (const sale of sales) {
+        for (const p of sale.payments || []) {
+          summary.totalByPaymentMethod[p.method] =
+            (summary.totalByPaymentMethod[p.method] ?? 0) + p.amount;
+          if (p.method === PaymentMethod.CASH && p.changeGiven) {
+            summary.totalCashChange += p.changeGiven;
+          }
+        }
         summary.totalByStatus[sale.status] += 1;
-      });
+      }
 
       return {
         date: targetDate.toISODate() || '',
         timezone,
-        sales: sales.map(sale => ({
+        sales: sales.map((sale) => ({
           id: sale._id?.toString() || '',
           saleNumber: sale.saleNumber,
           customerName: sale.customerName,
           total: sale.total,
-          paymentMethod: sale.paymentMethod,
+          payments: (sale.payments || []).map((p) => ({
+            method: p.method,
+            amount: p.amount,
+            receivedAmount: p.receivedAmount,
+            changeGiven: p.changeGiven,
+          })),
           status: sale.status,
           createdAt: sale.createdAt,
         })),

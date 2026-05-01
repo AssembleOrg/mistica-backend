@@ -11,7 +11,12 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
-import { CreateProductDto, UpdateProductDto, PaginatedDateFilterDto } from '../common/dto';
+import {
+  BulkUpdateProductsDto,
+  CreateProductDto,
+  PaginatedDateFilterDto,
+  UpdateProductDto,
+} from '../common/dto';
 import { Product } from '../common/interfaces';
 import { PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -32,6 +37,27 @@ export class ProductsController {
   @ApiResponse({ status: 409, description: 'Código de barras ya registrado' })
   async create(@Body() createProductDto: CreateProductDto): Promise<Product> {
     return this.productsService.create(createProductDto);
+  }
+
+  @Post('bulk-update')
+  @Auditory({ entity: 'Product', action: 'BULK_UPDATE' })
+  @ApiOperation({
+    summary: 'Actualización masiva por código de barras',
+    description:
+      'Actualiza múltiples productos en un solo request, identificando cada uno por su barcode. ' +
+      'Productos no encontrados se reportan en `notFound`; filas con datos inválidos en `errors`. ' +
+      'No crea productos nuevos.',
+  })
+  @ApiResponse({ status: 200, description: 'Bulk update procesado' })
+  @ApiResponse({ status: 400, description: 'Payload inválido' })
+  async bulkUpdate(
+    @Body() dto: BulkUpdateProductsDto,
+  ): Promise<{
+    updated: string[];
+    notFound: string[];
+    errors: Array<{ barcode: string; message: string }>;
+  }> {
+    return this.productsService.bulkUpdateByBarcode(dto.items);
   }
 
   @Get()

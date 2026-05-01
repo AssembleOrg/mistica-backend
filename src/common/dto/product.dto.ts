@@ -1,4 +1,17 @@
-import { IsString, IsEnum, IsOptional, IsNumber, IsUrl, Min, IsBoolean } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProductCategory, ProductStatus, UnitOfMeasure } from '../enums';
 
@@ -120,4 +133,34 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   specialProduct?: boolean;
-} 
+}
+
+/**
+ * Item del bulk-update: identifica el producto por su barcode (no por id)
+ * y aplica los campos enviados. Sólo `barcode` es obligatorio; el resto es
+ * parcial (campos no enviados quedan sin cambios).
+ */
+export class BulkUpdateProductItemDto {
+  @ApiProperty({ description: 'Código de barras (clave de match)' })
+  @IsString()
+  @IsNotEmpty()
+  barcode: string;
+
+  @ApiProperty({
+    description: 'Campos a actualizar (formato igual a UpdateProductDto)',
+    type: () => UpdateProductDto,
+  })
+  @ValidateNested()
+  @Type(() => UpdateProductDto)
+  fields: UpdateProductDto;
+}
+
+export class BulkUpdateProductsDto {
+  @ApiProperty({ type: [BulkUpdateProductItemDto], description: 'Filas a actualizar' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(2000)
+  @ValidateNested({ each: true })
+  @Type(() => BulkUpdateProductItemDto)
+  items: BulkUpdateProductItemDto[];
+}

@@ -1,12 +1,12 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { PrepaidStatus } from '../enums';
+import { PaymentMethod, PrepaidStatus } from '../enums';
 
 export type PrepaidDocument = Prepaid & Document;
 
-@Schema({ 
+@Schema({
   timestamps: true,
-  collection: 'prepaids'
+  collection: 'prepaids',
 })
 export class Prepaid {
   @Prop({ type: Types.ObjectId, ref: 'Client', required: true })
@@ -14,6 +14,18 @@ export class Prepaid {
 
   @Prop({ required: true, min: 0 })
   amount: number;
+
+  // Cómo se cobró la seña — para que la reportería de caja la sume al método
+  // correspondiente. Si llega cash, se acepta también `receivedAmount` y
+  // `changeGiven` para reflejar el vuelto entregado.
+  @Prop({ required: true, enum: PaymentMethod })
+  paymentMethod: PaymentMethod;
+
+  @Prop({ min: 0 })
+  receivedAmount?: number;
+
+  @Prop({ min: 0 })
+  changeGiven?: number;
 
   @Prop({ required: true, enum: PrepaidStatus, default: PrepaidStatus.PENDING })
   status: PrepaidStatus;
@@ -39,5 +51,6 @@ export const PrepaidSchema = SchemaFactory.createForClass(Prepaid);
 // Add indexes for better performance
 PrepaidSchema.index({ clientId: 1 });
 PrepaidSchema.index({ status: 1 });
+PrepaidSchema.index({ paymentMethod: 1 });
 PrepaidSchema.index({ createdAt: -1 });
 PrepaidSchema.index({ deletedAt: 1 });

@@ -12,13 +12,16 @@ import {
 } from '../common/exceptions';
 import { PrepaidDocument, ClientDocument } from '../common/schemas';
 import { buildDateFilter } from '../common/utils';
-import { PrepaidStatus } from '../common/enums';
+import { PaymentMethod, PrepaidStatus } from '../common/enums';
+import { CajaNoAbiertaException } from '../common/exceptions';
+import { CashboxService } from '../cashbox/cashbox.service';
 
 @Injectable()
 export class PrepaidsService {
   constructor(
     @InjectModel('Prepaid') private readonly prepaidModel: Model<PrepaidDocument>,
     @InjectModel('Client') private readonly clientModel: Model<ClientDocument>,
+    private readonly cashboxService: CashboxService,
   ) {}
 
   private mapToPrepaidResponse(prepaid: PrepaidDocument): Prepaid {
@@ -38,6 +41,9 @@ export class PrepaidsService {
       id: prepaidObj._id.toString(),
       clientId: client.fullName,
       amount: prepaidObj.amount,
+      paymentMethod: prepaidObj.paymentMethod,
+      receivedAmount: prepaidObj.receivedAmount,
+      changeGiven: prepaidObj.changeGiven,
       status: prepaidObj.status,
       notes: prepaidObj.notes,
       consumedAt: prepaidObj.consumedAt,
@@ -53,6 +59,10 @@ export class PrepaidsService {
 
   async create(createPrepaidDto: CreatePrepaidDto, clientId: string): Promise<Prepaid> {
     try {
+      // Bloqueo: las señas afectan caja, así que requieren caja abierta.
+      const open = await this.cashboxService.findOpenSession();
+      if (!open) throw new CajaNoAbiertaException();
+
       // Verificar que el cliente existe
       const client = await this.clientModel.findOne({
         _id: clientId,
@@ -63,10 +73,28 @@ export class PrepaidsService {
         throw new ClienteNoEncontradoException(clientId);
       }
 
-      // Crear prepaid
+      // Para CASH, calcular vuelto si se entregó más que el monto. Para los
+      // demás métodos `receivedAmount` no aplica.
+      let receivedAmount: number | undefined;
+      let changeGiven: number | undefined;
+      if (createPrepaidDto.paymentMethod === 'CASH') {
+        const received = createPrepaidDto.receivedAmount ?? createPrepaidDto.amount;
+        if (received < createPrepaidDto.amount) {
+          throw new BadRequestException(
+            `El efectivo recibido (${received}) no puede ser menor al monto de la seña (${createPrepaidDto.amount})`,
+          );
+        }
+        receivedAmount = received;
+        changeGiven = Number((received - createPrepaidDto.amount).toFixed(2));
+      }
+
       const prepaid = await this.prepaidModel.create({
-        ...createPrepaidDto,
         clientId,
+        amount: createPrepaidDto.amount,
+        paymentMethod: createPrepaidDto.paymentMethod,
+        receivedAmount,
+        changeGiven,
+        notes: createPrepaidDto.notes,
         status: PrepaidStatus.PENDING,
       });
 
@@ -76,7 +104,8 @@ export class PrepaidsService {
 
       return this.mapToPrepaidResponse(prepaid);
     } catch (error) {
-      if (error instanceof ClienteNoEncontradoException || 
+      if (error instanceof ClienteNoEncontradoException ||
+          error instanceof CajaNoAbiertaException ||
           error instanceof BadRequestException) {
         throw error;
       }
@@ -348,10 +377,12 @@ export class PrepaidsService {
             amount: newAmount,
           }).exec();
 
-          // Crear un prepaid consumido con el monto usado
+          // Crear un prepaid consumido con el monto usado.
+          // Hereda el `paymentMethod` del prepaid original (split de un mismo cobro).
           await this.prepaidModel.create({
             clientId: prepaid.clientId,
             amount: remainingAmount,
+            paymentMethod: prepaid.paymentMethod,
             status: PrepaidStatus.CONSUMED,
             consumedAt: new Date(),
             notes: `Consumido de prepaid ${prepaid._id}`,
@@ -375,12 +406,19 @@ export class PrepaidsService {
     }
   }
 
-  async restorePrepaidAmount(clientId: string, amount: number): Promise<void> {
+  async restorePrepaidAmount(
+    clientId: string,
+    amount: number,
+    paymentMethod: PaymentMethod = PaymentMethod.CASH,
+  ): Promise<void> {
     try {
-      // Crear un nuevo prepaid con el monto restaurado
+      // Crear un nuevo prepaid con el monto restaurado.
+      // El `paymentMethod` debería pasarlo el caller (la venta cancelada lo conoce);
+      // CASH es default conservador para callers legacy.
       await this.prepaidModel.create({
         clientId,
         amount,
+        paymentMethod,
         status: PrepaidStatus.PENDING,
         notes: `Restaurado por cancelación de venta`,
       });

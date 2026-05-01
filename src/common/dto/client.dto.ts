@@ -1,23 +1,41 @@
-import { 
-  IsString, 
-  IsEmail, 
-  IsOptional, 
-  IsNotEmpty, 
-  MaxLength, 
-  MinLength,
+import {
   IsArray,
-  ValidateNested,
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
   IsNumber,
-  Min
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PaymentMethod } from '../enums';
 
 export class CreatePrepaidDto {
   @ApiProperty({ description: 'Monto del prepago', minimum: 0.01 })
   @IsNumber({}, { message: 'El monto debe ser un número' })
   @Min(0.01, { message: 'El monto debe ser mayor a 0' })
   amount: number;
+
+  @ApiProperty({
+    description: 'Método de pago con el que se cobró la seña',
+    enum: PaymentMethod,
+  })
+  @IsEnum(PaymentMethod, { message: 'El método de pago debe ser válido' })
+  paymentMethod: PaymentMethod;
+
+  @ApiPropertyOptional({
+    description: 'Sólo CASH: lo entregado físicamente. Diferencia con `amount` = vuelto.',
+    minimum: 0,
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'receivedAmount debe ser un número' })
+  @Min(0, { message: 'receivedAmount debe ser mayor o igual a 0' })
+  receivedAmount?: number;
 
   @ApiPropertyOptional({ description: 'Notas del prepago' })
   @IsOptional()

@@ -1,7 +1,12 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { CreateProductDto, UpdateProductDto, PaginatedDateFilterDto } from '../common/dto';
+import {
+  BulkUpdateProductItemDto,
+  CreateProductDto,
+  PaginatedDateFilterDto,
+  UpdateProductDto,
+} from '../common/dto';
 import { Product } from '../common/interfaces';
 import { PaginatedResponse } from '../common/interfaces';
 import { 
@@ -214,6 +219,109 @@ export class ProductsService {
     }
 
     return this.mapToProductResponse(product);
+  }
+
+  /**
+   * Bulk-update por barcode (clave de negocio, no _id).
+   * - No crea productos: filas con barcode inexistente caen en `notFound`.
+   * - Filas con datos inválidos (precio <= costo, etc.) caen en `errors`.
+   * - El barcode se ignora dentro de `fields` (es la clave de match, no cambia).
+   * - Recalcula `profitMargin` cuando cambian precio o costo.
+   * - Single roundtrip a Mongo: una `find` y un `bulkWrite`.
+   */
+  async bulkUpdateByBarcode(
+    items: BulkUpdateProductItemDto[],
+  ): Promise<{
+    updated: string[];
+    notFound: string[];
+    errors: Array<{ barcode: string; message: string }>;
+  }> {
+    const updated: string[] = [];
+    const notFound: string[] = [];
+    const errors: Array<{ barcode: string; message: string }> = [];
+
+    // Detectar duplicados en el payload
+    const seen = new Set<string>();
+    const validItems: BulkUpdateProductItemDto[] = [];
+    for (const item of items) {
+      if (seen.has(item.barcode)) {
+        errors.push({ barcode: item.barcode, message: 'Barcode duplicado en el archivo' });
+        continue;
+      }
+      seen.add(item.barcode);
+      validItems.push(item);
+    }
+
+    if (validItems.length === 0) {
+      return { updated, notFound, errors };
+    }
+
+    // 1 sola lectura: traer todos los productos que matchean
+    const barcodes = validItems.map((i) => i.barcode);
+    const existing = await this.productModel
+      .find({ barcode: { $in: barcodes }, deletedAt: { $exists: false } })
+      .select({ barcode: 1, price: 1, costPrice: 1 })
+      .lean()
+      .exec();
+
+    const byBarcode = new Map<string, { price: number; costPrice: number }>();
+    for (const p of existing) {
+      byBarcode.set(p.barcode, { price: p.price, costPrice: p.costPrice });
+    }
+
+    // Armar las operaciones del bulkWrite
+    const ops: Array<{
+      updateOne: {
+        filter: Record<string, unknown>;
+        update: { $set: Record<string, unknown> };
+      };
+    }> = [];
+
+    for (const { barcode, fields } of validItems) {
+      const current = byBarcode.get(barcode);
+      if (!current) {
+        notFound.push(barcode);
+        continue;
+      }
+
+      // El barcode no se cambia en bulk (es el identificador del match).
+      const update: Record<string, unknown> = { ...fields };
+      delete update.barcode;
+
+      const newPrice = fields.price ?? current.price;
+      const newCost = fields.costPrice ?? current.costPrice;
+
+      if (newPrice <= newCost) {
+        errors.push({
+          barcode,
+          message: `Precio (${newPrice}) debe ser mayor al costo (${newCost})`,
+        });
+        continue;
+      }
+
+      // Si cambió precio o costo, recalculo margen
+      if (fields.price !== undefined || fields.costPrice !== undefined) {
+        update.profitMargin = ((newPrice - newCost) / newCost) * 100;
+      }
+
+      // Si no quedó nada para actualizar (todos los fields venían vacíos),
+      // saltamos sin reportar error: equivale a "no cambia".
+      if (Object.keys(update).length === 0) continue;
+
+      ops.push({
+        updateOne: {
+          filter: { barcode, deletedAt: { $exists: false } },
+          update: { $set: update },
+        },
+      });
+      updated.push(barcode);
+    }
+
+    if (ops.length > 0) {
+      await this.productModel.bulkWrite(ops, { ordered: false });
+    }
+
+    return { updated, notFound, errors };
   }
 
   async remove(id: string): Promise<void> {

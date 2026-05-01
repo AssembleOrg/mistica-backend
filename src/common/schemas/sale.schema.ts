@@ -66,8 +66,32 @@ export class Sale {
   @Prop({ required: true, min: 0 })
   total: number;
 
-  @Prop({ required: true, enum: PaymentMethod })
-  paymentMethod: PaymentMethod;
+  // Multi-payment: la suma de `payments[].amount` debe igualar `total`.
+  // Para CASH se permite `receivedAmount > amount`; el excedente queda como
+  // `changeGiven` (vuelto entregado al cliente).
+  @Prop({
+    type: [
+      {
+        method: { type: String, enum: Object.values(PaymentMethod), required: true },
+        amount: { type: Number, required: true, min: 0 },
+        receivedAmount: { type: Number, min: 0 },
+        changeGiven: { type: Number, min: 0 },
+      },
+    ],
+    required: true,
+    validate: {
+      validator: function (payments: Array<{ amount: number }>) {
+        return Array.isArray(payments) && payments.length > 0;
+      },
+      message: 'La venta debe tener al menos un pago',
+    },
+  })
+  payments: Array<{
+    method: PaymentMethod;
+    amount: number;
+    receivedAmount?: number;
+    changeGiven?: number;
+  }>;
 
   @Prop({ required: true, enum: SaleStatus, default: SaleStatus.PENDING })
   status: SaleStatus;
@@ -101,7 +125,7 @@ export const SaleSchema = SchemaFactory.createForClass(Sale);
 // Nota: saleNumber ya tiene índice único por el decorador @Prop({ unique: true })
 SaleSchema.index({ customerEmail: 1 });
 SaleSchema.index({ status: 1 });
-SaleSchema.index({ paymentMethod: 1 });
+SaleSchema.index({ 'payments.method': 1 });
 SaleSchema.index({ createdAt: -1 });
 SaleSchema.index({ deletedAt: 1 });
 SaleSchema.index({ 'items.productId': 1 });
