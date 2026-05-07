@@ -68,8 +68,19 @@ export class ProductsController {
   @ApiQuery({ name: 'from', required: false, type: String, description: 'Fecha de inicio (YYYY-MM-DD)', format: 'date' })
   @ApiQuery({ name: 'to', required: false, type: String, description: 'Fecha de fin (YYYY-MM-DD)', format: 'date' })
   @ApiResponse({ status: 200, description: 'Lista de productos obtenida exitosamente' })
-  async findAll(@Query() paginationDto: PaginatedDateFilterDto): Promise<PaginatedResponse<Product>> {
-    return this.productsService.findAll(paginationDto);
+  async findAll(
+    @Query() paginationDto: PaginatedDateFilterDto,
+  ): Promise<{ success: boolean; message: string; data: PaginatedResponse<Product> }> {
+    // Envuelvo en { success, message, data } para mantener la convención que
+    // ya usan clients/sales y que el frontend espera (apiService desempaqueta
+    // `data.data` si existe). Si esto no se hiciera, `meta` se perdería al
+    // pasar por apiService.handleResponse.
+    const result = await this.productsService.findAll(paginationDto);
+    return {
+      success: true,
+      message: 'Productos obtenidos exitosamente',
+      data: result,
+    };
   }
 
   @Get('all')

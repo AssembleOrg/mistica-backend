@@ -282,15 +282,15 @@ export class ClientsService {
         throw new ClienteNoEncontradoException(id);
       }
 
-      // Manejar prepaids si se proporcionan
+      // Manejar prepaids si se proporcionan: replace-all SOLO sobre las PENDING.
+      // Las CONSUMED se preservan como histórico (auditoría de señas ya
+      // aplicadas a ventas), aunque el usuario las haya editado en el form.
       if (updateClientDto.prepaids) {
-        // Eliminar prepaids existentes (soft delete)
         await this.prepaidModel.updateMany(
-          { clientId: id },
+          { clientId: id, status: PrepaidStatus.PENDING, deletedAt: { $exists: false } },
           { deletedAt: new Date() }
         ).exec();
 
-        // Crear nuevos prepaids
         if (updateClientDto.prepaids.length > 0) {
           const prepaidData = updateClientDto.prepaids.map(prepaid => ({
             ...prepaid,

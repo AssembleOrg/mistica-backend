@@ -54,8 +54,11 @@ export class Sale {
   @Prop({ min: 0, max: 100, default: 0 })
   tax: number; // Porcentaje de impuesto (0-100)
 
-  @Prop({ min: 0, max: 100, default: 0 })
-  discount: number; // Porcentaje de descuento (0-100)
+  // Positivo = descuento, negativo = recargo. Mantengo el nombre `discount`
+  // por compatibilidad con datos existentes (rango previo era 0..100; los
+  // documentos viejos siguen siendo válidos en el rango ampliado).
+  @Prop({ min: -100, max: 100, default: 0 })
+  discount: number;
 
   @Prop({ min: 0, default: 0 })
   prepaidUsed: number; // Monto en dinero usado de prepaid
