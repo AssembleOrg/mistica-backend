@@ -16,7 +16,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PaymentMethod, SaleStatus } from '../enums';
+import { PaymentMethod, SaleStatus, InvoiceType, TaxCondition } from '../enums';
 
 export class CreateSaleItemDto {
   @ApiProperty({ description: 'ID del producto' })
@@ -288,7 +288,7 @@ export class UpdateSaleDto {
   @IsBoolean({ message: 'El campo consumedPrepaid debe ser un booleano' })
   consumedPrepaid?: boolean;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Indica si se debe generar factura electrónica AFIP al completar la venta',
     default: false,
     example: true
@@ -296,6 +296,36 @@ export class UpdateSaleDto {
   @IsOptional()
   @IsBoolean({ message: 'El campo shouldInvoice debe ser un booleano' })
   shouldInvoice?: boolean;
+
+  // Datos para la factura AFIP. Solo se usan si shouldInvoice=true.
+  // Si no se proveen, default = Factura C consumidor final no identificado.
+  @ApiPropertyOptional({ description: 'Tipo de factura a emitir (A/B/C)', enum: InvoiceType })
+  @IsOptional()
+  @IsEnum(InvoiceType, { message: 'El tipo de factura debe ser A, B o C' })
+  invoiceType?: InvoiceType;
+
+  @ApiPropertyOptional({ description: 'CUIT del receptor (11 dígitos)' })
+  @IsOptional()
+  @IsString({ message: 'El CUIT debe ser una cadena' })
+  @MaxLength(13)
+  invoiceCuit?: string;
+
+  @ApiPropertyOptional({ description: 'Condición fiscal del receptor', enum: TaxCondition })
+  @IsOptional()
+  @IsEnum(TaxCondition, { message: 'La condición fiscal debe ser válida' })
+  invoiceTaxCondition?: TaxCondition;
+
+  @ApiPropertyOptional({ description: 'Razón social del receptor' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  invoiceBusinessName?: string;
+
+  @ApiPropertyOptional({ description: 'Domicilio fiscal del receptor' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  invoiceFiscalAddress?: string;
 }
 
 export class DailySalesQueryDto {

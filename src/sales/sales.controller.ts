@@ -23,6 +23,20 @@ import { Auditory } from '../common/decorators';
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
+  @Get('afip/contributor')
+  @ApiOperation({ summary: 'Consultar el padrón AFIP por CUIT' })
+  @ApiQuery({ name: 'cuit', required: true, type: String, description: 'CUIT del contribuyente (11 dígitos)' })
+  @ApiResponse({ status: 200, description: 'Datos del contribuyente obtenidos' })
+  @ApiResponse({ status: 400, description: 'CUIT inválido o AFIP rechazó la consulta' })
+  async lookupAfipContributor(@Query('cuit') cuit: string) {
+    const data = await this.salesService.lookupAfipContributor(cuit);
+    return {
+      success: true,
+      message: 'Contribuyente obtenido exitosamente',
+      data,
+    };
+  }
+
   @Post()
   @Auditory({ entity: 'Sale', action: 'CREATE' })
   @ApiOperation({ summary: 'Crear nueva venta' })

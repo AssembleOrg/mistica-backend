@@ -18,7 +18,7 @@ import {
   CajaNoAbiertaException,
 } from '../common/exceptions';
 import { SaleDocument, ProductDocument, ClientDocument } from '../common/schemas';
-import { PaymentMethod, PrepaidStatus, SaleStatus } from '../common/enums';
+import { InvoiceType, PaymentMethod, PrepaidStatus, SaleStatus, TaxCondition } from '../common/enums';
 import { PrepaidsService } from '../prepaids/prepaids.service';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { buildDateFilter } from '../common/utils';
@@ -240,12 +240,113 @@ export class SalesService {
     }
   }
 
+  // Mapas AFIP. Se mantienen privados acá porque solo se usan dentro de
+  // generateAfipInvoice / lookupAfipContributor.
+  private static readonly INVOICE_TYPE_TO_AFIP: Record<InvoiceType, number> = {
+    [InvoiceType.A]: 1,
+    [InvoiceType.B]: 6,
+    [InvoiceType.C]: 11,
+  };
+
+  private static readonly TAX_CONDITION_TO_AFIP: Record<TaxCondition, number> = {
+    [TaxCondition.RESPONSABLE_INSCRIPTO]: 1,
+    [TaxCondition.EXENTO]: 4,
+    [TaxCondition.CONSUMIDOR_FINAL]: 5,
+    [TaxCondition.MONOTRIBUTISTA]: 6,
+  };
+
+  // AFIP devuelve 1=RI, 4=Exento, 5=CF, 6=Monotributista
+  private static readonly AFIP_TO_TAX_CONDITION: Record<number, TaxCondition> = {
+    1: TaxCondition.RESPONSABLE_INSCRIPTO,
+    4: TaxCondition.EXENTO,
+    5: TaxCondition.CONSUMIDOR_FINAL,
+    6: TaxCondition.MONOTRIBUTISTA,
+  };
+
   /**
-   * Genera una factura electrónica tipo C en AFIP
+   * Consulta el padrón de AFIP por CUIT y devuelve los datos del contribuyente
+   * (denominación, condición fiscal, domicilio).
    */
-  private async generateAfipInvoice(sale: Sale): Promise<{ cae: string; numeroComprobante: number; caeFchVto: string } | null> {
+  async lookupAfipContributor(cuit: string): Promise<{
+    cuit: string;
+    businessName: string;
+    taxCondition: TaxCondition | null;
+    afipTaxConditionLabel: string | null;
+    fiscalAddress: string;
+    estado: string | null;
+  }> {
+    const cuitLimpio = (cuit || '').replace(/\D/g, '');
+    if (cuitLimpio.length !== 11) {
+      throw new BadRequestException('El CUIT debe tener 11 dígitos');
+    }
+
+    const afipApiUrl = process.env.AFIP_API_URL || 'https://api.afip-hub.com/api';
+    const certificateApiUrl = process.env.AFIP_CERTIFICATE_API_URL || 'https://afip-facturacion-production.up.railway.app/api';
+    const certificateId = process.env.AFIP_CERTIFICATE_ID || '154';
+    const cuitEmisor = process.env.AFIP_CUIT || '';
+
+    if (!cuitEmisor || !certificateId) {
+      throw new BadRequestException('Configuración AFIP incompleta');
+    }
+
+    const certificateResponse = await fetch(`${certificateApiUrl}/get-certificate/${certificateId}`);
+    if (!certificateResponse.ok) {
+      throw new BadRequestException(`Error al obtener certificado: ${certificateResponse.statusText}`);
+    }
+    const { cert: certificado, key: clavePrivada } = await certificateResponse.json();
+
+    const res = await fetch(`${afipApiUrl}/afip/consultar-contribuyente`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cuit: cuitLimpio,
+        cuitEmisor,
+        certificado,
+        clavePrivada,
+      }),
+    });
+
+    const text = await res.text();
+    let parsed: any = null;
+    try { parsed = JSON.parse(text); } catch { /* noop */ }
+
+    if (!res.ok) {
+      console.error('❌ AFIP /afip/consultar-contribuyente:', res.status, text);
+      throw new BadRequestException(parsed?.message || `AFIP rechazó la consulta de contribuyente (HTTP ${res.status})`);
+    }
+
+    const data = parsed?.data;
+    if (!data) {
+      throw new BadRequestException('AFIP respondió sin datos del contribuyente');
+    }
+
+    // Compone "direccion, localidad, provincia (CP)" sin partes vacías
+    const dom = data.domicilio || {};
+    const fiscalAddress = [
+      dom.direccion,
+      dom.localidad,
+      [dom.descripcionProvincia, dom.codPostal ? `(${dom.codPostal})` : ''].filter(Boolean).join(' '),
+    ].filter(Boolean).join(', ');
+
+    return {
+      cuit: data.cuit || cuitLimpio,
+      businessName: data.denominacion || '',
+      taxCondition: data.condicionIvaCodigo ? SalesService.AFIP_TO_TAX_CONDITION[data.condicionIvaCodigo] || null : null,
+      afipTaxConditionLabel: data.condicionIva || null,
+      fiscalAddress,
+      estado: data.estado || null,
+    };
+  }
+
+  /**
+   * Genera una factura electrónica en AFIP. Por default Factura C
+   * consumidor final; recibe options para emitir A/B con CUIT del receptor.
+   */
+  private async generateAfipInvoice(
+    sale: Sale,
+    options?: { invoiceType?: InvoiceType; cuit?: string; taxCondition?: TaxCondition },
+  ): Promise<{ cae: string; numeroComprobante: number; caeFchVto: string } | null> {
     try {
-      // Obtener configuración AFIP desde variables de entorno
       const afipApiUrl = process.env.AFIP_API_URL || 'https://api.afip-hub.com/api';
       const certificateApiUrl = process.env.AFIP_CERTIFICATE_API_URL || 'https://afip-facturacion-production.up.railway.app/api';
       const certificateId = process.env.AFIP_CERTIFICATE_ID || '154';
@@ -257,6 +358,21 @@ export class SalesService {
         return null;
       }
 
+      // Default: Factura C consumidor final no identificado.
+      const invoiceType = options?.invoiceType ?? InvoiceType.C;
+      const tipoComprobante = SalesService.INVOICE_TYPE_TO_AFIP[invoiceType];
+
+      // CUIT del receptor: si vino y es válido (11 dígitos) lo usamos como CUIT,
+      // sino consumidor final sin identificar.
+      const cuitClienteLimpio = (options?.cuit || '').replace(/\D/g, '');
+      const hasValidCuit = cuitClienteLimpio.length === 11;
+      const cuitCliente = hasValidCuit ? cuitClienteLimpio : '0';
+      const tipoDocumento = hasValidCuit ? 80 /* CUIT */ : 99 /* Consumidor Final */;
+
+      // Condición IVA del receptor: si no la pasaron, asumir CF.
+      const taxCondition = options?.taxCondition ?? TaxCondition.CONSUMIDOR_FINAL;
+      const condicionIvaReceptor = SalesService.TAX_CONDITION_TO_AFIP[taxCondition];
+
       // 1. Obtener certificado y clave privada desde el endpoint
       console.log('📄 Obteniendo certificado desde endpoint...');
       const certificateResponse = await fetch(`${certificateApiUrl}/get-certificate/${certificateId}`);
@@ -266,14 +382,14 @@ export class SalesService {
       const certificateData = await certificateResponse.json();
       const { cert: certificado, key: clavePrivada } = certificateData;
 
-      // 2. Consultar último comprobante autorizado
-      console.log('📄 Consultando último comprobante autorizado...');
+      // 2. Consultar último comprobante autorizado del tipo elegido
+      console.log(`📄 Consultando último autorizado tipo ${tipoComprobante}...`);
       const ultimoAutorizadoResponse = await fetch(`${afipApiUrl}/afip/ultimo-autorizado`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           puntoVenta,
-          tipoComprobante: 11, // Factura C
+          tipoComprobante,
           cuitEmisor,
           certificado,
           clavePrivada,
@@ -295,37 +411,63 @@ export class SalesService {
       const fecha = DateTime.now().setZone('America/Argentina/Buenos_Aires');
       const fechaComprobante = fecha.toFormat('yyyyMMdd');
 
-      // 4. Calcular importes para factura C (consumidor final, no discrimina IVA)
-      const importeNetoGravado = sale.subtotal;
-      const importeIva = 0; // Factura C no discrimina IVA
+      // 4. Importes. AFIP exige `ImpTotal == ImpNeto + ImpTrib + ImpIva`.
+      // Para Facturas C (consumidor final) no se discrimina IVA, así que
+      // ImpNeto == ImpTotal == sale.total. Para A/B, mantenemos misma lógica
+      // (no discriminamos IVA en este flujo); si hace falta desglose, se hace
+      // por línea como en hueso.
       const importeTotal = sale.total;
+      const importeNetoGravado = sale.total;
+      const importeIva = 0;
 
-      // 5. Crear factura
-      console.log('📄 Generando factura tipo C en AFIP...');
+      console.log(`📄 Generando factura tipo ${invoiceType} (${tipoComprobante}) en AFIP...`);
+      const invoicePayload = {
+        puntoVenta,
+        tipoComprobante,
+        numeroComprobante: proximoNumero,
+        fechaComprobante,
+        cuitCliente,
+        tipoDocumento,
+        condicionIvaReceptor,
+        importeNetoGravado,
+        importeIva,
+        importeTotal,
+        concepto: 1,
+        monedaId: 'PES',
+        cotizacionMoneda: 1,
+        cuitEmisor,
+        certificado,
+        clavePrivada,
+      };
+      console.log('📄 Payload a AFIP:', {
+        ...invoicePayload,
+        certificado: '<redacted>',
+        clavePrivada: '<redacted>',
+      });
+
       const invoiceResponse = await fetch(`${afipApiUrl}/afip/invoice`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          puntoVenta,
-          tipoComprobante: 11, // Factura C
-          numeroComprobante: proximoNumero,
-          fechaComprobante,
-          cuitCliente: '0', // Consumidor final
-          tipoDocumento: 99, // Consumidor final
-          importeNetoGravado,
-          importeIva,
-          importeTotal,
-          concepto: 1, // Productos
-          monedaId: 'PES',
-          cotizacionMoneda: 1,
-          cuitEmisor,
-          certificado,
-          clavePrivada,
-        }),
+        body: JSON.stringify(invoicePayload),
       });
 
       if (!invoiceResponse.ok) {
-        throw new Error(`Error al crear factura: ${invoiceResponse.statusText}`);
+        // Capturamos el body de la respuesta para ver qué rechazó AFIP.
+        // Antes solo se logueaba statusText ("Bad Request"), inservible.
+        let bodyText = '';
+        try {
+          bodyText = await invoiceResponse.text();
+        } catch {
+          /* noop */
+        }
+        console.error('❌ AFIP /afip/invoice falló:', {
+          status: invoiceResponse.status,
+          statusText: invoiceResponse.statusText,
+          body: bodyText,
+        });
+        throw new Error(
+          `Error al crear factura (HTTP ${invoiceResponse.status} ${invoiceResponse.statusText})${bodyText ? `: ${bodyText}` : ''}`,
+        );
       }
 
       const invoiceData = await invoiceResponse.json();
@@ -572,14 +714,23 @@ export class SalesService {
         throw new VentaCanceladaException(existingSale.saleNumber);
       }
 
-      // Solo permitir cancelación si la venta está completada o pendiente
+      // Reglas de transición de estado:
+      // 1. Cancelar: permitido desde cualquier estado salvo CANCELLED.
+      // 2. Facturar post-completado: permitido si la venta está COMPLETED
+      //    y todavía no tiene CAE (caso "facturé después del comprobante").
+      // 3. Resto de updates: bloqueados si la venta ya está COMPLETED
+      //    (regla original — los datos de una venta cerrada no se tocan).
+      const isInvoicingCompleted =
+        !!updateSaleDto.shouldInvoice &&
+        existingSale.status === SaleStatus.COMPLETED &&
+        !existingSale.afipCae;
+
       if (updateSaleDto.status === SaleStatus.CANCELLED) {
         // Permitir cancelación desde cualquier estado excepto ya cancelada
-      } else {
-        // Para otros cambios, verificar que no esté completada o cancelada  
-        if (existingSale.status === SaleStatus.COMPLETED) {
-          throw new VentaYaCompletadaException(existingSale.saleNumber);
-        }
+      } else if (isInvoicingCompleted) {
+        // Permitir facturación post-completado
+      } else if (existingSale.status === SaleStatus.COMPLETED) {
+        throw new VentaYaCompletadaException(existingSale.saleNumber);
       }
 
       let updateData: any = { ...updateSaleDto };
@@ -703,11 +854,17 @@ export class SalesService {
         updateData.customerEmail = updateSaleDto.customerEmail.toLowerCase();
       }
 
-      // Manejar facturación AFIP si se solicita al completar la venta
-      // IMPORTANTE: Si shouldInvoice es true, la facturación DEBE ser exitosa para completar la venta
-      if (updateSaleDto.shouldInvoice && updateSaleDto.status === SaleStatus.COMPLETED) {
+      // Manejar facturación AFIP. Dispara en dos casos:
+      // 1. Al completar la venta con factura: shouldInvoice + status COMPLETED en el payload.
+      // 2. Al facturar una venta ya completada sin CAE (post-completado).
+      // En ambos casos, si la facturación falla la venta NO se actualiza.
+      if (updateSaleDto.shouldInvoice && (updateSaleDto.status === SaleStatus.COMPLETED || isInvoicingCompleted)) {
         try {
-          const invoiceData = await this.generateAfipInvoice(existingSale);
+          const invoiceData = await this.generateAfipInvoice(existingSale, {
+            invoiceType: updateSaleDto.invoiceType,
+            cuit: updateSaleDto.invoiceCuit,
+            taxCondition: updateSaleDto.invoiceTaxCondition,
+          });
           if (!invoiceData) {
             throw new BadRequestException('No se pudo generar la factura electrónica. La venta no se completará.');
           }
