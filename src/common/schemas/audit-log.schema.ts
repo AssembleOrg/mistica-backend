@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 
 export type AuditLogDocument = AuditLog & Document;
 
@@ -17,7 +17,7 @@ export class AuditLog {
   @Prop({ required: true, trim: true })
   action: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   userId?: Types.ObjectId;
 
   @Prop({ trim: true })

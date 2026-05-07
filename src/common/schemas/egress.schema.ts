@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 import { Currency, EgressType, EgressStatus, PaymentMethod } from '../enums';
 
 export type EgressDocument = Egress & Document;
@@ -36,7 +36,7 @@ export class Egress {
   @Prop({ trim: true })
   authorizedBy?: string; // Persona que autoriza el egreso
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   userId?: Types.ObjectId; // Usuario que registra el egreso
 
   @Prop({ type: Date, default: Date.now })

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 import { PaymentMethod, PrepaidStatus } from '../enums';
 
 export type PrepaidDocument = Prepaid & Document;
@@ -9,7 +9,7 @@ export type PrepaidDocument = Prepaid & Document;
   collection: 'prepaids',
 })
 export class Prepaid {
-  @Prop({ type: Types.ObjectId, ref: 'Client', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Client', required: true })
   clientId: Types.ObjectId;
 
   @Prop({ required: true, min: 0 })

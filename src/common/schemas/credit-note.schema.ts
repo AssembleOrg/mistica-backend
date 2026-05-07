@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 
 export type CreditNoteDocument = CreditNote & Document;
 
@@ -19,7 +19,7 @@ export class CreditNote {
   @Prop({ required: true, unique: true, trim: true })
   noteNumber: string; // ej. NC-2026-0501-001
 
-  @Prop({ type: Types.ObjectId, ref: 'Sale', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Sale', required: true, index: true })
   saleId: Types.ObjectId;
 
   @Prop({ trim: true })
@@ -47,7 +47,7 @@ export class CreditNote {
   @Prop({ trim: true })
   afipError?: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   issuedByUserId?: Types.ObjectId;
 
   @Prop({ type: Date, default: Date.now })

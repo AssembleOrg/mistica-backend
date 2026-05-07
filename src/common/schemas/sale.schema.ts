@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 import { PaymentMethod, SaleStatus } from '../enums';
 
 export type SaleDocument = Sale & Document;
@@ -12,7 +12,7 @@ export class Sale {
   @Prop({ required: true, unique: true, trim: true })
   saleNumber: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'Client' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Client' })
   clientId?: Types.ObjectId;
 
   @Prop({ trim: true })
@@ -26,7 +26,7 @@ export class Sale {
 
   @Prop({ 
     type: [{
-      productId: { type: Types.ObjectId, ref: 'Product', required: true },
+      productId: { type: SchemaTypes.ObjectId, ref: 'Product', required: true },
       productName: { type: String, required: true, trim: true },
       quantity: { type: Number, required: true, min: 1 },
       unitPrice: { type: Number, required: true, min: 0 },
@@ -60,7 +60,7 @@ export class Sale {
   @Prop({ min: 0, default: 0 })
   prepaidUsed: number; // Monto en dinero usado de prepaid
 
-  @Prop({ type: Types.ObjectId, ref: 'Prepaid' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Prepaid' })
   prepaidId?: Types.ObjectId;
 
   @Prop({ required: true, min: 0 })
