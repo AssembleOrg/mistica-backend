@@ -21,9 +21,28 @@ async function bootstrap() {
     process.exit(1);
   });
 
-  // Enable CORS
+  // CORS — Cuando el frontend pega al backend via private network Railway,
+  // las llamadas server-to-server (Route Handler de Next) no usan CORS, así
+  // que no necesitan estar en este whitelist. CORS sólo aplica cuando algún
+  // browser pega directo al backend (poco usual, pero lo soportamos via
+  // `CORS_ORIGIN` env var).
+  //
+  // En dev (sin CORS_ORIGIN o NODE_ENV !== 'production'): permitimos cualquier
+  // origen. En prod: lista cerrada desde CORS_ORIGIN (coma-separada).
+  const isProd = process.env.NODE_ENV === 'production';
+  const corsOriginEnv = process.env.CORS_ORIGIN?.trim();
+  let corsOrigin: boolean | string[];
+  if (!isProd) {
+    corsOrigin = true;
+  } else if (corsOriginEnv && corsOriginEnv.length > 0) {
+    corsOrigin = corsOriginEnv.split(',').map((o) => o.trim()).filter(Boolean);
+  } else {
+    // Fallback histórico: dominio público actual del frontend. Reemplazar
+    // con `CORS_ORIGIN` en Railway cuando esté disponible.
+    corsOrigin = ['https://frontend-mistica-production.up.railway.app'];
+  }
   app.enableCors({
-    origin: ['http://localhost:3000', 'http://localhost:3001', 'https://frontend-mistica-production.up.railway.app'], 
+    origin: corsOrigin,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
