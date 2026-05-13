@@ -13,7 +13,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ProductCategory, ProductStatus, UnitOfMeasure } from '../enums';
+import { ProductKind, UnitOfMeasure } from '../enums';
 
 export class CreateProductDto {
   @ApiProperty({ description: 'Nombre del producto' })
@@ -24,40 +24,42 @@ export class CreateProductDto {
   @IsString()
   barcode: string;
 
-  @ApiProperty({ enum: ProductCategory, description: 'Categoría del producto' })
-  @IsEnum(ProductCategory)
-  category: ProductCategory;
+  // Categoría es free-text matching Category.name. Antes era enum cerrado.
+  @ApiProperty({ description: 'Categoría del producto' })
+  @IsString()
+  category: string;
 
   @ApiProperty({ description: 'Precio de venta' })
   @IsNumber()
   @Min(0)
   price: number;
 
-  @ApiProperty({ description: 'Precio de costo' })
+  @ApiPropertyOptional({ description: 'Precio de costo (opcional para servicios)' })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  costPrice: number;
+  costPrice?: number;
 
-  @ApiProperty({ description: 'Stock disponible' })
+  @ApiPropertyOptional({ description: 'Stock disponible (no aplica a servicios ni señas)' })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  stock: number;
+  stock?: number;
 
-  @ApiProperty({ enum: UnitOfMeasure, description: 'Unidad de medida' })
+  @ApiPropertyOptional({ enum: UnitOfMeasure, description: 'Unidad de medida' })
+  @IsOptional()
   @IsEnum(UnitOfMeasure)
-  unitOfMeasure: UnitOfMeasure;
+  unitOfMeasure?: UnitOfMeasure;
 
-  @ApiProperty({ description: 'URL de la imagen del producto' })
+  @ApiPropertyOptional({ description: 'URL de la imagen del producto' })
+  @IsOptional()
   @IsString()
-  image: string;
+  image?: string;
 
-  @ApiProperty({ description: 'Descripción del producto' })
+  @ApiPropertyOptional({ description: 'Descripción del producto' })
+  @IsOptional()
   @IsString()
-  description: string;
-
-  @ApiProperty({ enum: ProductStatus, description: 'Estado del producto' })
-  @IsEnum(ProductStatus)
-  status: ProductStatus;
+  description?: string;
 
   @ApiPropertyOptional({ description: 'Margen de ganancia' })
   @IsOptional()
@@ -68,6 +70,11 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   specialProduct?: boolean;
+
+  @ApiPropertyOptional({ enum: ProductKind, description: 'Tipo: STANDARD | SERVICE | PREPAID' })
+  @IsOptional()
+  @IsEnum(ProductKind)
+  kind?: ProductKind;
 }
 
 export class UpdateProductDto {
@@ -81,10 +88,10 @@ export class UpdateProductDto {
   @IsString()
   barcode?: string;
 
-  @ApiPropertyOptional({ enum: ProductCategory, description: 'Categoría del producto' })
+  @ApiPropertyOptional({ description: 'Categoría del producto' })
   @IsOptional()
-  @IsEnum(ProductCategory)
-  category?: ProductCategory;
+  @IsString()
+  category?: string;
 
   @ApiPropertyOptional({ description: 'Precio de venta' })
   @IsOptional()
@@ -119,11 +126,6 @@ export class UpdateProductDto {
   @IsString()
   description?: string;
 
-  @ApiPropertyOptional({ enum: ProductStatus, description: 'Estado del producto' })
-  @IsOptional()
-  @IsEnum(ProductStatus)
-  status?: ProductStatus;
-
   @ApiPropertyOptional({ description: 'Margen de ganancia' })
   @IsOptional()
   @IsNumber()
@@ -133,6 +135,11 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   specialProduct?: boolean;
+
+  @ApiPropertyOptional({ enum: ProductKind, description: 'Tipo: STANDARD | SERVICE | PREPAID' })
+  @IsOptional()
+  @IsEnum(ProductKind)
+  kind?: ProductKind;
 }
 
 /**

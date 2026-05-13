@@ -5,6 +5,7 @@ import { SalesService } from './sales.service';
 import { Sale, SaleSchema } from '../common/schemas/sale.schema';
 import { Product, ProductSchema } from '../common/schemas/product.schema';
 import { Client, ClientSchema } from '../common/schemas/client.schema';
+import { Prepaid, PrepaidSchema } from '../common/schemas/prepaid.schema';
 import { PrepaidsModule } from '../prepaids/prepaids.module';
 import { CashboxModule } from '../cashbox/cashbox.module';
 
@@ -14,6 +15,7 @@ import { CashboxModule } from '../cashbox/cashbox.module';
       { name: Sale.name, schema: SaleSchema },
       { name: Product.name, schema: ProductSchema },
       { name: Client.name, schema: ClientSchema },
+      { name: Prepaid.name, schema: PrepaidSchema },
     ]),
     PrepaidsModule,
     CashboxModule,

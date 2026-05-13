@@ -54,10 +54,12 @@ export class Sale {
   @Prop({ min: 0, max: 100, default: 0 })
   tax: number; // Porcentaje de impuesto (0-100)
 
-  // Positivo = descuento, negativo = recargo. Mantengo el nombre `discount`
-  // por compatibilidad con datos existentes (rango previo era 0..100; los
-  // documentos viejos siguen siendo válidos en el rango ampliado).
-  @Prop({ min: -100, max: 100, default: 0 })
+  // Ajuste en MONTO FIJO sobre el subtotal: positivo = descuento, negativo =
+  // recargo. Mantengo el nombre `discount` por compatibilidad con la base
+  // de datos. (Antes era un porcentaje 0..100; los documentos viejos quedan
+  // con el mismo número pero ahora se interpreta como pesos. Si hay datos
+  // históricos con ajustes %≠0, hay que migrarlos manualmente.)
+  @Prop({ default: 0 })
   discount: number;
 
   @Prop({ min: 0, default: 0 })

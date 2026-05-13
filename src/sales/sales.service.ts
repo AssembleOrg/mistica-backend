@@ -17,8 +17,8 @@ import {
   PrepaidYaConsumidoException,
   CajaNoAbiertaException,
 } from '../common/exceptions';
-import { SaleDocument, ProductDocument, ClientDocument } from '../common/schemas';
-import { InvoiceType, PaymentMethod, PrepaidStatus, SaleStatus, TaxCondition } from '../common/enums';
+import { SaleDocument, ProductDocument, ClientDocument, PrepaidDocument } from '../common/schemas';
+import { InvoiceType, PaymentMethod, PrepaidStatus, ProductKind, SaleStatus, TaxCondition } from '../common/enums';
 import { PrepaidsService } from '../prepaids/prepaids.service';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { buildDateFilter } from '../common/utils';
@@ -29,6 +29,7 @@ export class SalesService {
     @InjectModel('Sale') private readonly saleModel: Model<SaleDocument>,
     @InjectModel('Product') private readonly productModel: Model<ProductDocument>,
     @InjectModel('Client') private readonly clientModel: Model<ClientDocument>,
+    @InjectModel('Prepaid') private readonly prepaidModel: Model<PrepaidDocument>,
     private readonly prepaidsService: PrepaidsService,
     private readonly cashboxService: CashboxService,
   ) {}
@@ -168,7 +169,6 @@ export class SalesService {
 
   private async validateAndProcessItems(items: any[]): Promise<SaleItem[]> {
     const processedItems: SaleItem[] = [];
-    let subtotal = 0;
 
     for (const item of items) {
       // Verificar que el producto existe
@@ -181,13 +181,14 @@ export class SalesService {
         throw new ProductoNoEncontradoEnVentaException(item.productId);
       }
 
-      // Verificar stock disponible
-      if (product.stock < item.quantity) {
+      // PREPAID y SERVICE son virtuales: no tienen stock, así que no se chequea.
+      // El stock sólo se valida para productos físicos (STANDARD).
+      const skipsStock = product.kind === ProductKind.PREPAID || product.kind === ProductKind.SERVICE;
+      if (!skipsStock && product.stock < item.quantity) {
         throw new StockInsuficienteEnVentaException(product.name, product.stock, item.quantity);
       }
 
       const itemSubtotal = item.quantity * item.unitPrice;
-      subtotal += itemSubtotal;
 
       processedItems.push({
         productId: item.productId,
@@ -201,8 +202,37 @@ export class SalesService {
     return processedItems;
   }
 
+  // Devuelve los IDs de productos cuya kind === PREPAID. Se usa para detectar
+  // qué líneas deben generar una seña al confirmar la venta.
+  private async getPrepaidProductIds(productIds: string[]): Promise<Set<string>> {
+    if (productIds.length === 0) return new Set();
+    const prepaidProducts = await this.productModel
+      .find({ _id: { $in: productIds }, kind: ProductKind.PREPAID })
+      .select('_id')
+      .exec();
+    return new Set(prepaidProducts.map((p) => String(p._id)));
+  }
+
+  // IDs de productos "stockless" (PREPAID + SERVICE). Para estos no se descuenta
+  // ni se restaura stock al crear/cancelar ventas.
+  private async getStocklessProductIds(productIds: string[]): Promise<Set<string>> {
+    if (productIds.length === 0) return new Set();
+    const stockless = await this.productModel
+      .find({
+        _id: { $in: productIds },
+        kind: { $in: [ProductKind.PREPAID, ProductKind.SERVICE] },
+      })
+      .select('_id')
+      .exec();
+    return new Set(stockless.map((p) => String(p._id)));
+  }
+
   private async updateProductStock(items: SaleItem[], operation: 'add' | 'subtract'): Promise<void> {
+    const stocklessIds = await this.getStocklessProductIds(items.map((i) => i.productId.toString()));
     for (const item of items) {
+      // Las líneas PREPAID y SERVICE no tocan stock.
+      if (stocklessIds.has(item.productId.toString())) continue;
+
       const product = await this.productModel.findById(item.productId).exec();
       if (!product) continue;
 
@@ -217,24 +247,27 @@ export class SalesService {
     }
   }
 
-  private calculateTotal(subtotal: number, taxPercent: number = 0, discountPercent: number = 0, prepaidUsed: number = 0): { 
-    taxAmount: number; 
-    discountAmount: number; 
-    total: number; 
+  // `discountFlat` es ahora un MONTO FIJO en pesos. Positivo = descuento
+  // (reduce el total), negativo = recargo (lo aumenta). `taxPercent` se
+  // mantiene como porcentaje del subtotal.
+  private calculateTotal(subtotal: number, taxPercent: number = 0, discountFlat: number = 0, prepaidUsed: number = 0): {
+    taxAmount: number;
+    discountAmount: number;
+    total: number;
   } {
     const taxAmount = (subtotal * taxPercent) / 100;
-    const discountAmount = (subtotal * discountPercent) / 100;
+    const discountAmount = discountFlat;
     const total = subtotal + taxAmount - discountAmount - prepaidUsed;
-    
+
     return {
       taxAmount,
       discountAmount,
-      total: Math.max(0, total) // Asegurar que el total no sea negativo
+      total: Math.max(0, total),
     };
   }
 
-  private validatePrepaidUsed(prepaidUsed: number, subtotal: number, taxPercent: number = 0, discountPercent: number = 0): void {
-    const maxTotal = subtotal + (subtotal * taxPercent / 100) - (subtotal * discountPercent / 100);
+  private validatePrepaidUsed(prepaidUsed: number, subtotal: number, taxPercent: number = 0, discountFlat: number = 0): void {
+    const maxTotal = subtotal + (subtotal * taxPercent / 100) - discountFlat;
     if (prepaidUsed > maxTotal) {
       throw new BadRequestException(`El monto de prepaid usado (${prepaidUsed}) no puede ser mayor al total de la venta (${maxTotal})`);
     }
@@ -563,7 +596,7 @@ export class SalesService {
       // Calcular totales
       const subtotal = processedItems.reduce((sum, item) => sum + item.subtotal, 0);
       const taxPercent = createSaleDto.tax || 0;
-      const discountPercent = createSaleDto.discount || 0;
+      const discountFlat = createSaleDto.discount || 0;
       let prepaidUsed = createSaleDto.prepaidUsed || 0;
 
       // Manejar consumo de prepaids según los parámetros (solo si hay cliente)
@@ -586,10 +619,10 @@ export class SalesService {
       }
 
       // Validar que prepaidUsed no sea mayor al total
-      this.validatePrepaidUsed(prepaidUsed, subtotal, taxPercent, discountPercent);
+      this.validatePrepaidUsed(prepaidUsed, subtotal, taxPercent, discountFlat);
 
       // Calcular totales finales
-      const totals = this.calculateTotal(subtotal, taxPercent, discountPercent, prepaidUsed);
+      const totals = this.calculateTotal(subtotal, taxPercent, discountFlat, prepaidUsed);
 
       // Validar payments contra el total (1 entrada por método; suma === total;
       // vuelto sólo en CASH).
@@ -605,7 +638,7 @@ export class SalesService {
         items: processedItems,
         subtotal,
         tax: taxPercent,
-        discount: discountPercent,
+        discount: discountFlat,
         prepaidUsed,
         prepaidId: prepaidId,
         total: totals.total,
@@ -620,6 +653,32 @@ export class SalesService {
 
       // Actualizar stock de productos
       await this.updateProductStock(processedItems, 'subtract');
+
+      // Si la venta incluye líneas de producto PREPAID, generamos una seña
+      // (Prepaid PENDING) por línea, asociada al cliente de la venta. Cada
+      // línea genera un Prepaid de monto = item.subtotal.
+      const prepaidProductIds = await this.getPrepaidProductIds(
+        processedItems.map((i) => i.productId.toString()),
+      );
+      const prepaidLines = processedItems.filter((i) =>
+        prepaidProductIds.has(i.productId.toString()),
+      );
+      if (prepaidLines.length > 0) {
+        if (!createSaleDto.clientId) {
+          throw new BadRequestException(
+            'Las ventas con líneas de seña requieren un cliente asociado',
+          );
+        }
+        const paymentMethod = payments[0]?.method ?? PaymentMethod.CASH;
+        const prepaidDocs = prepaidLines.map((line) => ({
+          clientId: createSaleDto.clientId,
+          amount: line.subtotal,
+          paymentMethod,
+          status: PrepaidStatus.PENDING,
+          notes: `Seña creada con venta ${saleNumber}`,
+        }));
+        await this.prepaidModel.create(prepaidDocs);
+      }
 
       return this.mapToSaleResponse(sale);
     } catch (error) {
@@ -824,14 +883,14 @@ export class SalesService {
       if (needsRecalculation) {
         const currentSubtotal = updateData.subtotal || existingSale.subtotal;
         const currentTaxPercent = updateData.tax !== undefined ? updateData.tax : existingSale.tax;
-        const currentDiscountPercent = updateData.discount !== undefined ? updateData.discount : existingSale.discount;
+        const currentDiscountFlat = updateData.discount !== undefined ? updateData.discount : existingSale.discount;
         const currentPrepaidUsed = updateData.prepaidUsed !== undefined ? updateData.prepaidUsed : existingSale.prepaidUsed;
 
         // Validar que prepaidUsed no sea mayor al total
-        this.validatePrepaidUsed(currentPrepaidUsed, currentSubtotal, currentTaxPercent, currentDiscountPercent);
+        this.validatePrepaidUsed(currentPrepaidUsed, currentSubtotal, currentTaxPercent, currentDiscountFlat);
 
         // Calcular nuevo total
-        const totals = this.calculateTotal(currentSubtotal, currentTaxPercent, currentDiscountPercent, currentPrepaidUsed);
+        const totals = this.calculateTotal(currentSubtotal, currentTaxPercent, currentDiscountFlat, currentPrepaidUsed);
         updateData.total = totals.total;
 
         // Si cambió el total, los pagos vigentes ya no cuadran. Exigimos que

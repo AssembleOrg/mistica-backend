@@ -37,9 +37,9 @@ export class ProductsService {
       unitOfMeasure: productObj.unitOfMeasure,
       image: productObj.image,
       description: productObj.description,
-      status: productObj.status,
       profitMargin: productObj.profitMargin,
       specialProduct: productObj.specialProduct,
+      kind: productObj.kind,
       createdAt: productObj.createdAt,
       updatedAt: productObj.updatedAt,
       deletedAt: productObj.deletedAt,
@@ -56,11 +56,20 @@ export class ProductsService {
       throw new CodigoBarrasYaExisteException(createProductDto.barcode);
     }
 
-    if (createProductDto.price <= createProductDto.costPrice) {
+    // Validación precio>costo solo si ambos están presentes (servicios y señas
+    // pueden no tener costo).
+    if (
+      createProductDto.costPrice !== undefined &&
+      createProductDto.costPrice > 0 &&
+      createProductDto.price <= createProductDto.costPrice
+    ) {
       throw new PrecioInvalidoException();
     }
 
-    const profitMargin = ((createProductDto.price - createProductDto.costPrice) / createProductDto.costPrice) * 100;
+    const profitMargin =
+      createProductDto.costPrice && createProductDto.costPrice > 0
+        ? ((createProductDto.price - createProductDto.costPrice) / createProductDto.costPrice) * 100
+        : undefined;
 
     const product = await this.productModel.create({
       ...createProductDto,
@@ -264,7 +273,7 @@ export class ProductsService {
       .lean()
       .exec();
 
-    const byBarcode = new Map<string, { price: number; costPrice: number }>();
+    const byBarcode = new Map<string, { price: number; costPrice?: number }>();
     for (const p of existing) {
       byBarcode.set(p.barcode, { price: p.price, costPrice: p.costPrice });
     }
@@ -291,7 +300,9 @@ export class ProductsService {
       const newPrice = fields.price ?? current.price;
       const newCost = fields.costPrice ?? current.costPrice;
 
-      if (newPrice <= newCost) {
+      // La validación precio>costo y el cálculo de margen sólo aplican si
+      // hay costo definido (servicios/señas no lo tienen).
+      if (newCost !== undefined && newCost > 0 && newPrice <= newCost) {
         errors.push({
           barcode,
           message: `Precio (${newPrice}) debe ser mayor al costo (${newCost})`,
@@ -299,8 +310,10 @@ export class ProductsService {
         continue;
       }
 
-      // Si cambió precio o costo, recalculo margen
-      if (fields.price !== undefined || fields.costPrice !== undefined) {
+      if (
+        (fields.price !== undefined || fields.costPrice !== undefined) &&
+        newCost !== undefined && newCost > 0
+      ) {
         update.profitMargin = ((newPrice - newCost) / newCost) * 100;
       }
 

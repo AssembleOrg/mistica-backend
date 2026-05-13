@@ -1,21 +1,21 @@
-import { ProductCategory, ProductStatus, UnitOfMeasure } from '../enums';
+import { ProductKind, UnitOfMeasure } from '../enums';
 
 export interface Product {
-  id?: string; // Optional since Mongoose uses _id
-  _id?: string; // Mongoose ObjectId
+  id?: string;
+  _id?: string;
   name: string;
   barcode: string;
-  category: ProductCategory;
+  category?: string;
   price: number;
-  costPrice: number;
+  costPrice?: number;
   stock: number;
-  unitOfMeasure: UnitOfMeasure;
-  image: string;
-  description: string;
-  status: ProductStatus;
+  unitOfMeasure?: UnitOfMeasure;
+  image?: string;
+  description?: string;
   profitMargin: number | null;
   specialProduct: boolean;
+  kind: ProductKind;
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date;
-} 
+}

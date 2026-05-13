@@ -134,19 +134,15 @@ export class CreateSaleDto {
   @Max(100, { message: 'El impuesto no puede ser mayor a 100' })
   tax?: number;
 
-  @ApiPropertyOptional({ 
-    description: 'Porcentaje de descuento a aplicar (0-100)',
-    minimum: 0,
-    maximum: 100,
-    default: 0
+  @ApiPropertyOptional({
+    description: 'Ajuste en monto fijo (pesos): positivo = descuento, negativo = recargo',
+    default: 0,
   })
-  // Ajuste porcentual sobre el subtotal: positivo = descuento, negativo = recargo.
-  // Se mantuvo el nombre `discount` por compatibilidad con la base de datos
-  // existente; el rango permite ±100%.
+  // Ajuste en MONTO FIJO (pesos) sobre el subtotal: positivo = descuento,
+  // negativo = recargo. Se mantuvo el nombre `discount` por compatibilidad
+  // con la base de datos existente.
   @IsOptional()
   @IsNumber({}, { message: 'El ajuste debe ser un número' })
-  @Min(-100, { message: 'El ajuste no puede ser menor a -100' })
-  @Max(100, { message: 'El ajuste no puede ser mayor a 100' })
   discount?: number;
 
   @ApiPropertyOptional({ 
@@ -253,13 +249,11 @@ export class UpdateSaleDto {
     minimum: 0,
     maximum: 100
   })
-  // Ajuste porcentual sobre el subtotal: positivo = descuento, negativo = recargo.
-  // Se mantuvo el nombre `discount` por compatibilidad con la base de datos
-  // existente; el rango permite ±100%.
+  // Ajuste en MONTO FIJO (pesos) sobre el subtotal: positivo = descuento,
+  // negativo = recargo. Se mantuvo el nombre `discount` por compatibilidad
+  // con la base de datos existente.
   @IsOptional()
   @IsNumber({}, { message: 'El ajuste debe ser un número' })
-  @Min(-100, { message: 'El ajuste no puede ser menor a -100' })
-  @Max(100, { message: 'El ajuste no puede ser mayor a 100' })
   discount?: number;
 
   @ApiPropertyOptional({ 

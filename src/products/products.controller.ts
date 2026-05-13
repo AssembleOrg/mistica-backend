@@ -92,7 +92,7 @@ export class ProductsController {
 
   @Get('category/:category')
   @ApiOperation({ summary: 'Obtener productos por categoría con paginación' })
-  @ApiParam({ name: 'category', description: 'Categoría del producto', enum: ['organicos', 'aromaticos', 'wellness'] })
+  @ApiParam({ name: 'category', description: 'Categoría del producto (nombre)' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Número de página' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Límite por página' })
   @ApiResponse({ status: 200, description: 'Lista de productos por categoría obtenida exitosamente' })

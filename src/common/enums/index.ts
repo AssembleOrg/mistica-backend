@@ -1,6 +1,7 @@
 export * from './employee-role.enum';
 export * from './user-role.enum';
 export * from './product-category.enum';
+export * from './product-kind.enum';
 export * from './product-status.enum';
 export * from './unit-of-measure.enum';
 export * from './sale.enum';
