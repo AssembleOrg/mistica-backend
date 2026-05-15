@@ -14,4 +14,11 @@ export class SalesPaginatedFilterDto extends PaginatedDateFilterDto {
   @IsEnum(SaleStatus, { message: 'El status debe ser PENDING, COMPLETED o CANCELLED' })
   @Transform(({ value }) => value === '' ? undefined : value)
   status?: SaleStatus;
+
+  @ApiPropertyOptional({ 
+    description: 'Filtrar por ID del cliente',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === '' ? undefined : value)
+  clientId?: string;
 }

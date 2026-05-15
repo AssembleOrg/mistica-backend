@@ -696,7 +696,7 @@ export class SalesService {
   }
 
   async findAll(paginationDto?: SalesPaginatedFilterDto): Promise<PaginatedResponse<Sale>> {
-    const { page = 1, limit = 10, search, from, to, status } = paginationDto || {};
+    const { page = 1, limit = 10, search, from, to, status, clientId } = paginationDto || {};
     const skip = (page - 1) * limit;
 
     // Construir filtros
@@ -713,6 +713,11 @@ export class SalesService {
     // Filtro por status
     if (status) {
       filters.status = status;
+    }
+
+    // Filtro por clientId
+    if (clientId) {
+      filters.clientId = clientId;
     }
     
     // Filtros de fecha
