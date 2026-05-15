@@ -15,9 +15,11 @@ import { EgressesModule } from './egresses/egresses.module';
 import { CashboxModule } from './cashbox/cashbox.module';
 import { FinanceModule } from './finance/finance.module';
 import { CreditNotesModule } from './credit-notes/credit-notes.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
     }),
@@ -38,4 +40,4 @@ import { CreditNotesModule } from './credit-notes/credit-notes.module';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }

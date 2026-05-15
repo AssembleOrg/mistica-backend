@@ -77,6 +77,7 @@ export interface FinanceSummary {
     countedClosingCash: number | null;
     discrepancy: number | null;
     status: 'OPEN' | 'CLOSED';
+    closureType: 'MANUAL' | 'AUTO';
   }>;
 
   // Discrepancia acumulada de las sesiones cerradas en el rango
@@ -270,6 +271,7 @@ export class FinanceService {
         countedClosingCash: s.countedClosingCash ?? null,
         discrepancy: s.discrepancy ?? null,
         status: s.status,
+        closureType: s.closureType ?? 'MANUAL',
       })),
       totalDiscrepancy,
     };

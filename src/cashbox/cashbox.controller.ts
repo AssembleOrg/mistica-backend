@@ -7,6 +7,7 @@ import {
   Query,
   Req,
   UseGuards,
+  Patch,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -32,7 +33,7 @@ interface AuthRequest extends Request {
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class CashboxController {
-  constructor(private readonly cashboxService: CashboxService) {}
+  constructor(private readonly cashboxService: CashboxService) { }
 
   @Get('current')
   @ApiOperation({ summary: 'Sesión de caja actualmente abierta (o null)' })
@@ -64,9 +65,25 @@ export class CashboxController {
     return this.cashboxService.findAll(pagination);
   }
 
+  @Get('pending-auto-closure')
+  @ApiOperation({ summary: 'Obtener caja pendiente de arqueo' })
+  async getPendingAutoClosure() {
+    return this.cashboxService.findPendingAutoClosure();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Detalle de una sesión de caja' })
   async findOne(@Param('id') id: string) {
     return this.cashboxService.findOne(id);
+  }
+
+  @Patch(':id/resolve-auto')
+  @ApiOperation({ summary: 'Completar datos de una caja cerrada automaticamente' })
+  async resolveAutoClosure(
+    @Param('id') id: string,
+    @Body() dto: CloseCashSessionDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.cashboxService.resolveAutoClosure(id, dto, req.user?.id);
   }
 }

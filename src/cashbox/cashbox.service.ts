@@ -20,6 +20,7 @@ import {
 } from '../common/exceptions';
 import { PaymentMethod } from '../common/enums';
 import { PaginatedResponse } from '../common/interfaces';
+import { BadRequestException } from '@nestjs/common';
 
 export interface CashSessionResponse {
   id: string;
@@ -44,7 +45,7 @@ export class CashboxService {
     @InjectModel('Sale') private readonly saleModel: Model<SaleDocument>,
     @InjectModel('Prepaid') private readonly prepaidModel: Model<PrepaidDocument>,
     @InjectModel('Egress') private readonly egressModel: Model<EgressDocument>,
-  ) {}
+  ) { }
 
   private mapToResponse(s: CashSessionDocument): CashSessionResponse {
     const obj = s.toObject ? s.toObject() : (s as any);
@@ -241,4 +242,49 @@ export class CashboxService {
     if (!s) throw new SesionDeCajaNoEncontradaException(id);
     return this.mapToResponse(s);
   }
+
+  async findPendingAutoClosure(): Promise<CashSessionResponse | null> {
+    const s = await this.cashSessionModel.findOne({ closureType: 'AUTO' }).sort({ openedAt: -1 }).exec();
+    return s ? this.mapToResponse(s) : null;
+  }
+
+  async autoClose() {
+    const open = await this.findOpenSession();
+    if (!open) return;
+
+    const closedAt = new Date();
+    const expected = await this.computeExpectedClosingCash(
+      open.openingCash,
+      open.openedAt,
+      closedAt,
+    );
+    const discrepancy = Number((0 - expected).toFixed(2));
+
+    open.status = 'CLOSED';
+    open.closedAt = closedAt;
+    open.countedClosingCash = 0;
+    open.expectedClosingCash = expected;
+    open.discrepancy = discrepancy;
+    open.closingNotes = 'Cierre automático por el sistema';
+    open.closedByUserId = undefined;
+    open.closureType = 'AUTO';
+    await open.save();
+    return this.mapToResponse(open);
+  }
+
+  async resolveAutoClosure(id: string, dto: CloseCashSessionDto, userId?: string,): Promise<CashSessionResponse> {
+    const session = await this.cashSessionModel.findById(id);
+    if (!session) throw new SesionDeCajaNoEncontradaException(id);
+    if (session.closureType !== 'AUTO') throw new BadRequestException('Solo se pueden ajustar cajas con cierre automático');
+
+    const discrepancy = Number((dto.countedClosingCash - session.expectedClosingCash!).toFixed(2));
+    session.countedClosingCash = dto.countedClosingCash;
+    session.discrepancy = discrepancy;
+    session.closedByUserId = userId as any;
+    session.closingNotes = dto.notes ? dto.notes : 'Arqueado en diferido';
+    session.closureType = 'MANUAL';
+    await session.save();
+    return this.mapToResponse(session);
+  }
+
 }

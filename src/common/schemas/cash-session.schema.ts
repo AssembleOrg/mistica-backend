@@ -4,6 +4,7 @@ import { Document, SchemaTypes, Types } from 'mongoose';
 export type CashSessionDocument = CashSession & Document;
 
 export type CashSessionStatus = 'OPEN' | 'CLOSED';
+export type CashSessionClosureType = 'MANUAL' | 'AUTO'; // Indica si el cierre fue manual o si se cerro de manera automatica a las 00:00hs 
 
 /**
  * Sesión de caja (apertura/cierre).
@@ -66,6 +67,9 @@ export class CashSession {
 
   @Prop({ trim: true })
   closingNotes?: string;
+
+  @Prop({ enum: ['MANUAL', 'AUTO'], default: 'MANUAL' })
+  closureType: CashSessionClosureType;
 
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
