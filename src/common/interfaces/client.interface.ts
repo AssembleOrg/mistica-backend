@@ -9,6 +9,7 @@ export interface Client {
   updatedAt: Date;
   deletedAt?: Date;
   prepaid?: number; // Total de prepaids pendientes
+  transactionCount?: number;
 }
 
 export interface ClientWithPrepaids extends Client {

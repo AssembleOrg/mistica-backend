@@ -8,7 +8,7 @@ import {
   EmailClienteYaExisteException,
   CuitClienteYaExisteException
 } from '../common/exceptions';
-import { ClientDocument, PrepaidDocument } from '../common/schemas';
+import { ClientDocument, PrepaidDocument, SaleDocument } from '../common/schemas';
 import { buildDateFilter } from '../common/utils';
 import { PrepaidStatus } from '../common/enums';
 
@@ -17,9 +17,10 @@ export class ClientsService {
   constructor(
     @InjectModel('Client') private readonly clientModel: Model<ClientDocument>,
     @InjectModel('Prepaid') private readonly prepaidModel: Model<PrepaidDocument>,
+    @InjectModel('Sale') private readonly saleModel: Model<SaleDocument>,
   ) {}
 
-  private mapToClientResponse(client: ClientDocument, prepaidAmount?: number): Client {
+  private mapToClientResponse(client: ClientDocument, prepaidAmount?: number, transactionCount?: number): Client {
     const clientObj = client.toObject();
     return {
       id: clientObj._id.toString(),
@@ -32,6 +33,7 @@ export class ClientsService {
       updatedAt: clientObj.updatedAt,
       deletedAt: clientObj.deletedAt,
       prepaid: prepaidAmount || 0,
+      transactionCount: transactionCount || 0,
     };
   }
 
@@ -114,9 +116,10 @@ export class ClientsService {
       }
 
       const prepaidAmount = await this.calculateClientPrepaidAmount(client._id.toString());
+      const transactionCount = 0; // Al crearlo es 0
 
       return {
-        ...this.mapToClientResponse(client, prepaidAmount),
+        ...this.mapToClientResponse(client, prepaidAmount, transactionCount),
         prepaids,
       };
     } catch (error) {
@@ -159,11 +162,15 @@ export class ClientsService {
       this.clientModel.countDocuments(filter).exec(),
     ]);
 
-    // Calcular prepaid amount para cada cliente
+    // Calcular prepaid amount y transactions para cada cliente
     const clientsWithPrepaid = await Promise.all(
       clients.map(async (client) => {
-        const prepaidAmount = await this.calculateClientPrepaidAmount(client._id?.toString() || '');
-        return this.mapToClientResponse(client, prepaidAmount);
+        const clientId = client._id?.toString() || '';
+        const [prepaidAmount, transactionCount] = await Promise.all([
+          this.calculateClientPrepaidAmount(clientId),
+          this.saleModel.countDocuments({ clientId, deletedAt: { $exists: false } }).exec(),
+        ]);
+        return this.mapToClientResponse(client, prepaidAmount, transactionCount);
       })
     );
 
@@ -199,11 +206,15 @@ export class ClientsService {
       .sort({ createdAt: -1 })
       .exec();
 
-    // Calcular prepaid amount para cada cliente
+    // Calcular prepaid amount y transactions para cada cliente
     const clientsWithPrepaid = await Promise.all(
       clients.map(async (client) => {
-        const prepaidAmount = await this.calculateClientPrepaidAmount(client._id?.toString() || '');
-        return this.mapToClientResponse(client, prepaidAmount);
+        const clientId = client._id?.toString() || '';
+        const [prepaidAmount, transactionCount] = await Promise.all([
+          this.calculateClientPrepaidAmount(clientId),
+          this.saleModel.countDocuments({ clientId, deletedAt: { $exists: false } }).exec(),
+        ]);
+        return this.mapToClientResponse(client, prepaidAmount, transactionCount);
       })
     );
 
@@ -227,9 +238,10 @@ export class ClientsService {
     }).sort({ createdAt: -1 }).exec();
 
     const prepaidAmount = await this.calculateClientPrepaidAmount(id);
+    const transactionCount = await this.saleModel.countDocuments({ clientId: id, deletedAt: { $exists: false } }).exec();
 
     return {
-      ...this.mapToClientResponse(client, prepaidAmount),
+      ...this.mapToClientResponse(client, prepaidAmount, transactionCount),
       prepaids: prepaids.map(prepaid => this.mapToPrepaidResponse(prepaid)),
     };
   }
