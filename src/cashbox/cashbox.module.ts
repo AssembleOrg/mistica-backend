@@ -12,6 +12,7 @@ import {
   Egress,
   EgressSchema,
 } from '../common/schemas';
+import { CashboxCronService } from './cashbox.cron';
 
 @Module({
   imports: [
@@ -23,7 +24,7 @@ import {
     ]),
   ],
   controllers: [CashboxController],
-  providers: [CashboxService],
+  providers: [CashboxService, CashboxCronService],
   exports: [CashboxService],
 })
-export class CashboxModule {}
+export class CashboxModule { }
