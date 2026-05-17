@@ -122,6 +122,12 @@ export class CreateSaleDto {
   @MaxLength(500, { message: 'Las notas no pueden exceder 500 caracteres' })
   notes?: string;
 
+  @ApiProperty({ description: 'Nombre del vendedor' })
+  @IsString({ message: 'El vendedor debe ser una cadena de texto' })
+  @IsNotEmpty({ message: 'El vendedor es requerido' })
+  @MaxLength(100, { message: 'El vendedor no puede exceder 100 caracteres' })
+  seller: string;
+
   @ApiPropertyOptional({ 
     description: 'Porcentaje de impuesto a aplicar (0-100)',
     minimum: 0,
@@ -232,6 +238,12 @@ export class UpdateSaleDto {
   @IsString({ message: 'Las notas deben ser una cadena de texto' })
   @MaxLength(500, { message: 'Las notas no pueden exceder 500 caracteres' })
   notes?: string;
+
+  @ApiPropertyOptional({ description: 'Nombre del vendedor' })
+  @IsOptional()
+  @IsString({ message: 'El vendedor debe ser una cadena de texto' })
+  @MaxLength(100, { message: 'El vendedor no puede exceder 100 caracteres' })
+  seller?: string;
 
   @ApiPropertyOptional({ 
     description: 'Porcentaje de impuesto a aplicar (0-100)',

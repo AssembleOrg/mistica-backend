@@ -64,6 +64,7 @@ export class SalesService {
       })),
       status: saleObj.status,
       notes: saleObj.notes,
+      seller: saleObj.seller,
       afipCae: saleObj.afipCae,
       afipNumero: saleObj.afipNumero,
       afipFechaVto: saleObj.afipFechaVto,
@@ -645,6 +646,7 @@ export class SalesService {
         payments,
         status: SaleStatus.PENDING,
         notes: createSaleDto.notes,
+        seller: createSaleDto.seller,
       });
 
       if (!sale || !sale._id) {

@@ -104,6 +104,9 @@ export class Sale {
   @Prop({ trim: true })
   notes?: string; 
 
+  @Prop({ required: true, trim: true })
+  seller: string; 
+
   // Campos de facturación AFIP
   @Prop({ trim: true })
   afipCae?: string; // Código de Autorización Electrónico
