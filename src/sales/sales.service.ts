@@ -625,9 +625,29 @@ export class SalesService {
       // Calcular totales finales
       const totals = this.calculateTotal(subtotal, taxPercent, discountFlat, prepaidUsed);
 
-      // Validar payments contra el total (1 entrada por método; suma === total;
-      // vuelto sólo en CASH).
-      const payments = this.buildSalePayments(createSaleDto.payments, totals.total);
+      // Si la suma de pagos es menor al total, registramos la diferencia como
+      // descuento automático (pedido del negocio: poder cobrar menos sin
+      // bloquear la venta). Si excede, sí bloqueamos.
+      const paymentsSum = (createSaleDto.payments || []).reduce(
+        (acc, p) => acc + (p.amount || 0),
+        0,
+      );
+      let finalDiscount = discountFlat;
+      let finalTotal = totals.total;
+      if (paymentsSum > finalTotal + 0.01) {
+        throw new BadRequestException(
+          `La suma de los pagos (${paymentsSum.toFixed(2)}) excede el total a cobrar (${finalTotal.toFixed(2)}).`,
+        );
+      }
+      const autoDiscount = Number((finalTotal - paymentsSum).toFixed(2));
+      if (autoDiscount > 0.01) {
+        finalDiscount = Number((finalDiscount + autoDiscount).toFixed(2));
+        finalTotal = Number(paymentsSum.toFixed(2));
+      }
+
+      // Validar payments contra el total ajustado (1 entrada por método;
+      // suma === total; vuelto sólo en CASH).
+      const payments = this.buildSalePayments(createSaleDto.payments, finalTotal);
 
       // Crear la venta
       const sale = await this.saleModel.create({
@@ -639,10 +659,10 @@ export class SalesService {
         items: processedItems,
         subtotal,
         tax: taxPercent,
-        discount: discountFlat,
+        discount: finalDiscount,
         prepaidUsed,
         prepaidId: prepaidId,
-        total: totals.total,
+        total: finalTotal,
         payments,
         status: SaleStatus.PENDING,
         notes: createSaleDto.notes,

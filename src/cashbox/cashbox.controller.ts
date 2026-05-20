@@ -77,6 +77,15 @@ export class CashboxController {
     return this.cashboxService.findOne(id);
   }
 
+  @Get(':id/transactions')
+  @ApiOperation({
+    summary:
+      'Movimientos cronológicos (ventas + señas + egresos) de una sesión de caja',
+  })
+  async getSessionTransactions(@Param('id') id: string) {
+    return this.cashboxService.getSessionTransactions(id);
+  }
+
   @Patch(':id/resolve-auto')
   @ApiOperation({ summary: 'Completar datos de una caja cerrada automaticamente' })
   async resolveAutoClosure(

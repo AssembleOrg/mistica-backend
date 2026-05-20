@@ -243,6 +243,124 @@ export class CashboxService {
     return this.mapToResponse(s);
   }
 
+  /**
+   * Lista cronológica de movimientos (ventas + señas + egresos) ocurridos
+   * durante una sesión de caja. Para sesiones abiertas usa `now` como límite
+   * superior. Pensado para la vista "Transacciones" del tab de Ventas y para
+   * el detalle de sesión en Finanzas.
+   */
+  async getSessionTransactions(sessionId: string): Promise<{
+    sessionId: string;
+    transactions: Array<{
+      id: string;
+      source: 'sale' | 'prepaid' | 'egress';
+      type: 'ingreso' | 'egreso';
+      amount: number;
+      description: string;
+      paymentMethod: string;
+      createdAt: Date;
+      reference?: string;
+      afipCae?: string;
+    }>;
+  }> {
+    const session = await this.cashSessionModel.findById(sessionId).exec();
+    if (!session) throw new SesionDeCajaNoEncontradaException(sessionId);
+
+    const from = session.openedAt;
+    const to = session.closedAt ?? new Date();
+
+    const [sales, prepaids, egresses] = await Promise.all([
+      this.saleModel
+        .find({
+          createdAt: { $gte: from, $lte: to },
+          deletedAt: { $exists: false },
+          status: { $ne: 'CANCELLED' },
+        })
+        .lean()
+        .exec(),
+      this.prepaidModel
+        .find({
+          createdAt: { $gte: from, $lte: to },
+          deletedAt: { $exists: false },
+        })
+        .lean()
+        .exec(),
+      this.egressModel
+        .find({
+          createdAt: { $gte: from, $lte: to },
+          deletedAt: { $exists: false },
+          status: { $ne: 'CANCELLED' },
+        })
+        .lean()
+        .exec(),
+    ]);
+
+    const primaryMethod = (payments: any[] | undefined): string => {
+      if (!payments || payments.length === 0) return 'CASH';
+      if (payments.length === 1) return payments[0].method;
+      // Mayor monto define el método principal; si empata, "MIXTO"
+      const sorted = [...payments].sort((a, b) => b.amount - a.amount);
+      if (sorted.length > 1 && sorted[0].amount === sorted[1].amount) return 'MIXTO';
+      return sorted[0].method;
+    };
+
+    const txns: Array<{
+      id: string;
+      source: 'sale' | 'prepaid' | 'egress';
+      type: 'ingreso' | 'egreso';
+      amount: number;
+      description: string;
+      paymentMethod: string;
+      createdAt: Date;
+      reference?: string;
+      afipCae?: string;
+    }> = [];
+
+    for (const s of sales as any[]) {
+      txns.push({
+        id: s._id.toString(),
+        source: 'sale',
+        type: 'ingreso',
+        amount: s.total,
+        description: `Venta ${s.saleNumber}${s.customerName ? ` · ${s.customerName}` : ''}`,
+        paymentMethod: primaryMethod(s.payments),
+        createdAt: s.createdAt,
+        reference: s.saleNumber,
+        afipCae: s.afipCae,
+      });
+    }
+
+    for (const p of prepaids as any[]) {
+      txns.push({
+        id: p._id.toString(),
+        source: 'prepaid',
+        type: 'ingreso',
+        amount: p.amount,
+        description: p.notes || 'Seña',
+        paymentMethod: p.paymentMethod,
+        createdAt: p.createdAt,
+        reference: p._id.toString(),
+      });
+    }
+
+    for (const e of egresses as any[]) {
+      txns.push({
+        id: e._id.toString(),
+        source: 'egress',
+        type: 'egreso',
+        amount: e.amount,
+        description: `${e.egressNumber} · ${e.concept}`,
+        paymentMethod: e.paymentMethod,
+        createdAt: e.createdAt,
+        reference: e.egressNumber,
+      });
+    }
+
+    txns.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+
+    return { sessionId, transactions: txns };
+  }
+
   async findPendingAutoClosure(): Promise<CashSessionResponse | null> {
     const s = await this.cashSessionModel.findOne({ closureType: 'AUTO' }).sort({ openedAt: -1 }).exec();
     return s ? this.mapToResponse(s) : null;
