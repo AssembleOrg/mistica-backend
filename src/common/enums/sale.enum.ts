@@ -4,6 +4,14 @@ export enum PaymentMethod {
   TRANSFER = 'TRANSFER',
 }
 
+// Solo para filtros — nunca se guarda en la BD. No modificar PaymentMethod.
+export enum PaymentMethodFilter {
+  CASH = 'CASH',
+  CARD = 'CARD',
+  TRANSFER = 'TRANSFER',
+  MIXED = 'MIXED',
+}
+
 export enum SaleStatus {
   PENDING = 'PENDING',
   COMPLETED = 'COMPLETED',

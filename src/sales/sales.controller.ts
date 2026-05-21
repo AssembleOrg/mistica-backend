@@ -60,6 +60,7 @@ export class SalesController {
   @ApiQuery({ name: 'from', required: false, type: String, description: 'Fecha de inicio (YYYY-MM-DD)', format: 'date' })
   @ApiQuery({ name: 'to', required: false, type: String, description: 'Fecha de fin (YYYY-MM-DD)', format: 'date' })
   @ApiQuery({ name: 'status', required: false, enum: ['PENDING', 'COMPLETED', 'CANCELLED'], description: 'Filtrar por status de la venta' })
+  @ApiQuery({ name: 'paymentMethod', required: false, enum: ['CASH', 'CARD', 'TRANSFER', 'MIXED'], description: 'Filtrar por método de pago (MIXED = ventas con más de un método)' })
   @ApiResponse({ status: 200, description: 'Lista de ventas obtenida exitosamente' })
   async findAllPaginated(@Query() paginationDto: SalesPaginatedFilterDto): Promise<{ success: boolean; message: string; data: PaginatedResponse<Sale> }> {
     const result = await this.salesService.findAll(paginationDto);

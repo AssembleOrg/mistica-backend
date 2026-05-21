@@ -2,7 +2,7 @@ import { IsOptional, IsEnum } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { PaginatedDateFilterDto } from './paginated-date-filter.dto';
-import { SaleStatus } from '../enums';
+import { SaleStatus, PaymentMethodFilter } from '../enums';
 
 export class SalesPaginatedFilterDto extends PaginatedDateFilterDto {
   @ApiPropertyOptional({ 
@@ -15,10 +15,19 @@ export class SalesPaginatedFilterDto extends PaginatedDateFilterDto {
   @Transform(({ value }) => value === '' ? undefined : value)
   status?: SaleStatus;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Filtrar por ID del cliente',
   })
   @IsOptional()
   @Transform(({ value }) => value === '' ? undefined : value)
   clientId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filtrar por método de pago. MIXED = ventas con más de un método.',
+    enum: PaymentMethodFilter,
+  })
+  @IsOptional()
+  @IsEnum(PaymentMethodFilter, { message: 'El método debe ser CASH, CARD, TRANSFER o MIXED' })
+  @Transform(({ value }) => value === '' ? undefined : value)
+  paymentMethod?: PaymentMethodFilter;
 }

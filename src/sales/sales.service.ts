@@ -18,7 +18,7 @@ import {
   CajaNoAbiertaException,
 } from '../common/exceptions';
 import { SaleDocument, ProductDocument, ClientDocument, PrepaidDocument } from '../common/schemas';
-import { InvoiceType, PaymentMethod, PrepaidStatus, ProductKind, SaleStatus, TaxCondition } from '../common/enums';
+import { InvoiceType, PaymentMethod, PaymentMethodFilter, PrepaidStatus, ProductKind, SaleStatus, TaxCondition } from '../common/enums';
 import { PrepaidsService } from '../prepaids/prepaids.service';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { buildDateFilter } from '../common/utils';
@@ -718,7 +718,7 @@ export class SalesService {
   }
 
   async findAll(paginationDto?: SalesPaginatedFilterDto): Promise<PaginatedResponse<Sale>> {
-    const { page = 1, limit = 10, search, from, to, status, clientId } = paginationDto || {};
+    const { page = 1, limit = 10, search, from, to, status, clientId, paymentMethod } = paginationDto || {};
     const skip = (page - 1) * limit;
 
     // Construir filtros
@@ -742,6 +742,15 @@ export class SalesService {
       filters.clientId = clientId;
     }
     
+    // Filtro por método de pago
+    if (paymentMethod) {
+      if (paymentMethod === PaymentMethodFilter.MIXED) {
+        filters['payments.1'] = { $exists: true };
+      } else {
+        filters['payments.method'] = paymentMethod;
+      }
+    }
+
     // Filtros de fecha
     const dateFilter = buildDateFilter(from, to);
     Object.assign(filters, dateFilter);
