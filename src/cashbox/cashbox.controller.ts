@@ -21,6 +21,7 @@ import {
   CloseCashSessionDto,
   OpenCashSessionDto,
   PaginationDto,
+  UpdateCashSessionLabelDto,
 } from '../common/dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
@@ -84,6 +85,15 @@ export class CashboxController {
   })
   async getSessionTransactions(@Param('id') id: string) {
     return this.cashboxService.getSessionTransactions(id);
+  }
+
+  @Patch(':id/label')
+  @ApiOperation({ summary: 'Renombrar una sesión de caja' })
+  async updateLabel(
+    @Param('id') id: string,
+    @Body() dto: UpdateCashSessionLabelDto,
+  ) {
+    return this.cashboxService.updateLabel(id, dto.label);
   }
 
   @Patch(':id/resolve-auto')

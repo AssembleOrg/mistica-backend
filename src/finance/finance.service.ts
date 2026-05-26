@@ -66,6 +66,7 @@ export interface FinanceSummary {
   // Cajas: aperturas/cierres con discrepancias
   cashSessions: Array<{
     id: string;
+    label: string | null;
     openedAt: Date;
     closedAt: Date | null;
     openingCash: number;
@@ -255,6 +256,7 @@ export class FinanceService {
       netBalance,
       cashSessions: sessions.map((s) => ({
         id: s._id.toString(),
+        label: s.label ?? null,
         openedAt: s.openedAt,
         closedAt: s.closedAt ?? null,
         openingCash: s.openingCash,

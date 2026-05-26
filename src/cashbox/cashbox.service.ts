@@ -25,6 +25,7 @@ import { BadRequestException } from '@nestjs/common';
 export interface CashSessionResponse {
   id: string;
   status: 'OPEN' | 'CLOSED';
+  label?: string;
   openedAt: Date;
   closedAt?: Date;
   openingCash: number;
@@ -52,6 +53,7 @@ export class CashboxService {
     return {
       id: obj._id.toString(),
       status: obj.status,
+      label: obj.label,
       openedAt: obj.openedAt,
       closedAt: obj.closedAt,
       openingCash: obj.openingCash,
@@ -228,6 +230,19 @@ export class CashboxService {
   async findOne(id: string): Promise<CashSessionResponse> {
     const s = await this.cashSessionModel.findById(id).exec();
     if (!s) throw new SesionDeCajaNoEncontradaException(id);
+    return this.mapToResponse(s);
+  }
+
+  /**
+   * Renombra una sesión de caja. Un `label` vacío vuelve la sesión al nombre
+   * por default (el front muestra día + fecha de apertura).
+   */
+  async updateLabel(id: string, label?: string): Promise<CashSessionResponse> {
+    const s = await this.cashSessionModel.findById(id).exec();
+    if (!s) throw new SesionDeCajaNoEncontradaException(id);
+    const trimmed = (label ?? '').trim();
+    s.set('label', trimmed || undefined);
+    await s.save();
     return this.mapToResponse(s);
   }
 

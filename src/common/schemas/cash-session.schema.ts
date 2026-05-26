@@ -27,6 +27,13 @@ export class CashSession {
   @Prop({ required: true, enum: ['OPEN', 'CLOSED'], default: 'OPEN' })
   status: CashSessionStatus;
 
+  /**
+   * Nombre editable de la sesión. Si está vacío, el front muestra un default
+   * con el día y la fecha de apertura (ej. "Miércoles 20/05/26").
+   */
+  @Prop({ trim: true })
+  label?: string;
+
   @Prop({ type: Date, required: true, default: Date.now })
   openedAt: Date;
 

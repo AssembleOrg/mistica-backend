@@ -17,6 +17,17 @@ export class OpenCashSessionDto {
   notes?: string;
 }
 
+export class UpdateCashSessionLabelDto {
+  @ApiProperty({
+    description:
+      'Nombre editable de la sesión de caja. Enviar vacío para volver al default (día + fecha).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  label?: string;
+}
+
 export class CloseCashSessionDto {
   @ApiProperty({
     description:
