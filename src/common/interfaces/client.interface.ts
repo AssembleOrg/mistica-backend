@@ -23,8 +23,6 @@ export interface Prepaid {
   clientId: string;
   amount: number;
   paymentMethod: PaymentMethod;
-  receivedAmount?: number;
-  changeGiven?: number;
   status: 'PENDING' | 'CONSUMED';
   notes?: string;
   consumedAt?: Date;

@@ -16,16 +16,9 @@ export class Prepaid {
   amount: number;
 
   // Cómo se cobró la seña — para que la reportería de caja la sume al método
-  // correspondiente. Si llega cash, se acepta también `receivedAmount` y
-  // `changeGiven` para reflejar el vuelto entregado.
+  // correspondiente.
   @Prop({ required: true, enum: PaymentMethod })
   paymentMethod: PaymentMethod;
-
-  @Prop({ min: 0 })
-  receivedAmount?: number;
-
-  @Prop({ min: 0 })
-  changeGiven?: number;
 
   @Prop({ required: true, enum: PrepaidStatus, default: PrepaidStatus.PENDING })
   status: PrepaidStatus;

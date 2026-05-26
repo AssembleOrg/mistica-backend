@@ -28,15 +28,6 @@ export class CreatePrepaidDto {
   @IsEnum(PaymentMethod, { message: 'El método de pago debe ser válido' })
   paymentMethod: PaymentMethod;
 
-  @ApiPropertyOptional({
-    description: 'Sólo CASH: lo entregado físicamente. Diferencia con `amount` = vuelto.',
-    minimum: 0,
-  })
-  @IsOptional()
-  @IsNumber({}, { message: 'receivedAmount debe ser un número' })
-  @Min(0, { message: 'receivedAmount debe ser mayor o igual a 0' })
-  receivedAmount?: number;
-
   @ApiPropertyOptional({ description: 'Notas del prepago' })
   @IsOptional()
   @IsString({ message: 'Las notas deben ser una cadena de texto' })

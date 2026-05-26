@@ -42,8 +42,6 @@ export class PrepaidsService {
       clientId: client.fullName,
       amount: prepaidObj.amount,
       paymentMethod: prepaidObj.paymentMethod,
-      receivedAmount: prepaidObj.receivedAmount,
-      changeGiven: prepaidObj.changeGiven,
       status: prepaidObj.status,
       notes: prepaidObj.notes,
       consumedAt: prepaidObj.consumedAt,
@@ -73,27 +71,10 @@ export class PrepaidsService {
         throw new ClienteNoEncontradoException(clientId);
       }
 
-      // Para CASH, calcular vuelto si se entregó más que el monto. Para los
-      // demás métodos `receivedAmount` no aplica.
-      let receivedAmount: number | undefined;
-      let changeGiven: number | undefined;
-      if (createPrepaidDto.paymentMethod === 'CASH') {
-        const received = createPrepaidDto.receivedAmount ?? createPrepaidDto.amount;
-        if (received < createPrepaidDto.amount) {
-          throw new BadRequestException(
-            `El efectivo recibido (${received}) no puede ser menor al monto de la seña (${createPrepaidDto.amount})`,
-          );
-        }
-        receivedAmount = received;
-        changeGiven = Number((received - createPrepaidDto.amount).toFixed(2));
-      }
-
       const prepaid = await this.prepaidModel.create({
         clientId,
         amount: createPrepaidDto.amount,
         paymentMethod: createPrepaidDto.paymentMethod,
-        receivedAmount,
-        changeGiven,
         notes: createPrepaidDto.notes,
         status: PrepaidStatus.PENDING,
       });

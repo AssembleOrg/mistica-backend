@@ -40,10 +40,6 @@ export class CreateSaleItemDto {
  * tarjeta + transferencia, en cualquier combinación). Se permite una sola
  * entrada por método: si el cliente pone "$5 cash + $3 cash" se suma como
  * un solo CASH de $8.
- *
- * Para CASH se acepta `receivedAmount` (lo que efectivamente entregó el
- * cliente). Si es mayor a `amount`, la diferencia es el vuelto y se guarda
- * en `changeGiven`. Para los demás métodos `receivedAmount` no aplica.
  */
 export class CreateSalePaymentDto {
   @ApiProperty({ description: 'Método de pago', enum: PaymentMethod })
@@ -57,16 +53,6 @@ export class CreateSalePaymentDto {
   @IsNumber({}, { message: 'El monto debe ser un número' })
   @Min(0, { message: 'El monto debe ser mayor o igual a 0' })
   amount: number;
-
-  @ApiPropertyOptional({
-    description:
-      'Sólo CASH: lo que entregó el cliente físicamente. Debe ser ≥ amount; la diferencia queda como vuelto.',
-    minimum: 0,
-  })
-  @IsOptional()
-  @IsNumber({}, { message: 'receivedAmount debe ser un número' })
-  @Min(0, { message: 'receivedAmount debe ser mayor o igual a 0' })
-  receivedAmount?: number;
 }
 
 export class CreateSaleDto {

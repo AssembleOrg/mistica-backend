@@ -42,7 +42,7 @@ export class CashSession {
 
   /**
    * Sólo presente al cerrar. Calculado por el backend:
-   *   openingCash + ventas en CASH (amount) - egresos en CASH (amount) - vueltos en CASH (changeGiven)
+   *   openingCash + ventas en CASH (amount) - egresos en CASH (amount)
    * Las prepaid en CASH también suman acá.
    */
   @Prop({ min: 0 })

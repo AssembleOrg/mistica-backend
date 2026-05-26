@@ -72,15 +72,11 @@ export class Sale {
   total: number;
 
   // Multi-payment: la suma de `payments[].amount` debe igualar `total`.
-  // Para CASH se permite `receivedAmount > amount`; el excedente queda como
-  // `changeGiven` (vuelto entregado al cliente).
   @Prop({
     type: [
       {
         method: { type: String, enum: Object.values(PaymentMethod), required: true },
         amount: { type: Number, required: true, min: 0 },
-        receivedAmount: { type: Number, min: 0 },
-        changeGiven: { type: Number, min: 0 },
       },
     ],
     required: true,
@@ -94,8 +90,6 @@ export class Sale {
   payments: Array<{
     method: PaymentMethod;
     amount: number;
-    receivedAmount?: number;
-    changeGiven?: number;
   }>;
 
   @Prop({ required: true, enum: SaleStatus, default: SaleStatus.PENDING })

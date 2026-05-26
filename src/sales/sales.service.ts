@@ -59,8 +59,6 @@ export class SalesService {
       payments: (saleObj.payments || []).map((p) => ({
         method: p.method,
         amount: p.amount,
-        receivedAmount: p.receivedAmount,
-        changeGiven: p.changeGiven,
       })),
       status: saleObj.status,
       notes: saleObj.notes,
@@ -78,23 +76,17 @@ export class SalesService {
    * Valida `payments[]` contra `total`:
    *  - Suma de amounts = total (aceptamos ±0.01 de redondeo).
    *  - Una sola entrada por método (si pasan dos CASH, error: deben sumar a uno).
-   *  - Sólo CASH puede traer `receivedAmount > amount`. La diferencia se
-   *    devuelve como vuelto y se persiste en `changeGiven`.
-   *  - Para no-CASH, `receivedAmount` se ignora.
    * Devuelve el array normalizado listo para guardar.
    */
   private buildSalePayments(
     payments: Array<{
       method: PaymentMethod;
       amount: number;
-      receivedAmount?: number;
     }>,
     total: number,
   ): Array<{
     method: PaymentMethod;
     amount: number;
-    receivedAmount?: number;
-    changeGiven?: number;
   }> {
     if (!payments || payments.length === 0) {
       throw new BadRequestException('La venta debe tener al menos un pago');
@@ -115,23 +107,6 @@ export class SalesService {
         );
       }
 
-      if (p.method === PaymentMethod.CASH) {
-        const received = p.receivedAmount ?? p.amount;
-        if (received < p.amount) {
-          throw new BadRequestException(
-            `El efectivo recibido (${received}) no puede ser menor al monto a cobrar (${p.amount})`,
-          );
-        }
-        const change = Number((received - p.amount).toFixed(2));
-        return {
-          method: p.method,
-          amount: p.amount,
-          receivedAmount: received,
-          changeGiven: change,
-        };
-      }
-
-      // Para no-CASH ignoramos receivedAmount/changeGiven
       return { method: p.method, amount: p.amount };
     });
 
@@ -1069,7 +1044,6 @@ export class SalesService {
           [PaymentMethod.CARD]: 0,
           [PaymentMethod.TRANSFER]: 0,
         },
-        totalCashChange: 0,
         totalByStatus: {
           [SaleStatus.PENDING]: 0,
           [SaleStatus.COMPLETED]: 0,
@@ -1081,9 +1055,6 @@ export class SalesService {
         for (const p of sale.payments || []) {
           summary.totalByPaymentMethod[p.method] =
             (summary.totalByPaymentMethod[p.method] ?? 0) + p.amount;
-          if (p.method === PaymentMethod.CASH && p.changeGiven) {
-            summary.totalCashChange += p.changeGiven;
-          }
         }
         summary.totalByStatus[sale.status] += 1;
       }
@@ -1099,8 +1070,6 @@ export class SalesService {
           payments: (sale.payments || []).map((p) => ({
             method: p.method,
             amount: p.amount,
-            receivedAmount: p.receivedAmount,
-            changeGiven: p.changeGiven,
           })),
           status: sale.status,
           createdAt: sale.createdAt,

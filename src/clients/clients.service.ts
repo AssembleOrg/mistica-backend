@@ -44,8 +44,6 @@ export class ClientsService {
       clientId: prepaidObj.clientId.toString(),
       amount: prepaidObj.amount,
       paymentMethod: prepaidObj.paymentMethod,
-      receivedAmount: prepaidObj.receivedAmount,
-      changeGiven: prepaidObj.changeGiven,
       status: prepaidObj.status,
       notes: prepaidObj.notes,
       consumedAt: prepaidObj.consumedAt,

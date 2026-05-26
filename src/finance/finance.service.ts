@@ -7,7 +7,6 @@ import {
   PrepaidDocument,
   SaleDocument,
 } from '../common/schemas';
-import { PaymentMethod } from '../common/enums';
 import { FinanceSummaryQueryDto } from '../common/dto';
 
 export interface FinanceSummary {
@@ -25,9 +24,6 @@ export interface FinanceSummary {
     CARD: number;
     TRANSFER: number;
   };
-
-  // Sólo CASH: suma de changeGiven entregada en el rango
-  totalCashChange: number;
 
   // Estado de venta
   byStatus: {
@@ -132,7 +128,6 @@ export class FinanceService {
       CARD: 0,
       TRANSFER: 0,
     };
-    let totalCashChange = 0;
     const byStatus: FinanceSummary['byStatus'] = {
       PENDING: 0,
       COMPLETED: 0,
@@ -154,9 +149,6 @@ export class FinanceService {
       for (const p of sale.payments || []) {
         byPaymentMethod[p.method as keyof typeof byPaymentMethod] =
           (byPaymentMethod[p.method as keyof typeof byPaymentMethod] ?? 0) + p.amount;
-        if (p.method === PaymentMethod.CASH && p.changeGiven) {
-          totalCashChange += p.changeGiven;
-        }
       }
 
       if (sale.clientId) {
@@ -247,7 +239,6 @@ export class FinanceService {
       totalRevenue,
       averageTicket,
       byPaymentMethod,
-      totalCashChange,
       byStatus,
       byClient,
       topProducts,

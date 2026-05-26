@@ -103,16 +103,13 @@ export class CashboxService {
    *           + ventas en CASH (amount)
    *           + prepaids en CASH (amount)
    *           − egresos en CASH (amount)
-   *           − vueltos en CASH (changeGiven en sales y prepaids)
-   *
-   * El changeGiven se descuenta porque sale físicamente de la caja.
    */
   private async computeExpectedClosingCash(
     openingCash: number,
     from: Date,
     to: Date,
   ): Promise<number> {
-    // Acumular ventas en CASH del período: amount + (-changeGiven)
+    // Acumular ventas en CASH del período: amount
     const salesAgg = await this.saleModel.aggregate([
       {
         $match: {
@@ -127,13 +124,11 @@ export class CashboxService {
         $group: {
           _id: null,
           amount: { $sum: '$payments.amount' },
-          change: { $sum: { $ifNull: ['$payments.changeGiven', 0] } },
         },
       },
     ]);
 
     const salesCashAmount = salesAgg[0]?.amount ?? 0;
-    const salesCashChange = salesAgg[0]?.change ?? 0;
 
     // Prepaids en CASH del período
     const prepaidsAgg = await this.prepaidModel.aggregate([
@@ -148,12 +143,10 @@ export class CashboxService {
         $group: {
           _id: null,
           amount: { $sum: '$amount' },
-          change: { $sum: { $ifNull: ['$changeGiven', 0] } },
         },
       },
     ]);
     const prepaidsAmount = prepaidsAgg[0]?.amount ?? 0;
-    const prepaidsChange = prepaidsAgg[0]?.change ?? 0;
 
     // Egresos en CASH del período
     const egressesAgg = await this.egressModel.aggregate([
@@ -170,14 +163,9 @@ export class CashboxService {
     const egressAmount = egressesAgg[0]?.amount ?? 0;
 
     return Number(
-      (
-        openingCash +
-        salesCashAmount +
-        prepaidsAmount -
-        egressAmount -
-        salesCashChange -
-        prepaidsChange
-      ).toFixed(2),
+      (openingCash + salesCashAmount + prepaidsAmount - egressAmount).toFixed(
+        2,
+      ),
     );
   }
 
