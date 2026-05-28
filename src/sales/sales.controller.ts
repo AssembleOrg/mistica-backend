@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { SalesService } from './sales.service';
-import { CreateSaleDto, UpdateSaleDto, SalesPaginatedFilterDto, DailySalesQueryDto } from '../common/dto';
+import { CreateSaleDto, UpdateSaleDto, SalesPaginatedFilterDto, DailySalesQueryDto, AddSalePaymentsDto } from '../common/dto';
 import { Sale, PaginatedResponse, DailySalesResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Auditory } from '../common/decorators';
@@ -123,6 +123,29 @@ export class SalesController {
     return {
       success: true,
       message: 'Venta renombrada exitosamente',
+      data: sale,
+    };
+  }
+
+  @Patch(':id/payments')
+  @Auditory({ entity: 'Sale', action: 'UPDATE' })
+  @ApiOperation({
+    summary:
+      'Agregar pagos a una venta PARCIAL (completar seña). Opcional: markCompleted=true la pasa a COMPLETED.',
+  })
+  @ApiParam({ name: 'id', description: 'ID de la venta' })
+  @ApiResponse({ status: 200, description: 'Pagos agregados' })
+  @ApiResponse({ status: 400, description: 'Venta no PARCIAL o pagos exceden el total' })
+  async addPayments(
+    @Param('id') id: string,
+    @Body() dto: AddSalePaymentsDto,
+  ): Promise<{ success: boolean; message: string; data: Sale }> {
+    const sale = await this.salesService.addPayments(id, dto);
+    return {
+      success: true,
+      message: dto.markCompleted
+        ? 'Venta completada con los pagos agregados'
+        : 'Pagos agregados a la venta parcial',
       data: sale,
     };
   }

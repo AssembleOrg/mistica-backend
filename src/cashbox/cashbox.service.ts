@@ -111,17 +111,24 @@ export class CashboxService {
     from: Date,
     to: Date,
   ): Promise<number> {
-    // Acumular ventas en CASH del período: amount
+    // Acumular ventas en CASH del período. Filtramos por la fecha de CADA
+    // pago, no por sale.createdAt: una venta PARTIAL puede tener pagos en
+    // sesiones distintas (el saldo se completa después), y cada pago debe
+    // contar para la caja del día en que entró.
     const salesAgg = await this.saleModel.aggregate([
       {
         $match: {
-          createdAt: { $gte: from, $lte: to },
           deletedAt: { $exists: false },
           status: { $ne: 'CANCELLED' },
         },
       },
       { $unwind: '$payments' },
-      { $match: { 'payments.method': PaymentMethod.CASH } },
+      {
+        $match: {
+          'payments.method': PaymentMethod.CASH,
+          'payments.createdAt': { $gte: from, $lte: to },
+        },
+      },
       {
         $group: {
           _id: null,
@@ -292,11 +299,14 @@ export class CashboxService {
     const to = session.closedAt ?? new Date();
 
     const [sales, prepaids, egresses] = await Promise.all([
+      // Una venta entra en la sesión si ALGÚN pago suyo cae en la ventana.
+      // (Ventas PARCIALES pueden tener pagos en sesiones distintas; el row
+      // representa el aporte de esa venta a esta sesión.)
       this.saleModel
         .find({
-          createdAt: { $gte: from, $lte: to },
           deletedAt: { $exists: false },
           status: { $ne: 'CANCELLED' },
+          'payments.createdAt': { $gte: from, $lte: to },
         })
         .lean()
         .exec(),
@@ -339,14 +349,40 @@ export class CashboxService {
     }> = [];
 
     for (const s of sales as any[]) {
+      // Para la sesión sólo cuentan los pagos que entraron en la ventana.
+      // En ventas no-PARCIALES, esto coincide con todos los pagos (mismo
+      // instante que sale.createdAt). En PARCIALES queda el subconjunto.
+      const paymentsInWindow = (s.payments || []).filter((p: any) => {
+        const t = p.createdAt ? new Date(p.createdAt).getTime() : new Date(s.createdAt).getTime();
+        return t >= from.getTime() && t <= to.getTime();
+      });
+      if (paymentsInWindow.length === 0) continue;
+      const amountInWindow = paymentsInWindow.reduce(
+        (acc: number, p: any) => acc + (p.amount || 0),
+        0,
+      );
+      // Tomamos la fecha del último pago en ventana para ubicar el row
+      // cronológicamente dentro de la sesión.
+      const lastPayment = paymentsInWindow.reduce((acc: any, p: any) => {
+        const tAcc = acc?.createdAt ? new Date(acc.createdAt).getTime() : 0;
+        const tP = p.createdAt ? new Date(p.createdAt).getTime() : 0;
+        return tP >= tAcc ? p : acc;
+      }, paymentsInWindow[0]);
+      const customerSuffix = s.customerName ? ` · ${s.customerName}` : '';
+      let partialSuffix = '';
+      if (s.status === 'PARTIAL') {
+        partialSuffix = ' · pago parcial';
+      } else if (amountInWindow !== s.total) {
+        partialSuffix = ' · pago de seña';
+      }
       txns.push({
         id: s._id.toString(),
         source: 'sale',
         type: 'ingreso',
-        amount: s.total,
-        description: `Venta ${s.saleNumber}${s.customerName ? ` · ${s.customerName}` : ''}`,
-        paymentMethod: primaryMethod(s.payments),
-        createdAt: s.createdAt,
+        amount: amountInWindow,
+        description: `Venta ${s.saleNumber}${customerSuffix}${partialSuffix}`,
+        paymentMethod: primaryMethod(paymentsInWindow),
+        createdAt: lastPayment.createdAt ?? s.createdAt,
         reference: s.saleNumber,
         afipCae: s.afipCae,
       });

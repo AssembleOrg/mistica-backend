@@ -2,7 +2,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { DateTime } from 'luxon';
-import { CreateSaleDto, UpdateSaleDto, SalesPaginatedFilterDto, DailySalesQueryDto } from '../common/dto';
+import { CreateSaleDto, UpdateSaleDto, SalesPaginatedFilterDto, DailySalesQueryDto, AddSalePaymentsDto } from '../common/dto';
 import { Sale, SaleItem, DailySalesResponse, DailySalesSummary, PaginatedResponse } from '../common/interfaces';
 import {
   VentaNoEncontradaException,
@@ -50,6 +50,7 @@ export class SalesService {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         subtotal: item.subtotal,
+        bonifiedQty: item.bonifiedQty ?? 0,
       })),
       subtotal: saleObj.subtotal,
       tax: saleObj.tax,
@@ -60,8 +61,12 @@ export class SalesService {
       payments: (saleObj.payments || []).map((p) => ({
         method: p.method,
         amount: p.amount,
+        // Pagos viejos (pre-migración) podrían no tener createdAt — fallback a
+        // la fecha de la venta, que era el comportamiento implícito antes.
+        createdAt: p.createdAt ?? saleObj.createdAt,
       })),
       status: saleObj.status,
+      balanceDue: saleObj.balanceDue ?? 0,
       notes: saleObj.notes,
       seller: saleObj.seller,
       afipCae: saleObj.afipCae,
@@ -74,27 +79,32 @@ export class SalesService {
   }
 
   /**
-   * Valida `payments[]` contra `total`:
-   *  - Suma de amounts = total (aceptamos ±0.01 de redondeo).
+   * Normaliza `payments[]`:
    *  - Una sola entrada por método (si pasan dos CASH, error: deben sumar a uno).
-   * Devuelve el array normalizado listo para guardar.
+   *  - Cada pago lleva su propio `createdAt` (default = `now`), así pagos
+   *    agregados después (completando un PARTIAL) cuentan para la caja del día
+   *    en que entraron, no la del día original de la venta.
+   * NO valida `Σ amounts === total`: esa decisión es contextual (venta normal
+   * exige igualdad o aplica auto-descuento; PARTIAL acepta Σ < total) y vive
+   * en quien llama (`create`, `addPayments`).
    */
   private buildSalePayments(
     payments: Array<{
       method: PaymentMethod;
       amount: number;
     }>,
-    total: number,
+    when: Date = new Date(),
   ): Array<{
     method: PaymentMethod;
     amount: number;
+    createdAt: Date;
   }> {
     if (!payments || payments.length === 0) {
       throw new BadRequestException('La venta debe tener al menos un pago');
     }
 
     const seen = new Set<PaymentMethod>();
-    const normalized = payments.map((p) => {
+    return payments.map((p) => {
       if (seen.has(p.method)) {
         throw new BadRequestException(
           `Hay más de un pago con el mismo método (${p.method}). Combinálos en uno solo.`,
@@ -108,17 +118,8 @@ export class SalesService {
         );
       }
 
-      return { method: p.method, amount: p.amount };
+      return { method: p.method, amount: p.amount, createdAt: when };
     });
-
-    const sum = normalized.reduce((acc, p) => acc + p.amount, 0);
-    if (Math.abs(sum - total) > 0.01) {
-      throw new BadRequestException(
-        `La suma de los pagos (${sum.toFixed(2)}) no coincide con el total (${total.toFixed(2)}).`,
-      );
-    }
-
-    return normalized;
   }
 
   private async generateSaleNumber(): Promise<string> {
@@ -165,7 +166,15 @@ export class SalesService {
         throw new StockInsuficienteEnVentaException(product.name, product.stock, item.quantity);
       }
 
-      const itemSubtotal = item.quantity * item.unitPrice;
+      // Cantidad bonificada: sale del depo igual (stock se descuenta por la
+      // qty completa), pero no se cobra. Subtotal = (qty − bonif) × precio.
+      const bonifiedQty = Math.max(0, item.bonifiedQty ?? 0);
+      if (bonifiedQty > item.quantity) {
+        throw new BadRequestException(
+          `La cantidad bonificada (${bonifiedQty}) no puede ser mayor a la cantidad (${item.quantity}) en "${product.name}".`,
+        );
+      }
+      const itemSubtotal = (item.quantity - bonifiedQty) * item.unitPrice;
 
       processedItems.push({
         productId: item.productId,
@@ -173,6 +182,7 @@ export class SalesService {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         subtotal: itemSubtotal,
+        bonifiedQty,
       });
     }
 
@@ -602,19 +612,43 @@ export class SalesService {
       // Calcular totales finales
       const totals = this.calculateTotal(subtotal, taxPercent, discountFlat, prepaidUsed);
 
-      // Si la suma de pagos es menor al total, registramos la diferencia como
-      // descuento automático (pedido del negocio: poder cobrar menos sin
-      // bloquear la venta). Si excede, sí bloqueamos.
       const paymentsSum = (createSaleDto.payments || []).reduce(
         (acc, p) => acc + (p.amount || 0),
         0,
       );
       let finalDiscount = discountFlat;
       let finalTotal = totals.total;
+      const isPartial = createSaleDto.isPartial === true;
+      let saleStatus: SaleStatus = SaleStatus.PENDING;
+      let balanceDue = 0;
 
-      if (processedItems.length === 0) {
-        // Venta sin productos: el total ES el "monto a cobrar". Se exige
-        // que el cajero haya ingresado al menos un pago > 0.
+      if (isPartial) {
+        // PAGO PARCIAL: no se aplica auto-descuento. Hay dos casos:
+        //  a) Con productos: total = totals.total (calculado a partir del
+        //     subtotal de items + tax − discount). balanceDue = total − pagos.
+        //  b) Sin productos: el cajero ingresa explícitamente `partialTotal`
+        //     (lo que se debe en total) y los pagos parciales.
+        if (processedItems.length === 0) {
+          if (createSaleDto.partialTotal == null || createSaleDto.partialTotal <= 0) {
+            throw new BadRequestException(
+              'Una venta PARCIAL sin productos requiere `partialTotal` > 0.',
+            );
+          }
+          subtotal = createSaleDto.partialTotal;
+          finalTotal = createSaleDto.partialTotal;
+        }
+        if (paymentsSum <= 0) {
+          throw new BadRequestException('Una venta PARCIAL requiere al menos un pago > 0.');
+        }
+        if (paymentsSum > finalTotal + 0.01) {
+          throw new BadRequestException(
+            `Los pagos parciales (${paymentsSum.toFixed(2)}) no pueden exceder el total (${finalTotal.toFixed(2)}).`,
+          );
+        }
+        balanceDue = Number((finalTotal - paymentsSum).toFixed(2));
+        saleStatus = balanceDue > 0.01 ? SaleStatus.PARTIAL : SaleStatus.PENDING;
+      } else if (processedItems.length === 0) {
+        // Venta sin productos (no PARTIAL): el total ES el monto pagado.
         if (paymentsSum <= 0) {
           throw new BadRequestException(
             'Una venta sin productos requiere un monto a cobrar mayor a 0.',
@@ -627,15 +661,20 @@ export class SalesService {
           `La suma de los pagos (${paymentsSum.toFixed(2)}) excede el total a cobrar (${finalTotal.toFixed(2)}).`,
         );
       }
-      const autoDiscount = Number((finalTotal - paymentsSum).toFixed(2));
-      if (autoDiscount > 0.01) {
-        finalDiscount = Number((finalDiscount + autoDiscount).toFixed(2));
-        finalTotal = Number(paymentsSum.toFixed(2));
+
+      // Auto-descuento (sólo ventas NO PARCIALES): si el cajero cobró menos
+      // que el total, la diferencia se registra como descuento. En PARTIAL la
+      // diferencia es saldo pendiente, no descuento.
+      if (!isPartial) {
+        const autoDiscount = Number((finalTotal - paymentsSum).toFixed(2));
+        if (autoDiscount > 0.01) {
+          finalDiscount = Number((finalDiscount + autoDiscount).toFixed(2));
+          finalTotal = Number(paymentsSum.toFixed(2));
+        }
       }
 
-      // Validar payments contra el total ajustado (1 entrada por método;
-      // suma === total; vuelto sólo en CASH).
-      const payments = this.buildSalePayments(createSaleDto.payments, finalTotal);
+      // Normalizar pagos: 1 entrada por método, amount > 0, createdAt = now.
+      const payments = this.buildSalePayments(createSaleDto.payments);
 
       // Crear la venta
       const sale = await this.saleModel.create({
@@ -653,7 +692,8 @@ export class SalesService {
         prepaidId: prepaidId,
         total: finalTotal,
         payments,
-        status: SaleStatus.PENDING,
+        status: saleStatus,
+        balanceDue,
         notes: createSaleDto.notes,
         seller: createSaleDto.seller,
       });
@@ -804,6 +844,74 @@ export class SalesService {
     return this.mapToSaleResponse(sale);
   }
 
+  /**
+   * Agrega pagos a una venta PARTIAL (completar saldo de una seña). Cada nuevo
+   * pago se stampa con `createdAt = now`, así suma a la caja del día en que
+   * se ingresa (no la del día original de la venta).
+   *
+   * Si `markCompleted` es true (equivale a destildar "Pago parcial"), la venta
+   * pasa a COMPLETED y `balanceDue = 0`. Si los pagos acumulados no llegan al
+   * total, la diferencia se registra como descuento auto (acorde al flujo
+   * normal de venta).
+   *
+   * Si `markCompleted` es false (default), la venta sigue PARTIAL con
+   * `balanceDue = total − Σ pagos`. Si los pagos exceden el total, error.
+   */
+  async addPayments(id: string, dto: AddSalePaymentsDto): Promise<Sale> {
+    const sale = await this.saleModel.findById(id).exec();
+    if (!sale || sale.deletedAt) {
+      throw new VentaNoEncontradaException(id);
+    }
+    if (sale.status === SaleStatus.CANCELLED) {
+      throw new VentaCanceladaException(sale.saleNumber);
+    }
+    if (sale.status !== SaleStatus.PARTIAL) {
+      throw new BadRequestException(
+        `Sólo se pueden agregar pagos a una venta PARCIAL. Estado actual: ${sale.status}.`,
+      );
+    }
+
+    const newLines = this.buildSalePayments(dto.payments);
+    // Combinar pagos por método: si la venta ya tiene CASH y el nuevo pago
+    // también es CASH, sumamos los amounts y dejamos createdAt = now en el
+    // pago combinado para que cuente para la caja actual.
+    // Decisión: en lugar de combinar, los dejamos como entradas separadas para
+    // preservar la fecha individual de cada pago (clave para el arqueo por día).
+    const allPayments = [...sale.payments, ...newLines];
+
+    const newSum = allPayments.reduce((acc, p) => acc + (p.amount || 0), 0);
+    const total = sale.total;
+    const overpaysBy = newSum - total;
+
+    if (overpaysBy > 0.01) {
+      throw new BadRequestException(
+        `Los pagos acumulados (${newSum.toFixed(2)}) superan el total de la venta (${total.toFixed(2)}).`,
+      );
+    }
+
+    sale.payments = allPayments as any;
+
+    if (dto.markCompleted) {
+      // Destildar "Pago parcial" → COMPLETED. Si pagaron menos que el total,
+      // la diferencia queda como descuento (autoDiscount), reduciendo el total
+      // a lo efectivamente cobrado. Así la reportería queda coherente.
+      if (newSum < total - 0.01) {
+        const autoDiscount = Number((total - newSum).toFixed(2));
+        sale.discount = Number(((sale.discount || 0) + autoDiscount).toFixed(2));
+        sale.total = Number(newSum.toFixed(2));
+      }
+      sale.balanceDue = 0;
+      sale.status = SaleStatus.COMPLETED;
+    } else {
+      sale.balanceDue = Number((total - newSum).toFixed(2));
+      // Mantener PARTIAL aunque balanceDue llegue a 0: el toggle se cierra
+      // explícitamente con markCompleted=true.
+    }
+
+    await sale.save();
+    return this.mapToSaleResponse(sale);
+  }
+
   async update(id: string, updateSaleDto: UpdateSaleDto): Promise<Sale> {
     try {
       const existingSale = await this.findOne(id);
@@ -943,9 +1051,16 @@ export class SalesService {
       }
 
       // Si se envían payments (sea por re-cálculo o explícito), validamos.
+      // En update() exigimos que Σ pagos === total (no auto-descontamos acá).
       if (updateSaleDto.payments) {
         const totalForPayments = updateData.total ?? existingSale.total;
-        updateData.payments = this.buildSalePayments(updateSaleDto.payments, totalForPayments);
+        const sum = updateSaleDto.payments.reduce((acc, p) => acc + (p.amount || 0), 0);
+        if (Math.abs(sum - totalForPayments) > 0.01) {
+          throw new BadRequestException(
+            `La suma de los pagos (${sum.toFixed(2)}) no coincide con el total (${totalForPayments.toFixed(2)}).`,
+          );
+        }
+        updateData.payments = this.buildSalePayments(updateSaleDto.payments);
       }
 
       // Normalizar email si se proporciona
@@ -1077,6 +1192,7 @@ export class SalesService {
           [SaleStatus.PENDING]: 0,
           [SaleStatus.COMPLETED]: 0,
           [SaleStatus.CANCELLED]: 0,
+          [SaleStatus.PARTIAL]: 0,
         },
       };
 
@@ -1099,6 +1215,7 @@ export class SalesService {
           payments: (sale.payments || []).map((p) => ({
             method: p.method,
             amount: p.amount,
+            createdAt: p.createdAt ?? sale.createdAt,
           })),
           status: sale.status,
           createdAt: sale.createdAt,

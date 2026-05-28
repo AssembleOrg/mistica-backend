@@ -6,12 +6,20 @@ export interface SaleItem {
   quantity: number;
   unitPrice: number;
   subtotal: number;
+  /** Cantidad bonificada dentro de `quantity`. Subtotal = (quantity − bonifiedQty) × unitPrice. */
+  bonifiedQty?: number;
 }
 
 export interface SalePayment {
   method: PaymentMethod;
   /** Monto imputado a este método (lo que cuenta para la reportería). */
   amount: number;
+  /**
+   * Fecha en que se ingresó este pago. Para pagos iniciales coincide con
+   * `sale.createdAt`; para pagos agregados después (completando un PARTIAL)
+   * es la fecha real en que entraron a caja.
+   */
+  createdAt: Date;
 }
 
 export interface Sale {
@@ -32,6 +40,8 @@ export interface Sale {
   total: number;
   payments: SalePayment[];
   status: SaleStatus;
+  /** Saldo pendiente. Sólo > 0 cuando status === PARTIAL. */
+  balanceDue: number;
   notes?: string;
   seller?: string;
   afipCae?: string; // Código de Autorización Electrónico

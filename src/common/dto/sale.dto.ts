@@ -33,6 +33,17 @@ export class CreateSaleItemDto {
   @IsNumber({}, { message: 'El precio unitario debe ser un número' })
   @Min(0, { message: 'El precio unitario debe ser mayor o igual a 0' })
   unitPrice: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Cantidad bonificada (regalada) dentro de `quantity`. Subtotal del renglón = (quantity − bonifiedQty) × unitPrice. Debe ser ≤ quantity.',
+    minimum: 0,
+    default: 0,
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'La cantidad bonificada debe ser un número' })
+  @Min(0, { message: 'La cantidad bonificada debe ser ≥ 0' })
+  bonifiedQty?: number;
 }
 
 /**
@@ -110,6 +121,25 @@ export class CreateSaleDto {
   @IsString({ message: 'El nombre de la venta debe ser una cadena de texto' })
   @MaxLength(100, { message: 'El nombre de la venta no puede exceder 100 caracteres' })
   name?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Marca la venta como PAGO PARCIAL (seña). El total NO se ajusta al monto pagado: la diferencia queda como saldo pendiente (balanceDue). El cierre de caja automático no la confirma; sólo se completa cuando se destilde el flag.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean({ message: 'isPartial debe ser un booleano' })
+  isPartial?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Sólo aplica cuando `isPartial=true` y la venta NO tiene productos. Es el total real a cobrar por la venta (la diferencia con la suma de pagos queda como saldo).',
+    minimum: 0,
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'partialTotal debe ser un número' })
+  @Min(0, { message: 'partialTotal debe ser ≥ 0' })
+  partialTotal?: number;
 
   @ApiPropertyOptional({ description: 'Notas adicionales' })
   @IsOptional()
@@ -335,6 +365,38 @@ export class UpdateSaleDto {
   @IsString()
   @MaxLength(300)
   invoiceFiscalAddress?: string;
+}
+
+/**
+ * Body para agregar pagos a una venta PARTIAL (completar saldo).
+ * Cada pago llega con method+amount; el backend stampa `createdAt = now`,
+ * así el monto cuenta para la caja del día en que se ingresa (no la del
+ * día original de la venta).
+ *
+ * Si `markCompleted` es true, además se pasa la venta a COMPLETED y se setea
+ * `balanceDue = 0` (corresponde a destildar el toggle "Pago parcial"). En ese
+ * caso la suma acumulada de pagos no puede superar el `total`.
+ */
+export class AddSalePaymentsDto {
+  @ApiProperty({
+    description: 'Pagos a sumar a la venta',
+    type: [CreateSalePaymentDto],
+    minItems: 1,
+  })
+  @IsArray({ message: 'Los pagos deben ser un array' })
+  @ArrayMinSize(1, { message: 'Debe ingresar al menos un pago' })
+  @ValidateNested({ each: true })
+  @Type(() => CreateSalePaymentDto)
+  payments: CreateSalePaymentDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Si true, la venta pasa a COMPLETED (equivale a destildar "Pago parcial"). La suma de todos los pagos no puede superar el total.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean({ message: 'markCompleted debe ser un booleano' })
+  markCompleted?: boolean;
 }
 
 export class DailySalesQueryDto {

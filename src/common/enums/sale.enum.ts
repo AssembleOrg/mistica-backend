@@ -16,6 +16,11 @@ export enum SaleStatus {
   PENDING = 'PENDING',
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
+  // Pago parcial (seña sobre la venta). El total queda en `total`, lo ya
+  // cobrado en la suma de `payments[].amount`, y la diferencia en `balanceDue`.
+  // Las ventas PARTIAL NO se confirman automáticamente al cierre de caja:
+  // se quedan así hasta que un usuario destilde el toggle (→ COMPLETED).
+  PARTIAL = 'PARTIAL',
 }
 
 // Tipo de factura AFIP. El código numérico se mapea a `tipoComprobante`:

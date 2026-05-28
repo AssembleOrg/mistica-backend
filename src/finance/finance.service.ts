@@ -147,11 +147,6 @@ export class FinanceService {
       byStatus[sale.status as keyof FinanceSummary['byStatus']] =
         (byStatus[sale.status as keyof FinanceSummary['byStatus']] ?? 0) + 1;
 
-      for (const p of sale.payments || []) {
-        byPaymentMethod[p.method as keyof typeof byPaymentMethod] =
-          (byPaymentMethod[p.method as keyof typeof byPaymentMethod] ?? 0) + p.amount;
-      }
-
       if (sale.clientId) {
         byClient.named.count++;
         byClient.named.total += sale.total || 0;
@@ -177,6 +172,22 @@ export class FinanceService {
       .map(([productId, v]) => ({ productId, ...v }))
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10);
+
+    // byPaymentMethod cuenta pagos EFECTIVAMENTE INGRESADOS en la ventana
+    // (filtra por payments.createdAt, no por sale.createdAt). Esto importa
+    // para ventas PARCIALES: el pago hecho días después de la venta cuenta
+    // para el día en que entró, no el de la venta original.
+    const paymentAgg = await this.saleModel.aggregate([
+      { $match: { deletedAt: { $exists: false }, status: { $ne: 'CANCELLED' } } },
+      { $unwind: '$payments' },
+      { $match: { 'payments.createdAt': { $gte: from, $lte: to } } },
+      { $group: { _id: '$payments.method', amount: { $sum: '$payments.amount' } } },
+    ]);
+    for (const row of paymentAgg) {
+      if (row._id in byPaymentMethod) {
+        byPaymentMethod[row._id as keyof typeof byPaymentMethod] = row.amount;
+      }
+    }
 
     // === Egresos en el rango ===
     const egressMatch: Record<string, unknown> = {

@@ -41,7 +41,11 @@ export class Sale {
       productName: { type: String, required: true, trim: true },
       quantity: { type: Number, required: true, min: 1 },
       unitPrice: { type: Number, required: true, min: 0 },
-      subtotal: { type: Number, required: true, min: 0 }
+      subtotal: { type: Number, required: true, min: 0 },
+      // Cantidad bonificada (regalada) dentro de `quantity`. El subtotal del
+      // renglón = (quantity − bonifiedQty) × unitPrice. El stock se descuenta
+      // por la cantidad completa (la mercadería sale igual). Default 0.
+      bonifiedQty: { type: Number, default: 0, min: 0 },
     }],
     default: [],
   })
@@ -51,6 +55,7 @@ export class Sale {
     quantity: number;
     unitPrice: number;
     subtotal: number;
+    bonifiedQty?: number;
   }>;
 
   @Prop({ required: true, min: 0 })
@@ -76,12 +81,17 @@ export class Sale {
   @Prop({ required: true, min: 0 })
   total: number;
 
-  // Multi-payment: la suma de `payments[].amount` debe igualar `total`.
+  // Multi-payment: para ventas no-PARTIAL la suma de `payments[].amount` debe
+  // igualar `total`. Para PARTIAL puede ser menor (la diferencia queda en
+  // `balanceDue`). Cada pago lleva su `createdAt` propio: pagos agregados
+  // después (completando una seña) cuentan para la caja del día en que se
+  // ingresan, no la del día original de la venta.
   @Prop({
     type: [
       {
         method: { type: String, enum: Object.values(PaymentMethod), required: true },
         amount: { type: Number, required: true, min: 0 },
+        createdAt: { type: Date, required: true, default: Date.now },
       },
     ],
     required: true,
@@ -95,10 +105,16 @@ export class Sale {
   payments: Array<{
     method: PaymentMethod;
     amount: number;
+    createdAt: Date;
   }>;
 
   @Prop({ required: true, enum: SaleStatus, default: SaleStatus.PENDING })
   status: SaleStatus;
+
+  // Saldo pendiente. Sólo > 0 cuando status === PARTIAL.
+  // balanceDue = total − Σ payments[].amount (ventas PARTIAL).
+  @Prop({ min: 0, default: 0 })
+  balanceDue: number;
 
   @Prop({ trim: true })
   notes?: string; 
