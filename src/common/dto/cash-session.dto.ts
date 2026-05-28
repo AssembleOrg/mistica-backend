@@ -1,6 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  ArrayMinSize,
   IsArray,
   IsEnum,
   IsNumber,
@@ -55,18 +54,53 @@ export class RetroactiveEgressDto {
   notes?: string;
 }
 
-export class EditCashSessionDto {
+export class RetroactiveIncomeDto {
   @ApiProperty({
+    description:
+      'Concepto del ingreso (ej. "corrección de saldo", "devolución recibida", etc.)',
+  })
+  @IsString({ message: 'El concepto debe ser una cadena de texto' })
+  @MaxLength(200, { message: 'El concepto no puede exceder 200 caracteres' })
+  concept: string;
+
+  @ApiProperty({ description: 'Monto del ingreso', minimum: 0 })
+  @IsNumber({}, { message: 'El monto debe ser un número' })
+  @Min(0, { message: 'El monto debe ser mayor o igual a 0' })
+  amount: number;
+
+  @ApiProperty({ description: 'Método de pago', enum: PaymentMethod })
+  @IsEnum(PaymentMethod, { message: 'El método de pago debe ser válido' })
+  paymentMethod: PaymentMethod;
+
+  @ApiPropertyOptional({ description: 'Notas adicionales del ingreso' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}
+
+export class EditCashSessionDto {
+  @ApiPropertyOptional({
     description:
       'Egresos retroactivos a cargar en la sesión. Cada uno se crea con createdAt dentro de la ventana de la sesión y el arqueo se recalcula.',
     type: [RetroactiveEgressDto],
-    minItems: 1,
   })
+  @IsOptional()
   @IsArray({ message: 'addEgresses debe ser un array' })
-  @ArrayMinSize(1, { message: 'Debe agregar al menos un egreso' })
   @ValidateNested({ each: true })
   @Type(() => RetroactiveEgressDto)
-  addEgresses: RetroactiveEgressDto[];
+  addEgresses?: RetroactiveEgressDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Ingresos retroactivos (correcciones de saldo, miscelánea) a cargar en la sesión.',
+    type: [RetroactiveIncomeDto],
+  })
+  @IsOptional()
+  @IsArray({ message: 'addIncomes debe ser un array' })
+  @ValidateNested({ each: true })
+  @Type(() => RetroactiveIncomeDto)
+  addIncomes?: RetroactiveIncomeDto[];
 }
 
 export class UpdateCashSessionLabelDto {

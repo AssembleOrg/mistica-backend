@@ -98,6 +98,15 @@ export class CashSession {
             paymentMethod: { type: String },
           },
         ],
+        addedIncomes: [
+          {
+            incomeId: { type: SchemaTypes.ObjectId, ref: 'CashIncome' },
+            incomeNumber: { type: String },
+            concept: { type: String },
+            amount: { type: Number },
+            paymentMethod: { type: String },
+          },
+        ],
       },
     ],
     default: [],
@@ -108,6 +117,13 @@ export class CashSession {
     addedEgresses: Array<{
       egressId: Types.ObjectId;
       egressNumber: string;
+      concept: string;
+      amount: number;
+      paymentMethod: string;
+    }>;
+    addedIncomes: Array<{
+      incomeId: Types.ObjectId;
+      incomeNumber: string;
       concept: string;
       amount: number;
       paymentMethod: string;

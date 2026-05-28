@@ -7,6 +7,7 @@ import {
   SaleDocument,
   PrepaidDocument,
   EgressDocument,
+  CashIncomeDocument,
 } from '../common/schemas';
 import {
   CloseCashSessionDto,
@@ -29,6 +30,13 @@ export interface CashSessionEditEntry {
   addedEgresses: Array<{
     egressId: string;
     egressNumber: string;
+    concept: string;
+    amount: number;
+    paymentMethod: string;
+  }>;
+  addedIncomes: Array<{
+    incomeId: string;
+    incomeNumber: string;
     concept: string;
     amount: number;
     paymentMethod: string;
@@ -60,6 +68,7 @@ export class CashboxService {
     @InjectModel('Sale') private readonly saleModel: Model<SaleDocument>,
     @InjectModel('Prepaid') private readonly prepaidModel: Model<PrepaidDocument>,
     @InjectModel('Egress') private readonly egressModel: Model<EgressDocument>,
+    @InjectModel('CashIncome') private readonly cashIncomeModel: Model<CashIncomeDocument>,
   ) { }
 
   private mapToResponse(s: CashSessionDocument): CashSessionResponse {
@@ -84,6 +93,13 @@ export class CashboxService {
         addedEgresses: (e.addedEgresses ?? []).map((a: any) => ({
           egressId: a.egressId?.toString(),
           egressNumber: a.egressNumber,
+          concept: a.concept,
+          amount: a.amount,
+          paymentMethod: a.paymentMethod,
+        })),
+        addedIncomes: (e.addedIncomes ?? []).map((a: any) => ({
+          incomeId: a.incomeId?.toString(),
+          incomeNumber: a.incomeNumber,
           concept: a.concept,
           amount: a.amount,
           paymentMethod: a.paymentMethod,
@@ -228,10 +244,28 @@ export class CashboxService {
     ]);
     const egressAmount = egressesAgg[0]?.amount ?? 0;
 
+    // Ingresos puntuales (correcciones de saldo, etc.) en CASH del período.
+    // Suman al esperado (entran a la caja).
+    const incomesAgg = await this.cashIncomeModel.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: from, $lte: to },
+          deletedAt: { $exists: false },
+          paymentMethod: PaymentMethod.CASH,
+        },
+      },
+      { $group: { _id: null, amount: { $sum: '$amount' } } },
+    ]);
+    const incomesAmount = incomesAgg[0]?.amount ?? 0;
+
     return Number(
-      (openingCash + salesCashAmount + prepaidsAmount - egressAmount).toFixed(
-        2,
-      ),
+      (
+        openingCash +
+        salesCashAmount +
+        prepaidsAmount +
+        incomesAmount -
+        egressAmount
+      ).toFixed(2),
     );
   }
 
@@ -333,6 +367,18 @@ export class CashboxService {
     return `${prefix}-${String(seq).padStart(3, '0')}`;
   }
 
+  private async generateIncomeNumberForDate(when: Date): Promise<string> {
+    const dateStr = DateTime.fromJSDate(when).toFormat('yyyyMMdd');
+    const prefix = `INC-${dateStr}`;
+    const latest = await this.cashIncomeModel
+      .findOne({ incomeNumber: { $regex: `^${prefix}` }, deletedAt: null })
+      .sort({ incomeNumber: -1 })
+      .lean();
+    if (!latest) return `${prefix}-001`;
+    const seq = parseInt(latest.incomeNumber.split('-')[2], 10) + 1;
+    return `${prefix}-${String(seq).padStart(3, '0')}`;
+  }
+
   /**
    * Edita una sesión cerrada agregando egresos retroactivos. Reglas:
    *  - Sólo se permite si la sesión está CLOSED.
@@ -366,16 +412,31 @@ export class CashboxService {
       );
     }
 
+    const egressesIn = dto.addEgresses ?? [];
+    const incomesIn = dto.addIncomes ?? [];
+    if (egressesIn.length === 0 && incomesIn.length === 0) {
+      throw new BadRequestException(
+        'Debe agregar al menos un egreso o un ingreso para editar la sesión.',
+      );
+    }
+
     const occurredAt = session.closedAt;
-    const created: Array<{
+    const createdEgresses: Array<{
       egressId: any;
       egressNumber: string;
       concept: string;
       amount: number;
       paymentMethod: string;
     }> = [];
+    const createdIncomes: Array<{
+      incomeId: any;
+      incomeNumber: string;
+      concept: string;
+      amount: number;
+      paymentMethod: string;
+    }> = [];
 
-    for (const e of dto.addEgresses) {
+    for (const e of egressesIn) {
       const egressNumber = await this.generateEgressNumberForDate(occurredAt);
       const doc = await this.egressModel.create({
         egressNumber,
@@ -390,7 +451,7 @@ export class CashboxService {
         createdAt: occurredAt,
         updatedAt: occurredAt,
       });
-      created.push({
+      createdEgresses.push({
         egressId: doc._id,
         egressNumber: doc.egressNumber,
         concept: doc.concept,
@@ -399,7 +460,30 @@ export class CashboxService {
       });
     }
 
-    // Recalcular esperado y discrepancia con el nuevo set de egresos en ventana.
+    for (const i of incomesIn) {
+      const incomeNumber = await this.generateIncomeNumberForDate(occurredAt);
+      const doc = await this.cashIncomeModel.create({
+        incomeNumber,
+        concept: i.concept,
+        amount: i.amount,
+        paymentMethod: i.paymentMethod,
+        notes: i.notes,
+        userId: userId ? (userId as any) : undefined,
+        createdAt: occurredAt,
+        updatedAt: occurredAt,
+      });
+      createdIncomes.push({
+        incomeId: doc._id,
+        incomeNumber: doc.incomeNumber,
+        concept: doc.concept,
+        amount: doc.amount,
+        paymentMethod: doc.paymentMethod,
+      });
+    }
+
+    // Recalcular esperado y discrepancia con el nuevo set de movimientos en
+    // ventana. computeExpectedClosingCash ya incluye ingresos CASH (+) y
+    // egresos CASH (−) del período.
     const newExpected = await this.computeExpectedClosingCash(
       session.openingCash,
       session.openedAt,
@@ -413,7 +497,8 @@ export class CashboxService {
     session.editHistory.push({
       editedAt: new Date(),
       editedByUserId: userId ? (userId as any) : undefined,
-      addedEgresses: created,
+      addedEgresses: createdEgresses,
+      addedIncomes: createdIncomes,
     });
     await session.save();
     return this.mapToResponse(session);
@@ -442,7 +527,7 @@ export class CashboxService {
     sessionId: string;
     transactions: Array<{
       id: string;
-      source: 'sale' | 'prepaid' | 'egress';
+      source: 'sale' | 'prepaid' | 'egress' | 'income';
       type: 'ingreso' | 'egreso';
       amount: number;
       description: string;
@@ -458,7 +543,7 @@ export class CashboxService {
     const from = session.openedAt;
     const to = session.closedAt ?? new Date();
 
-    const [sales, prepaids, egresses] = await Promise.all([
+    const [sales, prepaids, egresses, incomes] = await Promise.all([
       // Una venta entra en la sesión si ALGÚN pago suyo cae en la ventana.
       // (Ventas PARCIALES pueden tener pagos en sesiones distintas; el row
       // representa el aporte de esa venta a esta sesión.)
@@ -485,6 +570,13 @@ export class CashboxService {
         })
         .lean()
         .exec(),
+      this.cashIncomeModel
+        .find({
+          createdAt: { $gte: from, $lte: to },
+          deletedAt: { $exists: false },
+        })
+        .lean()
+        .exec(),
     ]);
 
     const primaryMethod = (payments: any[] | undefined): string => {
@@ -498,7 +590,7 @@ export class CashboxService {
 
     const txns: Array<{
       id: string;
-      source: 'sale' | 'prepaid' | 'egress';
+      source: 'sale' | 'prepaid' | 'egress' | 'income';
       type: 'ingreso' | 'egreso';
       amount: number;
       description: string;
@@ -571,6 +663,19 @@ export class CashboxService {
         paymentMethod: e.paymentMethod,
         createdAt: e.createdAt,
         reference: e.egressNumber,
+      });
+    }
+
+    for (const i of incomes as any[]) {
+      txns.push({
+        id: i._id.toString(),
+        source: 'income',
+        type: 'ingreso',
+        amount: i.amount,
+        description: `${i.incomeNumber} · ${i.concept}`,
+        paymentMethod: i.paymentMethod,
+        createdAt: i.createdAt,
+        reference: i.incomeNumber,
       });
     }
 

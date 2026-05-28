@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
+  CashIncomeDocument,
   CashSessionDocument,
   EgressDocument,
   PrepaidDocument,
@@ -53,6 +54,15 @@ export interface FinanceSummary {
     byPaymentMethod: { CASH: number; CARD: number; TRANSFER: number };
   };
 
+  // Ingresos puntuales / correcciones de saldo (no son ventas) en el rango.
+  // Hoy se cargan desde la edición de una sesión cerrada (egresos/ingresos
+  // retroactivos).
+  incomes: {
+    count: number;
+    total: number;
+    byPaymentMethod: { CASH: number; CARD: number; TRANSFER: number };
+  };
+
   // Prepaids (señas) en el rango
   prepaids: {
     count: number;
@@ -60,7 +70,7 @@ export interface FinanceSummary {
     byPaymentMethod: { CASH: number; CARD: number; TRANSFER: number };
   };
 
-  // Saldo neto del rango (revenue + prepaids − egresos)
+  // Saldo neto del rango (revenue + prepaids + ingresos − egresos)
   netBalance: number;
 
   // Cajas: aperturas/cierres con discrepancias
@@ -88,6 +98,8 @@ export class FinanceService {
     @InjectModel('Sale') private readonly saleModel: Model<SaleDocument>,
     @InjectModel('Prepaid') private readonly prepaidModel: Model<PrepaidDocument>,
     @InjectModel('Egress') private readonly egressModel: Model<EgressDocument>,
+    @InjectModel('CashIncome')
+    private readonly cashIncomeModel: Model<CashIncomeDocument>,
     @InjectModel('CashSession')
     private readonly cashSessionModel: Model<CashSessionDocument>,
   ) {}
@@ -206,6 +218,22 @@ export class FinanceService {
       }
     }
 
+    // === Ingresos puntuales (correcciones de saldo) en el rango ===
+    const incomeMatch: Record<string, unknown> = {
+      createdAt: { $gte: from, $lte: to },
+      deletedAt: { $exists: false },
+    };
+    if (query.paymentMethod) incomeMatch.paymentMethod = query.paymentMethod;
+    const incomes = await this.cashIncomeModel.find(incomeMatch).lean().exec();
+    const incomesByPm = { CASH: 0, CARD: 0, TRANSFER: 0 };
+    let incomesTotal = 0;
+    for (const i of incomes) {
+      incomesTotal += i.amount || 0;
+      if (incomesByPm[i.paymentMethod as keyof typeof incomesByPm] !== undefined) {
+        incomesByPm[i.paymentMethod as keyof typeof incomesByPm] += i.amount || 0;
+      }
+    }
+
     // === Prepaids en el rango ===
     const prepaidMatch: Record<string, unknown> = {
       createdAt: { $gte: from, $lte: to },
@@ -235,7 +263,8 @@ export class FinanceService {
       0,
     );
 
-    const netBalance = totalRevenue + prepaidsTotal - expensesTotal;
+    const netBalance =
+      totalRevenue + prepaidsTotal + incomesTotal - expensesTotal;
 
     return {
       range: {
@@ -259,6 +288,11 @@ export class FinanceService {
         count: egresses.length,
         total: expensesTotal,
         byPaymentMethod: expensesByPm,
+      },
+      incomes: {
+        count: incomes.length,
+        total: incomesTotal,
+        byPaymentMethod: incomesByPm,
       },
       prepaids: {
         count: prepaids.length,

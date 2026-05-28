@@ -11,6 +11,8 @@ import {
   PrepaidSchema,
   Egress,
   EgressSchema,
+  CashIncome,
+  CashIncomeSchema,
 } from '../common/schemas';
 import { CashboxCronService } from './cashbox.cron';
 
@@ -21,6 +23,7 @@ import { CashboxCronService } from './cashbox.cron';
       { name: Sale.name, schema: SaleSchema },
       { name: Prepaid.name, schema: PrepaidSchema },
       { name: Egress.name, schema: EgressSchema },
+      { name: CashIncome.name, schema: CashIncomeSchema },
     ]),
   ],
   controllers: [CashboxController],
