@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
@@ -10,6 +10,7 @@ import {
 } from '../common/schemas';
 import {
   CloseCashSessionDto,
+  EditCashSessionDto,
   OpenCashSessionDto,
   PaginationDto,
 } from '../common/dto';
@@ -18,9 +19,21 @@ import {
   CajaYaAbiertaException,
   SesionDeCajaNoEncontradaException,
 } from '../common/exceptions';
-import { PaymentMethod, SaleStatus } from '../common/enums';
+import { Currency, EgressStatus, PaymentMethod, SaleStatus } from '../common/enums';
 import { PaginatedResponse } from '../common/interfaces';
-import { BadRequestException } from '@nestjs/common';
+import { DateTime } from 'luxon';
+
+export interface CashSessionEditEntry {
+  editedAt: Date;
+  editedByUserId?: string;
+  addedEgresses: Array<{
+    egressId: string;
+    egressNumber: string;
+    concept: string;
+    amount: number;
+    paymentMethod: string;
+  }>;
+}
 
 export interface CashSessionResponse {
   id: string;
@@ -36,6 +49,7 @@ export interface CashSessionResponse {
   closingNotes?: string;
   openedByUserId?: string;
   closedByUserId?: string;
+  editHistory: CashSessionEditEntry[];
 }
 
 @Injectable()
@@ -64,6 +78,17 @@ export class CashboxService {
       closingNotes: obj.closingNotes,
       openedByUserId: obj.openedByUserId?.toString(),
       closedByUserId: obj.closedByUserId?.toString(),
+      editHistory: (obj.editHistory ?? []).map((e: any) => ({
+        editedAt: e.editedAt,
+        editedByUserId: e.editedByUserId?.toString(),
+        addedEgresses: (e.addedEgresses ?? []).map((a: any) => ({
+          egressId: a.egressId?.toString(),
+          egressNumber: a.egressNumber,
+          concept: a.concept,
+          amount: a.amount,
+          paymentMethod: a.paymentMethod,
+        })),
+      })),
     };
   }
 
@@ -289,6 +314,109 @@ export class CashboxService {
     const s = await this.cashSessionModel.findById(id).exec();
     if (!s) throw new SesionDeCajaNoEncontradaException(id);
     return this.mapToResponse(s);
+  }
+
+  /**
+   * Genera un número de egreso usando como prefijo la fecha pasada (no `now`).
+   * Para egresos retroactivos, así el EGR-yyyymmdd refleja la fecha real del
+   * gasto (la de la sesión a la que se cargó).
+   */
+  private async generateEgressNumberForDate(when: Date): Promise<string> {
+    const dateStr = DateTime.fromJSDate(when).toFormat('yyyyMMdd');
+    const prefix = `EGR-${dateStr}`;
+    const latest = await this.egressModel
+      .findOne({ egressNumber: { $regex: `^${prefix}` }, deletedAt: null })
+      .sort({ egressNumber: -1 })
+      .lean();
+    if (!latest) return `${prefix}-001`;
+    const seq = parseInt(latest.egressNumber.split('-')[2], 10) + 1;
+    return `${prefix}-${String(seq).padStart(3, '0')}`;
+  }
+
+  /**
+   * Edita una sesión cerrada agregando egresos retroactivos. Reglas:
+   *  - Sólo se permite si la sesión está CLOSED.
+   *  - `closedAt` debe haber sido hace menos de 72 hs.
+   *  - Cada egreso se crea con `createdAt = session.closedAt`, así pertenece
+   *    a la ventana de esa sesión y el arqueo lo cuenta correctamente.
+   *  - Después de crear los egresos se recalculan `expectedClosingCash` y
+   *    `discrepancy` y se persisten.
+   *  - Se agrega una entrada a `editHistory` con snapshot de lo cargado
+   *    (útil para auditoría incluso si el egreso se borra después).
+   */
+  async editSession(
+    id: string,
+    dto: EditCashSessionDto,
+    userId?: string,
+  ): Promise<CashSessionResponse> {
+    const session = await this.cashSessionModel.findById(id).exec();
+    if (!session) throw new SesionDeCajaNoEncontradaException(id);
+
+    if (session.status !== 'CLOSED' || !session.closedAt) {
+      throw new BadRequestException(
+        'Sólo se pueden editar sesiones de caja cerradas.',
+      );
+    }
+
+    const hoursSinceClose =
+      (Date.now() - session.closedAt.getTime()) / (1000 * 60 * 60);
+    if (hoursSinceClose > 72) {
+      throw new ForbiddenException(
+        'Esta sesión se cerró hace más de 72 horas y ya no se puede editar.',
+      );
+    }
+
+    const occurredAt = session.closedAt;
+    const created: Array<{
+      egressId: any;
+      egressNumber: string;
+      concept: string;
+      amount: number;
+      paymentMethod: string;
+    }> = [];
+
+    for (const e of dto.addEgresses) {
+      const egressNumber = await this.generateEgressNumberForDate(occurredAt);
+      const doc = await this.egressModel.create({
+        egressNumber,
+        concept: e.concept,
+        amount: e.amount,
+        paymentMethod: e.paymentMethod,
+        type: e.type,
+        notes: e.notes,
+        currency: Currency.ARS,
+        status: EgressStatus.PENDING,
+        userId: userId ? (userId as any) : undefined,
+        createdAt: occurredAt,
+        updatedAt: occurredAt,
+      });
+      created.push({
+        egressId: doc._id,
+        egressNumber: doc.egressNumber,
+        concept: doc.concept,
+        amount: doc.amount,
+        paymentMethod: doc.paymentMethod,
+      });
+    }
+
+    // Recalcular esperado y discrepancia con el nuevo set de egresos en ventana.
+    const newExpected = await this.computeExpectedClosingCash(
+      session.openingCash,
+      session.openedAt,
+      session.closedAt,
+    );
+    const counted = session.countedClosingCash ?? 0;
+    const newDiscrepancy = Number((counted - newExpected).toFixed(2));
+
+    session.expectedClosingCash = newExpected;
+    session.discrepancy = newDiscrepancy;
+    session.editHistory.push({
+      editedAt: new Date(),
+      editedByUserId: userId ? (userId as any) : undefined,
+      addedEgresses: created,
+    });
+    await session.save();
+    return this.mapToResponse(session);
   }
 
   /**

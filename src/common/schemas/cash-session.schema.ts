@@ -78,6 +78,42 @@ export class CashSession {
   @Prop({ enum: ['MANUAL', 'AUTO'], default: 'MANUAL' })
   closureType: CashSessionClosureType;
 
+  /**
+   * Historial de ediciones post-cierre (sólo se permite editar dentro de las
+   * 72hs siguientes a `closedAt`). Cada entrada deja un snapshot de los
+   * egresos retroactivos cargados — útil para auditoría incluso si después
+   * se borra el egreso original. Las entradas se acumulan, nunca se editan.
+   */
+  @Prop({
+    type: [
+      {
+        editedAt: { type: Date, required: true, default: Date.now },
+        editedByUserId: { type: SchemaTypes.ObjectId, ref: 'User' },
+        addedEgresses: [
+          {
+            egressId: { type: SchemaTypes.ObjectId, ref: 'Egress' },
+            egressNumber: { type: String },
+            concept: { type: String },
+            amount: { type: Number },
+            paymentMethod: { type: String },
+          },
+        ],
+      },
+    ],
+    default: [],
+  })
+  editHistory: Array<{
+    editedAt: Date;
+    editedByUserId?: Types.ObjectId;
+    addedEgresses: Array<{
+      egressId: Types.ObjectId;
+      egressNumber: string;
+      concept: string;
+      amount: number;
+      paymentMethod: string;
+    }>;
+  }>;
+
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
 

@@ -1,5 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { EgressType, PaymentMethod } from '../enums';
 
 export class OpenCashSessionDto {
   @ApiProperty({
@@ -15,6 +27,46 @@ export class OpenCashSessionDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+}
+
+export class RetroactiveEgressDto {
+  @ApiProperty({ description: 'Concepto/explicación del egreso retroactivo' })
+  @IsString({ message: 'El concepto debe ser una cadena de texto' })
+  @MaxLength(200, { message: 'El concepto no puede exceder 200 caracteres' })
+  concept: string;
+
+  @ApiProperty({ description: 'Monto del egreso', minimum: 0 })
+  @IsNumber({}, { message: 'El monto debe ser un número' })
+  @Min(0, { message: 'El monto debe ser mayor o igual a 0' })
+  amount: number;
+
+  @ApiProperty({ description: 'Método de pago', enum: PaymentMethod })
+  @IsEnum(PaymentMethod, { message: 'El método de pago debe ser válido' })
+  paymentMethod: PaymentMethod;
+
+  @ApiProperty({ description: 'Tipo de egreso', enum: EgressType })
+  @IsEnum(EgressType, { message: 'El tipo de egreso debe ser válido' })
+  type: EgressType;
+
+  @ApiPropertyOptional({ description: 'Notas adicionales del egreso' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}
+
+export class EditCashSessionDto {
+  @ApiProperty({
+    description:
+      'Egresos retroactivos a cargar en la sesión. Cada uno se crea con createdAt dentro de la ventana de la sesión y el arqueo se recalcula.',
+    type: [RetroactiveEgressDto],
+    minItems: 1,
+  })
+  @IsArray({ message: 'addEgresses debe ser un array' })
+  @ArrayMinSize(1, { message: 'Debe agregar al menos un egreso' })
+  @ValidateNested({ each: true })
+  @Type(() => RetroactiveEgressDto)
+  addEgresses: RetroactiveEgressDto[];
 }
 
 export class UpdateCashSessionLabelDto {

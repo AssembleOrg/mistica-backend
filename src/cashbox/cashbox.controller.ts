@@ -19,6 +19,7 @@ import type { Request } from 'express';
 import { CashboxService } from './cashbox.service';
 import {
   CloseCashSessionDto,
+  EditCashSessionDto,
   OpenCashSessionDto,
   PaginationDto,
   UpdateCashSessionLabelDto,
@@ -103,6 +104,23 @@ export class CashboxController {
     @Body() dto: UpdateCashSessionLabelDto,
   ) {
     return this.cashboxService.updateLabel(id, dto.label);
+  }
+
+  @Patch(':id/edit')
+  @ApiOperation({
+    summary:
+      'Editar una sesión cerrada: cargar egresos retroactivos. Sólo permitido dentro de las 72 hs siguientes al cierre.',
+  })
+  @ApiResponse({ status: 200, description: 'Sesión editada' })
+  @ApiResponse({ status: 400, description: 'La sesión no está cerrada' })
+  @ApiResponse({ status: 403, description: 'Pasaron más de 72 hs desde el cierre' })
+  @ApiResponse({ status: 404, description: 'Sesión no encontrada' })
+  async editSession(
+    @Param('id') id: string,
+    @Body() dto: EditCashSessionDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.cashboxService.editSession(id, dto, req.user?.id);
   }
 
   @Patch(':id/resolve-auto')
