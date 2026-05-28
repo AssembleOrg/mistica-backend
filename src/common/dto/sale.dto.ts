@@ -79,16 +79,16 @@ export class CreateSaleDto {
   @MaxLength(20, { message: 'El teléfono no puede exceder 20 caracteres' })
   customerPhone?: string;
 
-  @ApiProperty({
-    description: 'Items de la venta',
+  @ApiPropertyOptional({
+    description:
+      'Items de la venta. Puede ir vacío o no enviarse: en ese caso el total se toma de la suma de los pagos ("monto a cobrar").',
     type: [CreateSaleItemDto],
-    minItems: 1,
   })
+  @IsOptional()
   @IsArray({ message: 'Los items deben ser un array' })
-  @ArrayMinSize(1, { message: 'La venta debe tener al menos un producto' })
   @ValidateNested({ each: true })
   @Type(() => CreateSaleItemDto)
-  items: CreateSaleItemDto[];
+  items?: CreateSaleItemDto[];
 
   @ApiProperty({
     description:
@@ -208,12 +208,11 @@ export class UpdateSaleDto {
   customerPhone?: string;
 
   @ApiPropertyOptional({
-    description: 'Items de la venta',
+    description: 'Items de la venta (puede ir vacío)',
     type: [CreateSaleItemDto],
   })
   @IsOptional()
   @IsArray({ message: 'Los items deben ser un array' })
-  @ArrayMinSize(1, { message: 'La venta debe tener al menos un producto' })
   @ValidateNested({ each: true })
   @Type(() => CreateSaleItemDto)
   items?: CreateSaleItemDto[];

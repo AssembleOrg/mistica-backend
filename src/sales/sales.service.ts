@@ -564,14 +564,15 @@ export class SalesService {
         }
       }
 
-      // Validar y procesar items
-      const processedItems = await this.validateAndProcessItems(createSaleDto.items);
-      
+      // Validar y procesar items (puede venir vacío: venta sin productos).
+      const processedItems = await this.validateAndProcessItems(createSaleDto.items ?? []);
+
       // Generar número de venta único
       const saleNumber = await this.generateSaleNumber();
 
-      // Calcular totales
-      const subtotal = processedItems.reduce((sum, item) => sum + item.subtotal, 0);
+      // Calcular totales. Cuando NO hay productos, el subtotal lo define la
+      // suma de los pagos ("monto a cobrar") — se reasigna más abajo.
+      let subtotal = processedItems.reduce((sum, item) => sum + item.subtotal, 0);
       const taxPercent = createSaleDto.tax || 0;
       const discountFlat = createSaleDto.discount || 0;
       let prepaidUsed = createSaleDto.prepaidUsed || 0;
@@ -610,7 +611,18 @@ export class SalesService {
       );
       let finalDiscount = discountFlat;
       let finalTotal = totals.total;
-      if (paymentsSum > finalTotal + 0.01) {
+
+      if (processedItems.length === 0) {
+        // Venta sin productos: el total ES el "monto a cobrar". Se exige
+        // que el cajero haya ingresado al menos un pago > 0.
+        if (paymentsSum <= 0) {
+          throw new BadRequestException(
+            'Una venta sin productos requiere un monto a cobrar mayor a 0.',
+          );
+        }
+        subtotal = paymentsSum;
+        finalTotal = paymentsSum;
+      } else if (paymentsSum > finalTotal + 0.01) {
         throw new BadRequestException(
           `La suma de los pagos (${paymentsSum.toFixed(2)}) excede el total a cobrar (${finalTotal.toFixed(2)}).`,
         );

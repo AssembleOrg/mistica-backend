@@ -32,7 +32,10 @@ export class Sale {
   @Prop({ trim: true })
   customerPhone?: string;
 
-  @Prop({ 
+  // Las ventas pueden no tener productos: en ese caso el total = "monto a
+  // cobrar" (suma de pagos) y el cajero define el importe directo. items=[]
+  // es válido.
+  @Prop({
     type: [{
       productId: { type: SchemaTypes.ObjectId, ref: 'Product', required: true },
       productName: { type: String, required: true, trim: true },
@@ -40,13 +43,7 @@ export class Sale {
       unitPrice: { type: Number, required: true, min: 0 },
       subtotal: { type: Number, required: true, min: 0 }
     }],
-    required: true,
-    validate: {
-      validator: function(items: any[]) {
-        return items && items.length > 0;
-      },
-      message: 'La venta debe tener al menos un producto'
-    }
+    default: [],
   })
   items: Array<{
     productId: Types.ObjectId;
