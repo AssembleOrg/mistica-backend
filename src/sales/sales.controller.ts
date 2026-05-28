@@ -111,6 +111,22 @@ export class SalesController {
     };
   }
 
+  @Patch(':id/name')
+  @Auditory({ entity: 'Sale', action: 'UPDATE' })
+  @ApiOperation({ summary: 'Renombrar venta (edición inline)' })
+  @ApiParam({ name: 'id', description: 'ID de la venta' })
+  async updateName(
+    @Param('id') id: string,
+    @Body() dto: UpdateSaleDto,
+  ): Promise<{ success: boolean; message: string; data: Sale }> {
+    const sale = await this.salesService.updateName(id, dto.name);
+    return {
+      success: true,
+      message: 'Venta renombrada exitosamente',
+      data: sale,
+    };
+  }
+
   @Patch(':id')
   @Auditory({ entity: 'Sale', action: 'UPDATE' })
   @ApiOperation({ summary: 'Actualizar venta' })

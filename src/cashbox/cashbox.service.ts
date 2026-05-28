@@ -18,7 +18,7 @@ import {
   CajaYaAbiertaException,
   SesionDeCajaNoEncontradaException,
 } from '../common/exceptions';
-import { PaymentMethod } from '../common/enums';
+import { PaymentMethod, SaleStatus } from '../common/enums';
 import { PaginatedResponse } from '../common/interfaces';
 import { BadRequestException } from '@nestjs/common';
 
@@ -171,6 +171,24 @@ export class CashboxService {
     );
   }
 
+  /**
+   * Al cerrar la caja, toda venta PENDING creada durante el período de la
+   * sesión (entre `from` y `to`) pasa a COMPLETED ("confirmada"). Es sólo un
+   * cambio de estado: no factura en AFIP ni mueve stock (el stock ya se
+   * descontó al crear la venta). Devuelve cuántas ventas se confirmaron.
+   */
+  private async confirmPendingSales(from: Date, to: Date): Promise<number> {
+    const res = await this.saleModel.updateMany(
+      {
+        createdAt: { $gte: from, $lte: to },
+        status: SaleStatus.PENDING,
+        deletedAt: { $exists: false },
+      },
+      { $set: { status: SaleStatus.COMPLETED } },
+    );
+    return res.modifiedCount ?? 0;
+  }
+
   async close(
     dto: CloseCashSessionDto,
     userId?: string,
@@ -194,6 +212,7 @@ export class CashboxService {
     open.closingNotes = dto.notes;
     open.closedByUserId = userId ? (userId as any) : undefined;
     await open.save();
+    await this.confirmPendingSales(open.openedAt, closedAt);
     return this.mapToResponse(open);
   }
 
@@ -390,6 +409,7 @@ export class CashboxService {
     open.closedByUserId = undefined;
     open.closureType = 'AUTO';
     await open.save();
+    await this.confirmPendingSales(open.openedAt, closedAt);
     return this.mapToResponse(open);
   }
 

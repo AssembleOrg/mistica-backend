@@ -102,6 +102,15 @@ export class CreateSaleDto {
   @Type(() => CreateSalePaymentDto)
   payments: CreateSalePaymentDto[];
 
+  @ApiPropertyOptional({
+    description:
+      'Nombre amigable de la venta (ej. "Pepe"). Opcional. El N° de venta se sigue generando aparte.',
+  })
+  @IsOptional()
+  @IsString({ message: 'El nombre de la venta debe ser una cadena de texto' })
+  @MaxLength(100, { message: 'El nombre de la venta no puede exceder 100 caracteres' })
+  name?: string;
+
   @ApiPropertyOptional({ description: 'Notas adicionales' })
   @IsOptional()
   @IsString({ message: 'Las notas deben ser una cadena de texto' })
@@ -166,6 +175,15 @@ export class CreateSaleDto {
 }
 
 export class UpdateSaleDto {
+  @ApiPropertyOptional({
+    description:
+      'Nombre amigable de la venta. Enviar vacío para limpiarlo y volver al default ("-").',
+  })
+  @IsOptional()
+  @IsString({ message: 'El nombre de la venta debe ser una cadena de texto' })
+  @MaxLength(100, { message: 'El nombre de la venta no puede exceder 100 caracteres' })
+  name?: string;
+
   @ApiPropertyOptional({ description: 'ID del cliente' })
   @IsOptional()
   @IsString({ message: 'El ID del cliente debe ser una cadena de texto' })

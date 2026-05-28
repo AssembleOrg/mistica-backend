@@ -17,6 +17,8 @@ export interface SalePayment {
 export interface Sale {
   id: string;
   saleNumber: string;
+  /** Nombre editable de la venta. Si está vacío, el front muestra "-". */
+  name?: string;
   clientId?: string;
   customerName?: string;
   customerEmail?: string;

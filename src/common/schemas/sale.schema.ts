@@ -12,6 +12,14 @@ export class Sale {
   @Prop({ required: true, unique: true, trim: true })
   saleNumber: string;
 
+  /**
+   * Nombre amigable de la venta, editable por el usuario (ej. "Pepe").
+   * Es opcional: si está vacío, el front muestra "-".
+   * El N° de venta (`saleNumber`) se mantiene como identificador interno.
+   */
+  @Prop({ trim: true })
+  name?: string;
+
   @Prop({ type: SchemaTypes.ObjectId, ref: 'Client' })
   clientId?: Types.ObjectId;
 

@@ -39,6 +39,7 @@ export class SalesService {
     return {
       id: saleObj._id.toString(),
       saleNumber: saleObj.saleNumber,
+      name: saleObj.name,
       clientId: saleObj.clientId?.toString(),
       customerName: saleObj.customerName,
       customerEmail: saleObj.customerEmail,
@@ -627,6 +628,7 @@ export class SalesService {
       // Crear la venta
       const sale = await this.saleModel.create({
         saleNumber,
+        name: createSaleDto.name?.trim() || undefined,
         clientId: createSaleDto.clientId,
         customerName: createSaleDto.customerName,
         customerEmail: createSaleDto.customerEmail?.toLowerCase(),
@@ -699,12 +701,10 @@ export class SalesService {
     // Construir filtros
     const filters: any = { deletedAt: { $exists: false } };
     
-    // Filtro de búsqueda por nombre de cliente o número de venta
+    // Filtro de búsqueda: SOLO por el nombre amigable de la venta.
+    // (Decisión del producto: bloquear búsqueda por N° de venta y por cliente.)
     if (search) {
-      filters.$or = [
-        { customerName: { $regex: search, $options: 'i' } },
-        { saleNumber: { $regex: search, $options: 'i' } }
-      ];
+      filters.name = { $regex: search, $options: 'i' };
     }
     
     // Filtro por status
@@ -772,6 +772,23 @@ export class SalesService {
       throw new VentaNoEncontradaException(id);
     }
 
+    return this.mapToSaleResponse(sale);
+  }
+
+  /**
+   * Renombra la venta (edición inline desde la tabla). Es un cambio liviano:
+   * NO pasa por las reglas de transición de estado de `update()` para que se
+   * pueda renombrar incluso ventas ya COMPLETED. Enviar string vacío deja la
+   * venta sin nombre (el front mostrará "-").
+   */
+  async updateName(id: string, name?: string): Promise<Sale> {
+    const sale = await this.saleModel.findById(id).exec();
+    if (!sale || sale.deletedAt) {
+      throw new VentaNoEncontradaException(id);
+    }
+    const trimmed = (name ?? '').trim();
+    sale.set('name', trimmed || undefined);
+    await sale.save();
     return this.mapToSaleResponse(sale);
   }
 
