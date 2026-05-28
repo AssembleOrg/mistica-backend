@@ -42,6 +42,15 @@ export class CashboxController {
     return this.cashboxService.getCurrent();
   }
 
+  @Get('current/expected')
+  @ApiOperation({
+    summary:
+      'Preview en vivo del efectivo esperado en la caja abierta (mismo cálculo que el cierre, sin escribir).',
+  })
+  async getCurrentExpected() {
+    return this.cashboxService.getCurrentExpected();
+  }
+
   @Post('open')
   @ApiOperation({ summary: 'Abrir caja con un monto inicial de efectivo' })
   @ApiResponse({ status: 201, description: 'Caja abierta' })

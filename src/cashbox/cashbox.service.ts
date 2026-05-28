@@ -84,6 +84,38 @@ export class CashboxService {
     return this.cashSessionModel.findOne({ status: 'OPEN' }).exec();
   }
 
+  /**
+   * Esperado en vivo de la sesión actualmente abierta (preview pre-cierre).
+   * Aplica la misma fórmula que `close()` pero sin escribir nada: el frontend
+   * lo usa en el diálogo "Cerrar caja" para mostrar al cajero cuánto debería
+   * tener antes de tipear el conteo físico.
+   *
+   * Devuelve null si no hay caja abierta.
+   */
+  async getCurrentExpected(): Promise<{
+    sessionId: string;
+    openedAt: Date;
+    openingCash: number;
+    expectedClosingCash: number;
+    asOf: Date;
+  } | null> {
+    const open = await this.findOpenSession();
+    if (!open) return null;
+    const asOf = new Date();
+    const expectedClosingCash = await this.computeExpectedClosingCash(
+      open.openingCash,
+      open.openedAt,
+      asOf,
+    );
+    return {
+      sessionId: String(open._id),
+      openedAt: open.openedAt,
+      openingCash: open.openingCash,
+      expectedClosingCash,
+      asOf,
+    };
+  }
+
   async open(dto: OpenCashSessionDto, userId?: string): Promise<CashSessionResponse> {
     const existing = await this.findOpenSession();
     if (existing) throw new CajaYaAbiertaException();
