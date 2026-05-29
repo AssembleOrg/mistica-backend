@@ -244,28 +244,17 @@ export class CashboxService {
     ]);
     const egressAmount = egressesAgg[0]?.amount ?? 0;
 
-    // Ingresos puntuales (correcciones de saldo, etc.) en CASH del período.
-    // Suman al esperado (entran a la caja).
-    const incomesAgg = await this.cashIncomeModel.aggregate([
-      {
-        $match: {
-          createdAt: { $gte: from, $lte: to },
-          deletedAt: { $exists: false },
-          paymentMethod: PaymentMethod.CASH,
-        },
-      },
-      { $group: { _id: null, amount: { $sum: '$amount' } } },
-    ]);
-    const incomesAmount = incomesAgg[0]?.amount ?? 0;
+    // NOTA: los CashIncome (ingresos retroactivos / correcciones de saldo)
+    // NO entran acá. Semánticamente representan "plata que ya estaba en la
+    // caja pero el cajero no contó al cierre" → ajustan `countedClosingCash`,
+    // no `expectedClosingCash`. Esa suma se hace al editar la sesión (ver
+    // editSession). Así, agregar un ingreso REDUCE el faltante (o crece el
+    // sobrante), que es el efecto esperado por el operador.
 
     return Number(
-      (
-        openingCash +
-        salesCashAmount +
-        prepaidsAmount +
-        incomesAmount -
-        egressAmount
-      ).toFixed(2),
+      (openingCash + salesCashAmount + prepaidsAmount - egressAmount).toFixed(
+        2,
+      ),
     );
   }
 
@@ -481,18 +470,27 @@ export class CashboxService {
       });
     }
 
-    // Recalcular esperado y discrepancia con el nuevo set de movimientos en
-    // ventana. computeExpectedClosingCash ya incluye ingresos CASH (+) y
-    // egresos CASH (−) del período.
+    // Recalcular esperado: incluye los egresos retroactivos recién creados
+    // (CASH egresses entran en computeExpectedClosingCash).
     const newExpected = await this.computeExpectedClosingCash(
       session.openingCash,
       session.openedAt,
       session.closedAt,
     );
-    const counted = session.countedClosingCash ?? 0;
-    const newDiscrepancy = Number((counted - newExpected).toFixed(2));
+
+    // Los ingresos retroactivos CASH suman al CONTADO ("plata que estaba en
+    // la caja y no se contó al cierre"), no al esperado. Así agregar un
+    // ingreso reduce el faltante / crece el sobrante.
+    const cashIncomesDelta = createdIncomes
+      .filter((i) => i.paymentMethod === PaymentMethod.CASH)
+      .reduce((acc, i) => acc + (i.amount || 0), 0);
+    const newCounted = Number(
+      ((session.countedClosingCash ?? 0) + cashIncomesDelta).toFixed(2),
+    );
+    const newDiscrepancy = Number((newCounted - newExpected).toFixed(2));
 
     session.expectedClosingCash = newExpected;
+    session.countedClosingCash = newCounted;
     session.discrepancy = newDiscrepancy;
     session.editHistory.push({
       editedAt: new Date(),
