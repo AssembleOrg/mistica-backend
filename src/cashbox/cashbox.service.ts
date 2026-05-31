@@ -535,6 +535,7 @@ export class CashboxService {
       createdAt: Date;
       reference?: string;
       afipCae?: string;
+      isSena?: boolean;
     }>;
   }> {
     const session = await this.cashSessionModel.findById(sessionId).exec();
@@ -598,6 +599,10 @@ export class CashboxService {
       createdAt: Date;
       reference?: string;
       afipCae?: string;
+      // true cuando el movimiento es una seña: prepaid (saldo a favor) o
+      // venta con saldo pendiente (status PARTIAL). El front lo usa para el
+      // chip "Seña" unificado en el detalle de sesión.
+      isSena?: boolean;
     }> = [];
 
     for (const s of sales as any[]) {
@@ -623,20 +628,24 @@ export class CashboxService {
       const customerSuffix = s.customerName ? ` · ${s.customerName}` : '';
       let partialSuffix = '';
       if (s.status === 'PARTIAL') {
-        partialSuffix = ' · pago parcial';
+        partialSuffix = ' · seña';
       } else if (amountInWindow !== s.total) {
         partialSuffix = ' · pago de seña';
       }
+      // Mostramos el nombre amigable de la venta si el operador lo cargó
+      // (ej. "Seña cumple 30/5"); si no, caemos al número de venta autogenerado.
+      const saleDisplay = s.name?.trim() ? s.name.trim() : `Venta ${s.saleNumber}`;
       txns.push({
         id: s._id.toString(),
         source: 'sale',
         type: 'ingreso',
         amount: amountInWindow,
-        description: `Venta ${s.saleNumber}${customerSuffix}${partialSuffix}`,
+        description: `${saleDisplay}${customerSuffix}${partialSuffix}`,
         paymentMethod: primaryMethod(paymentsInWindow),
         createdAt: lastPayment.createdAt ?? s.createdAt,
         reference: s.saleNumber,
         afipCae: s.afipCae,
+        isSena: s.status === 'PARTIAL',
       });
     }
 
@@ -650,6 +659,7 @@ export class CashboxService {
         paymentMethod: p.paymentMethod,
         createdAt: p.createdAt,
         reference: p._id.toString(),
+        isSena: true,
       });
     }
 
