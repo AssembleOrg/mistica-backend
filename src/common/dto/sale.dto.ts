@@ -266,6 +266,24 @@ export class UpdateSaleDto {
   @IsEnum(SaleStatus, { message: 'El estado debe ser válido' })
   status?: SaleStatus;
 
+  @ApiPropertyOptional({
+    description:
+      'Marca la venta como PAGO PARCIAL (seña). Con true, los pagos pueden sumar menos que el total y la diferencia queda como saldo pendiente.',
+  })
+  @IsOptional()
+  @IsBoolean({ message: 'isPartial debe ser un booleano' })
+  isPartial?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Sólo aplica cuando `isPartial=true` y la venta NO tiene productos. Es el total real a cobrar.',
+    minimum: 0,
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'partialTotal debe ser un número' })
+  @Min(0, { message: 'partialTotal debe ser ≥ 0' })
+  partialTotal?: number;
+
   @ApiPropertyOptional({ description: 'Notas adicionales' })
   @IsOptional()
   @IsString({ message: 'Las notas deben ser una cadena de texto' })
