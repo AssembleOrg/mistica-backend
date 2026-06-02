@@ -11,6 +11,7 @@ import {
 } from '../common/schemas';
 import {
   CloseCashSessionDto,
+  CreateCashIncomeDto,
   EditCashSessionDto,
   OpenCashSessionDto,
   PaginationDto,
@@ -154,6 +155,52 @@ export class CashboxService {
       openingCash: open.openingCash,
       expectedClosingCash,
       asOf,
+    };
+  }
+
+  /**
+   * Crea un ingreso puntual sobre la caja ABIERTA. El `createdAt` se fija a `now`, así el preview
+   * en vivo (`/cashbox/current/expected`) y el cierre lo cuentan automaticamente.
+   * Falla si no hay sesión abierta.
+   */
+  async createIncome(
+    dto: CreateCashIncomeDto,
+    userId?: string,
+  ): Promise<{
+    id: string;
+    incomeNumber: string;
+    concept: string;
+    amount: number;
+    paymentMethod: PaymentMethod;
+    notes?: string;
+    createdAt: Date;
+  }> {
+    const open = await this.findOpenSession();
+    if (!open) throw new CajaNoAbiertaException();
+
+    const now = new Date();
+    const paymentMethod = dto.paymentMethod ?? PaymentMethod.CASH;
+    const incomeNumber = await this.generateIncomeNumberForDate(now);
+
+    const doc = await this.cashIncomeModel.create({
+      incomeNumber,
+      concept: dto.concept,
+      amount: dto.amount,
+      paymentMethod,
+      notes: dto.notes,
+      userId: userId ? (userId as any) : undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return {
+      id: String(doc._id),
+      incomeNumber: doc.incomeNumber,
+      concept: doc.concept,
+      amount: doc.amount,
+      paymentMethod: doc.paymentMethod,
+      notes: doc.notes,
+      createdAt: doc.createdAt,
     };
   }
 

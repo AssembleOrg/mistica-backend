@@ -79,6 +79,42 @@ export class RetroactiveIncomeDto {
   notes?: string;
 }
 
+/**
+ * Crear un ingreso puntual sobre la caja ABIERTA en el momento. Caso de uso:
+ * el dueño mete plata a la caja sin que sea una venta .
+ *  El backend stampa `createdAt = now` y, mientras la
+ * sesión esté abierta, el ingreso ya cuenta para el esperado de cierre.
+ */
+export class CreateCashIncomeDto {
+  @ApiProperty({
+    description:
+      'Concepto del ingreso (ej. "Aporte del dueño", "Cambio chico", "Corrección").',
+  })
+  @IsString({ message: 'El concepto debe ser una cadena de texto' })
+  @MaxLength(200, { message: 'El concepto no puede exceder 200 caracteres' })
+  concept: string;
+
+  @ApiProperty({ description: 'Monto del ingreso', minimum: 0 })
+  @IsNumber({}, { message: 'El monto debe ser un número' })
+  @Min(0, { message: 'El monto debe ser mayor o igual a 0' })
+  amount: number;
+
+  @ApiPropertyOptional({
+    description: 'Método de pago. Default CASH.',
+    enum: PaymentMethod,
+    default: PaymentMethod.CASH,
+  })
+  @IsOptional()
+  @IsEnum(PaymentMethod, { message: 'El método de pago debe ser válido' })
+  paymentMethod?: PaymentMethod;
+
+  @ApiPropertyOptional({ description: 'Notas adicionales del ingreso' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}
+
 export class EditCashSessionDto {
   @ApiPropertyOptional({
     description:
