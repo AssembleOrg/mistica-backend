@@ -11,6 +11,7 @@ import {
 } from '../common/schemas';
 import {
   CloseCashSessionDto,
+  CreateCashExpenseDto,
   CreateCashIncomeDto,
   EditCashSessionDto,
   OpenCashSessionDto,
@@ -21,7 +22,7 @@ import {
   CajaYaAbiertaException,
   SesionDeCajaNoEncontradaException,
 } from '../common/exceptions';
-import { Currency, EgressStatus, PaymentMethod, SaleStatus } from '../common/enums';
+import { Currency, EgressStatus, EgressType, PaymentMethod, SaleStatus } from '../common/enums';
 import { PaginatedResponse } from '../common/interfaces';
 import { DateTime } from 'luxon';
 
@@ -196,6 +197,56 @@ export class CashboxService {
     return {
       id: String(doc._id),
       incomeNumber: doc.incomeNumber,
+      concept: doc.concept,
+      amount: doc.amount,
+      paymentMethod: doc.paymentMethod,
+      notes: doc.notes,
+      createdAt: doc.createdAt,
+    };
+  }
+
+  /**
+   * Crea un egreso puntual sobre la caja ABIERTA. El `createdAt` se fija a `now`,
+   * así el preview en vivo (`/cashbox/current/expected`) y el cierre lo descuentan
+   * automaticamente (los egresos CASH del período restan del esperado). Espejo de
+   * `createIncome`. Falla si no hay sesión abierta.
+   */
+  async createExpense(
+    dto: CreateCashExpenseDto,
+    userId?: string,
+  ): Promise<{
+    id: string;
+    egressNumber: string;
+    concept: string;
+    amount: number;
+    paymentMethod: PaymentMethod;
+    notes?: string;
+    createdAt: Date;
+  }> {
+    const open = await this.findOpenSession();
+    if (!open) throw new CajaNoAbiertaException();
+
+    const now = new Date();
+    const paymentMethod = dto.paymentMethod ?? PaymentMethod.CASH;
+    const egressNumber = await this.generateEgressNumberForDate(now);
+
+    const doc = await this.egressModel.create({
+      egressNumber,
+      concept: dto.concept,
+      amount: dto.amount,
+      paymentMethod,
+      type: EgressType.EXPENSE,
+      notes: dto.notes,
+      currency: Currency.ARS,
+      status: EgressStatus.PENDING,
+      userId: userId ? (userId as any) : undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return {
+      id: String(doc._id),
+      egressNumber: doc.egressNumber,
       concept: doc.concept,
       amount: doc.amount,
       paymentMethod: doc.paymentMethod,

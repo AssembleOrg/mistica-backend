@@ -115,6 +115,42 @@ export class CreateCashIncomeDto {
   notes?: string;
 }
 
+/**
+ * Crear un egreso puntual sobre la caja ABIERTA en el momento. Caso de uso:
+ * sale plata de la caja sin ser una venta (retiro, pago a proveedor, gasto).
+ * El backend stampa `createdAt = now` y, mientras la sesión esté abierta, el
+ * egreso ya se descuenta del esperado de cierre.
+ */
+export class CreateCashExpenseDto {
+  @ApiProperty({
+    description:
+      'Concepto del egreso (ej. "Pago proveedor", "Retiro", "Gasto").',
+  })
+  @IsString({ message: 'El concepto debe ser una cadena de texto' })
+  @MaxLength(200, { message: 'El concepto no puede exceder 200 caracteres' })
+  concept: string;
+
+  @ApiProperty({ description: 'Monto del egreso', minimum: 0 })
+  @IsNumber({}, { message: 'El monto debe ser un número' })
+  @Min(0, { message: 'El monto debe ser mayor o igual a 0' })
+  amount: number;
+
+  @ApiPropertyOptional({
+    description: 'Método de pago. Default CASH.',
+    enum: PaymentMethod,
+    default: PaymentMethod.CASH,
+  })
+  @IsOptional()
+  @IsEnum(PaymentMethod, { message: 'El método de pago debe ser válido' })
+  paymentMethod?: PaymentMethod;
+
+  @ApiPropertyOptional({ description: 'Notas adicionales del egreso' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}
+
 export class EditCashSessionDto {
   @ApiPropertyOptional({
     description:

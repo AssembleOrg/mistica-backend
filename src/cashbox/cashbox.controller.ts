@@ -19,6 +19,7 @@ import type { Request } from 'express';
 import { CashboxService } from './cashbox.service';
 import {
   CloseCashSessionDto,
+  CreateCashExpenseDto,
   CreateCashIncomeDto,
   EditCashSessionDto,
   OpenCashSessionDto,
@@ -73,6 +74,20 @@ export class CashboxController {
     @Req() req: AuthRequest,
   ) {
     return this.cashboxService.createIncome(dto, req.user?.id);
+  }
+
+  @Post('current/egresses')
+  @ApiOperation({
+    summary:
+      'Registra un egreso puntual de efectivo desde la caja abierta (retiro, pago a proveedor, gasto). Se descuenta del esperado de cierre.',
+  })
+  @ApiResponse({ status: 201, description: 'Egreso registrado' })
+  @ApiResponse({ status: 409, description: 'No hay caja abierta' })
+  async createExpense(
+    @Body() dto: CreateCashExpenseDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.cashboxService.createExpense(dto, req.user?.id);
   }
 
   @Post('close')
