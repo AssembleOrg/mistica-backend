@@ -358,11 +358,41 @@ export class CashboxService {
 
   /**
    * Al cerrar la caja, toda venta PENDING creada durante el período de la
-   * sesión (entre `from` y `to`) pasa a COMPLETED ("confirmada"). Es sólo un
-   * cambio de estado: no factura en AFIP ni mueve stock (el stock ya se
-   * descontó al crear la venta). Devuelve cuántas ventas se confirmaron.
+   * sesión (entre `from` y `to`) pasa a COMPLETED ("confirmada"). No factura en
+   * AFIP ni mueve stock (el stock ya se descontó al crear la venta).
+   *
+   * Caso especial: las PENDING con saldo pendiente (ex-"señas") se completan
+   * descontando el saldo no cobrado → total = Σ pagos, discount += saldo,
+   * balanceDue = 0. NO se agregan pagos, así que el arqueo no se altera (la caja
+   * sólo cuenta los pagos efectivos por su fecha). Devuelve cuántas se confirmaron.
    */
   private async confirmPendingSales(from: Date, to: Date): Promise<number> {
+    // 1) PENDING con saldo: completar aplicando auto-descuento del saldo.
+    const withBalance = await this.saleModel
+      .find({
+        createdAt: { $gte: from, $lte: to },
+        status: SaleStatus.PENDING,
+        balanceDue: { $gt: 0.01 },
+        deletedAt: { $exists: false },
+      })
+      .exec();
+
+    for (const sale of withBalance) {
+      const paid = (sale.payments || []).reduce(
+        (acc: number, p: any) => acc + (p.amount || 0),
+        0,
+      );
+      if (paid < sale.total - 0.01) {
+        const autoDiscount = Number((sale.total - paid).toFixed(2));
+        sale.discount = Number(((sale.discount || 0) + autoDiscount).toFixed(2));
+        sale.total = Number(paid.toFixed(2));
+      }
+      sale.balanceDue = 0;
+      sale.status = SaleStatus.COMPLETED;
+      await sale.save();
+    }
+
+    // 2) Resto de PENDING (sin saldo) → COMPLETED en bloque.
     const res = await this.saleModel.updateMany(
       {
         createdAt: { $gte: from, $lte: to },
@@ -371,7 +401,7 @@ export class CashboxService {
       },
       { $set: { status: SaleStatus.COMPLETED } },
     );
-    return res.modifiedCount ?? 0;
+    return (res.modifiedCount ?? 0) + withBalance.length;
   }
 
   async close(
@@ -722,14 +752,12 @@ export class CashboxService {
         return tP >= tAcc ? p : acc;
       }, paymentsInWindow[0]);
       const customerSuffix = s.customerName ? ` · ${s.customerName}` : '';
-      let partialSuffix = '';
-      if (s.status === 'PARTIAL') {
-        partialSuffix = ' · seña';
-      } else if (amountInWindow !== s.total) {
-        partialSuffix = ' · pago de seña';
-      }
-      // Mostramos el nombre amigable de la venta si el operador lo cargó
-      // (ej. "Seña cumple 30/5"); si no, caemos al número de venta autogenerado.
+      // Si en esta ventana entró menos que el total de la venta, fue un pago
+      // parcial (la venta sigue PENDING con saldo, o es un pago posterior sobre
+      // el saldo). Ya no existe el rótulo "seña" en las ventas.
+      const partialSuffix = amountInWindow !== s.total ? ' · pago parcial' : '';
+      // Mostramos el nombre amigable de la venta si el operador lo cargó; si no,
+      // caemos al número de venta autogenerado.
       const saleDisplay = s.name?.trim() ? s.name.trim() : `Venta ${s.saleNumber}`;
       txns.push({
         id: s._id.toString(),
@@ -741,7 +769,6 @@ export class CashboxService {
         createdAt: lastPayment.createdAt ?? s.createdAt,
         reference: s.saleNumber,
         afipCae: s.afipCae,
-        isSena: s.status === 'PARTIAL',
       });
     }
 

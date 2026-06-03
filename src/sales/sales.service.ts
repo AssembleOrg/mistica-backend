@@ -623,22 +623,24 @@ export class SalesService {
       let balanceDue = 0;
 
       if (isPartial) {
-        // PAGO PARCIAL: no se aplica auto-descuento. Hay dos casos:
-        //  a) Con productos: total = totals.total (calculado a partir del
-        //     subtotal de items + tax − discount). balanceDue = total − pagos.
-        //  b) Sin productos: el cajero ingresa explícitamente `partialTotal`
-        //     (lo que se debe en total) y los pagos parciales.
+        // PAGO PARCIAL: la venta nace PENDING (ya NO existe el estado seña).
+        // No se aplica auto-descuento al crear: la diferencia queda como
+        // `balanceDue` (saldo) hasta que la venta se complete (manualmente o al
+        // cierre de caja), momento en el que el saldo no cobrado se descuenta.
+        // Dos casos:
+        //  a) Con productos: total = totals.total (subtotal items + tax − discount).
+        //  b) Sin productos: el cajero ingresa explícitamente `partialTotal`.
         if (processedItems.length === 0) {
           if (createSaleDto.partialTotal == null || createSaleDto.partialTotal <= 0) {
             throw new BadRequestException(
-              'Una venta PARCIAL sin productos requiere `partialTotal` > 0.',
+              'Una venta con pago parcial sin productos requiere `partialTotal` > 0.',
             );
           }
           subtotal = createSaleDto.partialTotal;
           finalTotal = createSaleDto.partialTotal;
         }
         if (paymentsSum <= 0) {
-          throw new BadRequestException('Una venta PARCIAL requiere al menos un pago > 0.');
+          throw new BadRequestException('Una venta con pago parcial requiere al menos un pago > 0.');
         }
         if (paymentsSum > finalTotal + 0.01) {
           throw new BadRequestException(
@@ -646,7 +648,7 @@ export class SalesService {
           );
         }
         balanceDue = Number((finalTotal - paymentsSum).toFixed(2));
-        saleStatus = balanceDue > 0.01 ? SaleStatus.PARTIAL : SaleStatus.PENDING;
+        // status queda PENDING (inicializado arriba): sigue el flujo normal.
       } else if (processedItems.length === 0) {
         // Venta sin productos (no PARTIAL): el total ES el monto pagado.
         if (paymentsSum <= 0) {
@@ -865,9 +867,11 @@ export class SalesService {
     if (sale.status === SaleStatus.CANCELLED) {
       throw new VentaCanceladaException(sale.saleNumber);
     }
-    if (sale.status !== SaleStatus.PARTIAL) {
+    // Sólo tiene sentido agregar pagos a una venta con saldo pendiente. Ya no
+    // existe el estado seña: son ventas PENDING con balanceDue > 0.
+    if (!(sale.status === SaleStatus.PENDING && (sale.balanceDue ?? 0) > 0.01)) {
       throw new BadRequestException(
-        `Sólo se pueden agregar pagos a una venta PARCIAL. Estado actual: ${sale.status}.`,
+        `Sólo se pueden agregar pagos a una venta pendiente con saldo. Estado actual: ${sale.status}, saldo: ${(sale.balanceDue ?? 0).toFixed(2)}.`,
       );
     }
 
@@ -892,9 +896,9 @@ export class SalesService {
     sale.payments = allPayments as any;
 
     if (dto.markCompleted) {
-      // Destildar "Pago parcial" → COMPLETED. Si pagaron menos que el total,
-      // la diferencia queda como descuento (autoDiscount), reduciendo el total
-      // a lo efectivamente cobrado. Así la reportería queda coherente.
+      // Completar la venta. Si pagaron menos que el total, la diferencia queda
+      // como descuento (autoDiscount), reduciendo el total a lo efectivamente
+      // cobrado. Así la reportería queda coherente con la caja.
       if (newSum < total - 0.01) {
         const autoDiscount = Number((total - newSum).toFixed(2));
         sale.discount = Number(((sale.discount || 0) + autoDiscount).toFixed(2));
@@ -903,9 +907,8 @@ export class SalesService {
       sale.balanceDue = 0;
       sale.status = SaleStatus.COMPLETED;
     } else {
+      // Sigue PENDING con el saldo actualizado.
       sale.balanceDue = Number((total - newSum).toFixed(2));
-      // Mantener PARTIAL aunque balanceDue llegue a 0: el toggle se cierra
-      // explícitamente con markCompleted=true.
     }
 
     await sale.save();
@@ -1051,13 +1054,16 @@ export class SalesService {
       }
 
       // Si se envían payments (sea por re-cálculo o explícito), validamos.
-      // Para ventas PARCIALES (la edición de una seña) Σ pagos puede ser < total:
-      // la diferencia queda como `balanceDue`. Para ventas no-parciales exigimos
-      // Σ pagos === total (no auto-descontamos acá).
+      // Para ventas con pago parcial (PENDING con saldo) Σ pagos puede ser < total:
+      // la diferencia queda como `balanceDue`. Para el resto exigimos
+      // Σ pagos === total (no auto-descontamos acá). Ya NO existe el estado seña:
+      // estas ventas quedan PENDING y siguen el flujo normal.
       const isPartial =
         updateSaleDto.isPartial === true ||
         (updateSaleDto.isPartial === undefined &&
-          existingSale.status === SaleStatus.PARTIAL);
+          (existingSale.status === SaleStatus.PARTIAL ||
+            (existingSale.status === SaleStatus.PENDING &&
+              (existingSale.balanceDue ?? 0) > 0.01)));
 
       if (updateSaleDto.payments) {
         const totalForPayments = updateData.total ?? existingSale.total;
@@ -1066,7 +1072,7 @@ export class SalesService {
         if (isPartial) {
           if (sum <= 0) {
             throw new BadRequestException(
-              'Una venta PARCIAL requiere al menos un pago > 0.',
+              'Una venta con pago parcial requiere al menos un pago > 0.',
             );
           }
           if (sum > totalForPayments + 0.01) {
@@ -1075,8 +1081,7 @@ export class SalesService {
             );
           }
           updateData.balanceDue = Number((totalForPayments - sum).toFixed(2));
-          updateData.status =
-            updateData.balanceDue > 0.01 ? SaleStatus.PARTIAL : SaleStatus.PENDING;
+          updateData.status = SaleStatus.PENDING;
         } else if (Math.abs(sum - totalForPayments) > 0.01) {
           throw new BadRequestException(
             `La suma de los pagos (${sum.toFixed(2)}) no coincide con el total (${totalForPayments.toFixed(2)}).`,

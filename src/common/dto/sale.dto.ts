@@ -124,7 +124,7 @@ export class CreateSaleDto {
 
   @ApiPropertyOptional({
     description:
-      'Marca la venta como PAGO PARCIAL (seña). El total NO se ajusta al monto pagado: la diferencia queda como saldo pendiente (balanceDue). El cierre de caja automático no la confirma; sólo se completa cuando se destilde el flag.',
+      'Permite cobrar menos que el total (pago parcial): el total NO se ajusta al monto pagado, la diferencia queda como saldo pendiente (balanceDue) y la venta nace PENDING. Sigue el flujo normal: se autocompleta al cierre de caja descontando el saldo no cobrado. (Ya no existe el estado "seña").',
     default: false,
   })
   @IsOptional()
@@ -268,7 +268,7 @@ export class UpdateSaleDto {
 
   @ApiPropertyOptional({
     description:
-      'Marca la venta como PAGO PARCIAL (seña). Con true, los pagos pueden sumar menos que el total y la diferencia queda como saldo pendiente.',
+      'Permite cobrar menos que el total (pago parcial): con true, los pagos pueden sumar menos que el total y la diferencia queda como saldo pendiente (balanceDue). La venta queda PENDING. (Ya no existe el estado "seña").',
   })
   @IsOptional()
   @IsBoolean({ message: 'isPartial debe ser un booleano' })
@@ -386,7 +386,7 @@ export class UpdateSaleDto {
 }
 
 /**
- * Body para agregar pagos a una venta PARTIAL (completar saldo).
+ * Body para agregar pagos a una venta PENDING con saldo pendiente (completar saldo).
  * Cada pago llega con method+amount; el backend stampa `createdAt = now`,
  * así el monto cuenta para la caja del día en que se ingresa (no la del
  * día original de la venta).

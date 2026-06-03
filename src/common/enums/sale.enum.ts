@@ -16,10 +16,11 @@ export enum SaleStatus {
   PENDING = 'PENDING',
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
-  // Pago parcial (seña sobre la venta). El total queda en `total`, lo ya
-  // cobrado en la suma de `payments[].amount`, y la diferencia en `balanceDue`.
-  // Las ventas PARTIAL NO se confirman automáticamente al cierre de caja:
-  // se quedan así hasta que un usuario destilde el toggle (→ COMPLETED).
+  // DEPRECADO — ya no se asigna. El "pago parcial / seña" dejó de ser un estado
+  // propio: ahora esas ventas nacen PENDING con `balanceDue` > 0 y siguen el
+  // flujo normal (se autocompletan al cierre de caja descontando el saldo no
+  // cobrado). El valor se conserva sólo para lecturas históricas previas a la
+  // migración (ver scripts/migrate-sena-to-pending.mongo.js).
   PARTIAL = 'PARTIAL',
 }
 
