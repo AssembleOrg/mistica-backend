@@ -11,6 +11,7 @@ import {
 } from '../common/schemas';
 import {
   CloseCashSessionDto,
+  CreateCashIncomeDto,
   EditCashSessionDto,
   OpenCashSessionDto,
   PaginationDto,
@@ -154,6 +155,52 @@ export class CashboxService {
       openingCash: open.openingCash,
       expectedClosingCash,
       asOf,
+    };
+  }
+
+  /**
+   * Crea un ingreso puntual sobre la caja ABIERTA. El `createdAt` se fija a `now`, así el preview
+   * en vivo (`/cashbox/current/expected`) y el cierre lo cuentan automaticamente.
+   * Falla si no hay sesión abierta.
+   */
+  async createIncome(
+    dto: CreateCashIncomeDto,
+    userId?: string,
+  ): Promise<{
+    id: string;
+    incomeNumber: string;
+    concept: string;
+    amount: number;
+    paymentMethod: PaymentMethod;
+    notes?: string;
+    createdAt: Date;
+  }> {
+    const open = await this.findOpenSession();
+    if (!open) throw new CajaNoAbiertaException();
+
+    const now = new Date();
+    const paymentMethod = dto.paymentMethod ?? PaymentMethod.CASH;
+    const incomeNumber = await this.generateIncomeNumberForDate(now);
+
+    const doc = await this.cashIncomeModel.create({
+      incomeNumber,
+      concept: dto.concept,
+      amount: dto.amount,
+      paymentMethod,
+      notes: dto.notes,
+      userId: userId ? (userId as any) : undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return {
+      id: String(doc._id),
+      incomeNumber: doc.incomeNumber,
+      concept: doc.concept,
+      amount: doc.amount,
+      paymentMethod: doc.paymentMethod,
+      notes: doc.notes,
+      createdAt: doc.createdAt,
     };
   }
 
@@ -533,6 +580,7 @@ export class CashboxService {
       createdAt: Date;
       reference?: string;
       afipCae?: string;
+      isSena?: boolean;
     }>;
   }> {
     const session = await this.cashSessionModel.findById(sessionId).exec();
@@ -596,6 +644,10 @@ export class CashboxService {
       createdAt: Date;
       reference?: string;
       afipCae?: string;
+      // true cuando el movimiento es una seña: prepaid (saldo a favor) o
+      // venta con saldo pendiente (status PARTIAL). El front lo usa para el
+      // chip "Seña" unificado en el detalle de sesión.
+      isSena?: boolean;
     }> = [];
 
     for (const s of sales as any[]) {
@@ -621,20 +673,24 @@ export class CashboxService {
       const customerSuffix = s.customerName ? ` · ${s.customerName}` : '';
       let partialSuffix = '';
       if (s.status === 'PARTIAL') {
-        partialSuffix = ' · pago parcial';
+        partialSuffix = ' · seña';
       } else if (amountInWindow !== s.total) {
         partialSuffix = ' · pago de seña';
       }
+      // Mostramos el nombre amigable de la venta si el operador lo cargó
+      // (ej. "Seña cumple 30/5"); si no, caemos al número de venta autogenerado.
+      const saleDisplay = s.name?.trim() ? s.name.trim() : `Venta ${s.saleNumber}`;
       txns.push({
         id: s._id.toString(),
         source: 'sale',
         type: 'ingreso',
         amount: amountInWindow,
-        description: `Venta ${s.saleNumber}${customerSuffix}${partialSuffix}`,
+        description: `${saleDisplay}${customerSuffix}${partialSuffix}`,
         paymentMethod: primaryMethod(paymentsInWindow),
         createdAt: lastPayment.createdAt ?? s.createdAt,
         reference: s.saleNumber,
         afipCae: s.afipCae,
+        isSena: s.status === 'PARTIAL',
       });
     }
 
@@ -648,6 +704,7 @@ export class CashboxService {
         paymentMethod: p.paymentMethod,
         createdAt: p.createdAt,
         reference: p._id.toString(),
+        isSena: true,
       });
     }
 

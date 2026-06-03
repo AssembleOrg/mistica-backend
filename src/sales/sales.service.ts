@@ -1051,11 +1051,33 @@ export class SalesService {
       }
 
       // Si se envían payments (sea por re-cálculo o explícito), validamos.
-      // En update() exigimos que Σ pagos === total (no auto-descontamos acá).
+      // Para ventas PARCIALES (la edición de una seña) Σ pagos puede ser < total:
+      // la diferencia queda como `balanceDue`. Para ventas no-parciales exigimos
+      // Σ pagos === total (no auto-descontamos acá).
+      const isPartial =
+        updateSaleDto.isPartial === true ||
+        (updateSaleDto.isPartial === undefined &&
+          existingSale.status === SaleStatus.PARTIAL);
+
       if (updateSaleDto.payments) {
         const totalForPayments = updateData.total ?? existingSale.total;
         const sum = updateSaleDto.payments.reduce((acc, p) => acc + (p.amount || 0), 0);
-        if (Math.abs(sum - totalForPayments) > 0.01) {
+
+        if (isPartial) {
+          if (sum <= 0) {
+            throw new BadRequestException(
+              'Una venta PARCIAL requiere al menos un pago > 0.',
+            );
+          }
+          if (sum > totalForPayments + 0.01) {
+            throw new BadRequestException(
+              `Los pagos parciales (${sum.toFixed(2)}) no pueden exceder el total (${totalForPayments.toFixed(2)}).`,
+            );
+          }
+          updateData.balanceDue = Number((totalForPayments - sum).toFixed(2));
+          updateData.status =
+            updateData.balanceDue > 0.01 ? SaleStatus.PARTIAL : SaleStatus.PENDING;
+        } else if (Math.abs(sum - totalForPayments) > 0.01) {
           throw new BadRequestException(
             `La suma de los pagos (${sum.toFixed(2)}) no coincide con el total (${totalForPayments.toFixed(2)}).`,
           );
