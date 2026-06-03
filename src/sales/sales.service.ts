@@ -553,6 +553,39 @@ export class SalesService {
     }
   }
 
+  /**
+   * Reescala los renglones de una venta para que sus subtotales sumen `target`
+   * (pago parcial / precio libre). Reparte proporcional al subtotal original; el
+   * último renglón absorbe el redondeo. Recalcula unitPrice y limpia bonifiedQty
+   * (en precio libre no aplica). Así el recibo queda coherente con el total
+   * cobrado, sin mostrar el precio de lista.
+   */
+  private rescaleItemsToTotal(items: SaleItem[], target: number): SaleItem[] {
+    const itemsSum = items.reduce((acc, it) => acc + (it.subtotal || 0), 0);
+    const n = items.length;
+    let allocated = 0;
+    return items.map((it, idx) => {
+      const isLast = idx === n - 1;
+      let share: number;
+      if (isLast) {
+        share = Number((target - allocated).toFixed(2));
+      } else {
+        share =
+          itemsSum > 0
+            ? Number(((it.subtotal / itemsSum) * target).toFixed(2))
+            : Number((target / n).toFixed(2));
+        allocated = Number((allocated + share).toFixed(2));
+      }
+      const qty = it.quantity || 1;
+      return {
+        ...it,
+        subtotal: share,
+        unitPrice: Number((share / qty).toFixed(2)),
+        bonifiedQty: 0,
+      };
+    });
+  }
+
   async create(createSaleDto: CreateSaleDto): Promise<Sale> {
     try {
       // Bloqueo: no se puede vender sin caja abierta.
@@ -623,32 +656,19 @@ export class SalesService {
       let balanceDue = 0;
 
       if (isPartial) {
-        // PAGO PARCIAL: la venta nace PENDING (ya NO existe el estado seña).
-        // No se aplica auto-descuento al crear: la diferencia queda como
-        // `balanceDue` (saldo) hasta que la venta se complete (manualmente o al
-        // cierre de caja), momento en el que el saldo no cobrado se descuenta.
-        // Dos casos:
-        //  a) Con productos: total = totals.total (subtotal items + tax − discount).
-        //  b) Sin productos: el cajero ingresa explícitamente `partialTotal`.
-        if (processedItems.length === 0) {
-          if (createSaleDto.partialTotal == null || createSaleDto.partialTotal <= 0) {
-            throw new BadRequestException(
-              'Una venta con pago parcial sin productos requiere `partialTotal` > 0.',
-            );
-          }
-          subtotal = createSaleDto.partialTotal;
-          finalTotal = createSaleDto.partialTotal;
-        }
+        // PAGO PARCIAL / PRECIO LIBRE: el total de la venta ES lo que se cobra
+        // ahora. La cuenta queda SALDADA: sin descuento, sin saldo, sin leyenda.
+        // El precio de lista de los productos se ignora — los ítems (si hay) se
+        // reescalan más abajo para sumar este total y que el recibo sea coherente.
+        // La venta nace PENDING (status inicializado arriba) y sigue el flujo normal.
         if (paymentsSum <= 0) {
           throw new BadRequestException('Una venta con pago parcial requiere al menos un pago > 0.');
         }
-        if (paymentsSum > finalTotal + 0.01) {
-          throw new BadRequestException(
-            `Los pagos parciales (${paymentsSum.toFixed(2)}) no pueden exceder el total (${finalTotal.toFixed(2)}).`,
-          );
-        }
-        balanceDue = Number((finalTotal - paymentsSum).toFixed(2));
-        // status queda PENDING (inicializado arriba): sigue el flujo normal.
+        finalTotal = Number(paymentsSum.toFixed(2));
+        subtotal = finalTotal;
+        finalDiscount = 0;
+        prepaidUsed = 0;
+        balanceDue = 0;
       } else if (processedItems.length === 0) {
         // Venta sin productos (no PARTIAL): el total ES el monto pagado.
         if (paymentsSum <= 0) {
@@ -678,6 +698,14 @@ export class SalesService {
       // Normalizar pagos: 1 entrada por método, amount > 0, createdAt = now.
       const payments = this.buildSalePayments(createSaleDto.payments);
 
+      // En pago parcial (precio libre) reescalamos los ítems para que sus
+      // subtotales sumen el total cobrado: el recibo no muestra el precio de
+      // lista ni huecos. En ventas normales se guardan tal cual.
+      const itemsForSale =
+        isPartial && processedItems.length > 0
+          ? this.rescaleItemsToTotal(processedItems, finalTotal)
+          : processedItems;
+
       // Crear la venta
       const sale = await this.saleModel.create({
         saleNumber,
@@ -686,7 +714,7 @@ export class SalesService {
         customerName: createSaleDto.customerName,
         customerEmail: createSaleDto.customerEmail?.toLowerCase(),
         customerPhone: createSaleDto.customerPhone,
-        items: processedItems,
+        items: itemsForSale,
         subtotal,
         tax: taxPercent,
         discount: finalDiscount,
