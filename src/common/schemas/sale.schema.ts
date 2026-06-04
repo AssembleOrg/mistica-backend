@@ -78,6 +78,13 @@ export class Sale {
   @Prop({ type: SchemaTypes.ObjectId, ref: 'Prepaid' })
   prepaidId?: Types.ObjectId;
 
+  // Ventas relacionadas (sólo informativo). El vínculo es MUTUO: al relacionar
+  // A↔B se guarda el id de cada una en el array de la otra. No afecta totales,
+  // saldos ni el flujo de la venta — es un distintivo para agrupar ventas
+  // (ej. una seña y su venta final, o compras de un mismo pedido).
+  @Prop({ type: [SchemaTypes.ObjectId], ref: 'Sale', default: [] })
+  relatedSaleIds: Types.ObjectId[];
+
   @Prop({ required: true, min: 0 })
   total: number;
 
@@ -152,6 +159,7 @@ SaleSchema.index({ 'payments.method': 1 });
 SaleSchema.index({ createdAt: -1 });
 SaleSchema.index({ deletedAt: 1 });
 SaleSchema.index({ 'items.productId': 1 });
+SaleSchema.index({ relatedSaleIds: 1 });
 // Índices para campos de facturación AFIP
 SaleSchema.index({ afipCae: 1 });
 SaleSchema.index({ afipNumero: 1 });

@@ -12,7 +12,8 @@ import {
   MaxLength, 
   ValidateNested, 
   ArrayMinSize,
-  IsDateString
+  IsDateString,
+  IsMongoId
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -415,6 +416,23 @@ export class AddSalePaymentsDto {
   @IsOptional()
   @IsBoolean({ message: 'markCompleted debe ser un booleano' })
   markCompleted?: boolean;
+}
+
+/**
+ * Body para PATCH /sales/:id/links — define el conjunto COMPLETO de ventas
+ * relacionadas (vínculo mutuo, informativo). El backend reconcilia ambos lados
+ * y excluye la propia venta. Enviar [] desvincula todo.
+ */
+export class SetSaleLinksDto {
+  @ApiProperty({
+    description: 'Ids de las ventas a relacionar (set completo, vínculo mutuo)',
+    type: [String],
+    example: ['66b0...', '66b1...'],
+  })
+  @IsOptional()
+  @IsArray({ message: 'relatedSaleIds debe ser un array' })
+  @IsMongoId({ each: true, message: 'Cada id debe ser un ObjectId válido' })
+  relatedSaleIds?: string[];
 }
 
 export class DailySalesQueryDto {

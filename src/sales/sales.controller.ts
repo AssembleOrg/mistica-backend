@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { SalesService } from './sales.service';
-import { CreateSaleDto, UpdateSaleDto, SalesPaginatedFilterDto, DailySalesQueryDto, AddSalePaymentsDto } from '../common/dto';
+import { CreateSaleDto, UpdateSaleDto, SalesPaginatedFilterDto, DailySalesQueryDto, AddSalePaymentsDto, SetSaleLinksDto } from '../common/dto';
 import { Sale, PaginatedResponse, DailySalesResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Auditory } from '../common/decorators';
@@ -146,6 +146,27 @@ export class SalesController {
       message: dto.markCompleted
         ? 'Venta completada con los pagos agregados'
         : 'Pagos agregados a la venta parcial',
+      data: sale,
+    };
+  }
+
+  @Patch(':id/links')
+  @Auditory({ entity: 'Sale', action: 'UPDATE' })
+  @ApiOperation({
+    summary:
+      'Relacionar la venta con otras (vínculo mutuo, informativo). Define el set completo; [] desvincula.',
+  })
+  @ApiParam({ name: 'id', description: 'ID de la venta' })
+  @ApiResponse({ status: 200, description: 'Ventas relacionadas actualizadas' })
+  @ApiResponse({ status: 404, description: 'Venta no encontrada' })
+  async setLinks(
+    @Param('id') id: string,
+    @Body() dto: SetSaleLinksDto,
+  ): Promise<{ success: boolean; message: string; data: Sale }> {
+    const sale = await this.salesService.setLinks(id, dto.relatedSaleIds ?? []);
+    return {
+      success: true,
+      message: 'Ventas relacionadas actualizadas',
       data: sale,
     };
   }

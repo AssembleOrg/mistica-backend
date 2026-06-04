@@ -22,6 +22,16 @@ export interface SalePayment {
   createdAt: Date;
 }
 
+/** Resumen liviano de una venta relacionada (para mostrar el distintivo). */
+export interface RelatedSaleSummary {
+  id: string;
+  saleNumber: string;
+  name?: string;
+  total: number;
+  status: SaleStatus;
+  createdAt: Date;
+}
+
 export interface Sale {
   id: string;
   saleNumber: string;
@@ -37,6 +47,10 @@ export interface Sale {
   discount: number; // Porcentaje de descuento (0-100)
   prepaidUsed: number; // Monto en dinero usado de prepaid
   prepaidId?: string;
+  /** Ids de ventas relacionadas (vínculo mutuo, informativo). */
+  relatedSaleIds?: string[];
+  /** Resúmenes de las ventas relacionadas — sólo se incluye en findOne. */
+  relatedSales?: RelatedSaleSummary[];
   total: number;
   payments: SalePayment[];
   status: SaleStatus;

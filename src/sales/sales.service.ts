@@ -1,9 +1,9 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { DateTime } from 'luxon';
 import { CreateSaleDto, UpdateSaleDto, SalesPaginatedFilterDto, DailySalesQueryDto, AddSalePaymentsDto } from '../common/dto';
-import { Sale, SaleItem, DailySalesResponse, DailySalesSummary, PaginatedResponse } from '../common/interfaces';
+import { Sale, SaleItem, DailySalesResponse, DailySalesSummary, PaginatedResponse, RelatedSaleSummary } from '../common/interfaces';
 import {
   VentaNoEncontradaException,
   NumeroVentaYaExisteException,
@@ -34,10 +34,12 @@ export class SalesService {
     private readonly cashboxService: CashboxService,
   ) {}
 
-  private mapToSaleResponse(sale: SaleDocument): Sale {
+  private mapToSaleResponse(sale: SaleDocument, relatedSales?: RelatedSaleSummary[]): Sale {
     const saleObj = sale.toObject();
     return {
       id: saleObj._id.toString(),
+      relatedSaleIds: (saleObj.relatedSaleIds || []).map((x: any) => x.toString()),
+      relatedSales,
       saleNumber: saleObj.saleNumber,
       name: saleObj.name,
       clientId: saleObj.clientId?.toString(),
@@ -854,7 +856,78 @@ export class SalesService {
       throw new VentaNoEncontradaException(id);
     }
 
-    return this.mapToSaleResponse(sale);
+    return this.mapToSaleResponse(sale, await this.loadRelatedSummaries(sale));
+  }
+
+  /**
+   * Trae los resúmenes livianos de las ventas relacionadas (vínculo mutuo).
+   * Sólo lo usa `findOne` — la lista/paginado no lo necesita (alcanza con el
+   * array de ids para mostrar el distintivo). Ignora ventas borradas.
+   */
+  private async loadRelatedSummaries(
+    sale: SaleDocument,
+  ): Promise<RelatedSaleSummary[]> {
+    const ids = sale.relatedSaleIds || [];
+    if (ids.length === 0) return [];
+    const related = await this.saleModel
+      .find({ _id: { $in: ids }, deletedAt: { $exists: false } })
+      .select('saleNumber name total status createdAt')
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec();
+    return related.map((r: any) => ({
+      id: r._id.toString(),
+      saleNumber: r.saleNumber,
+      name: r.name,
+      total: r.total,
+      status: r.status,
+      createdAt: r.createdAt,
+    }));
+  }
+
+  /**
+   * Vincula (de forma MUTUA) la venta `id` con el conjunto `relatedSaleIds`.
+   * Es sólo informativo: no toca totales ni saldos. Reconcilia ambos lados —
+   * agrega esta venta al array de las nuevas relacionadas y se quita de las
+   * que se desvincularon. Excluye self y valida que las otras existan.
+   */
+  async setLinks(id: string, relatedSaleIds: string[] = []): Promise<Sale> {
+    const sale = await this.saleModel.findById(id).exec();
+    if (!sale || sale.deletedAt) {
+      throw new VentaNoEncontradaException(id);
+    }
+
+    // Dedup, descartar self y validar existencia (no borradas).
+    const requested = [...new Set((relatedSaleIds || []).filter((x) => x && x !== id))];
+    const existing = requested.length
+      ? await this.saleModel
+          .find({ _id: { $in: requested }, deletedAt: { $exists: false } })
+          .select('_id')
+          .exec()
+      : [];
+    const validIds = existing.map((d: any) => d._id.toString());
+
+    const oldIds = (sale.relatedSaleIds || []).map((x) => x.toString());
+    const added = validIds.filter((x) => !oldIds.includes(x));
+    const removed = oldIds.filter((x) => !validIds.includes(x));
+
+    sale.relatedSaleIds = validIds.map((x) => new Types.ObjectId(x));
+    await sale.save();
+
+    if (added.length) {
+      await this.saleModel.updateMany(
+        { _id: { $in: added } },
+        { $addToSet: { relatedSaleIds: sale._id } },
+      );
+    }
+    if (removed.length) {
+      await this.saleModel.updateMany(
+        { _id: { $in: removed } },
+        { $pull: { relatedSaleIds: sale._id } },
+      );
+    }
+
+    return this.findOne(id);
   }
 
   /**
@@ -1210,6 +1283,13 @@ export class SalesService {
       }
     }
     
+    // Quitar esta venta de las relacionadas (vínculo mutuo) para no dejar
+    // referencias colgando a una venta borrada.
+    await this.saleModel.updateMany(
+      { relatedSaleIds: new Types.ObjectId(id) },
+      { $pull: { relatedSaleIds: new Types.ObjectId(id) } },
+    );
+
     // Soft delete
     await this.saleModel.findByIdAndUpdate(id, {
       deletedAt: new Date()
