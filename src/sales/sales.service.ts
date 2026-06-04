@@ -680,19 +680,18 @@ export class SalesService {
         }
         subtotal = paymentsSum;
         finalTotal = paymentsSum;
-      } else if (paymentsSum > finalTotal + 0.01) {
-        throw new BadRequestException(
-          `La suma de los pagos (${paymentsSum.toFixed(2)}) excede el total a cobrar (${finalTotal.toFixed(2)}).`,
-        );
       }
 
-      // Auto-descuento (sólo ventas NO PARCIALES): si el cajero cobró menos
-      // que el total, la diferencia se registra como descuento. En PARTIAL la
-      // diferencia es saldo pendiente, no descuento.
+      // Ajuste automático (sólo ventas NO PARCIALES): la venta se salda con lo
+      // efectivamente cobrado. Si Σ pagos difiere del total de lista, el total
+      // pasa a ser lo cobrado y la diferencia se registra como ajuste con signo
+      // (positivo = descuento si se cobró de menos; negativo = recargo si se
+      // cobró de más). Antes el sobre-cobro se bloqueaba; ahora se permite.
+      // En PARTIAL la diferencia es saldo pendiente, no ajuste.
       if (!isPartial) {
-        const autoDiscount = Number((finalTotal - paymentsSum).toFixed(2));
-        if (autoDiscount > 0.01) {
-          finalDiscount = Number((finalDiscount + autoDiscount).toFixed(2));
+        const autoAdjust = Number((finalTotal - paymentsSum).toFixed(2));
+        if (Math.abs(autoAdjust) > 0.01) {
+          finalDiscount = Number((finalDiscount + autoAdjust).toFixed(2));
           finalTotal = Number(paymentsSum.toFixed(2));
         }
       }
@@ -1183,10 +1182,20 @@ export class SalesService {
           }
           updateData.balanceDue = Number((totalForPayments - sum).toFixed(2));
           updateData.status = SaleStatus.PENDING;
-        } else if (Math.abs(sum - totalForPayments) > 0.01) {
-          throw new BadRequestException(
-            `La suma de los pagos (${sum.toFixed(2)}) no coincide con el total (${totalForPayments.toFixed(2)}).`,
-          );
+        } else {
+          // Venta normal: se salda con lo cobrado. Si Σ pagos difiere del total,
+          // el total pasa a ser lo cobrado y la diferencia se registra como
+          // ajuste con signo (positivo = descuento, negativo = recargo). Ya no
+          // se bloquea el sobre-cobro (alineado con `create`).
+          const autoAdjust = Number((totalForPayments - sum).toFixed(2));
+          if (Math.abs(autoAdjust) > 0.01) {
+            const baseDiscount =
+              updateData.discount !== undefined
+                ? updateData.discount
+                : existingSale.discount;
+            updateData.discount = Number((baseDiscount + autoAdjust).toFixed(2));
+            updateData.total = Number(sum.toFixed(2));
+          }
         }
         updateData.payments = this.buildSalePayments(updateSaleDto.payments);
       }

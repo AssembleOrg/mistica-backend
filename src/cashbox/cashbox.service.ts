@@ -275,6 +275,7 @@ export class CashboxService {
    *   esperado = openingCash
    *           + ventas en CASH (amount)
    *           + prepaids en CASH (amount)
+   *           + ingresos puntuales en CASH (amount)
    *           − egresos en CASH (amount)
    */
   private async computeExpectedClosingCash(
@@ -342,17 +343,30 @@ export class CashboxService {
     ]);
     const egressAmount = egressesAgg[0]?.amount ?? 0;
 
-    // NOTA: los CashIncome (ingresos retroactivos / correcciones de saldo)
-    // NO entran acá. Semánticamente representan "plata que ya estaba en la
-    // caja pero el cajero no contó al cierre" → ajustan `countedClosingCash`,
-    // no `expectedClosingCash`. Esa suma se hace al editar la sesión (ver
-    // editSession). Así, agregar un ingreso REDUCE el faltante (o crece el
-    // sobrante), que es el efecto esperado por el operador.
+    // Ingresos puntuales en CASH del período. Representan plata nueva que entró
+    // a la caja (aportes, devoluciones recibidas, ajustes a favor) → suman al
+    // esperado, simétricos a los egresos. Filtramos por `createdAt` igual que
+    // egresos/prepaids.
+    const incomesAgg = await this.cashIncomeModel.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: from, $lte: to },
+          deletedAt: { $exists: false },
+          paymentMethod: PaymentMethod.CASH,
+        },
+      },
+      { $group: { _id: null, amount: { $sum: '$amount' } } },
+    ]);
+    const incomesAmount = incomesAgg[0]?.amount ?? 0;
 
     return Number(
-      (openingCash + salesCashAmount + prepaidsAmount - egressAmount).toFixed(
-        2,
-      ),
+      (
+        openingCash +
+        salesCashAmount +
+        prepaidsAmount +
+        incomesAmount -
+        egressAmount
+      ).toFixed(2),
     );
   }
 
@@ -598,23 +612,18 @@ export class CashboxService {
       });
     }
 
-    // Recalcular esperado: incluye los egresos retroactivos recién creados
-    // (CASH egresses entran en computeExpectedClosingCash).
+    // Recalcular esperado: incluye los egresos e ingresos retroactivos recién
+    // creados (los CASH entran en computeExpectedClosingCash). Un ingreso CASH
+    // sube el esperado (plata nueva que entró); un egreso CASH lo baja.
     const newExpected = await this.computeExpectedClosingCash(
       session.openingCash,
       session.openedAt,
       session.closedAt,
     );
 
-    // Los ingresos retroactivos CASH suman al CONTADO ("plata que estaba en
-    // la caja y no se contó al cierre"), no al esperado. Así agregar un
-    // ingreso reduce el faltante / crece el sobrante.
-    const cashIncomesDelta = createdIncomes
-      .filter((i) => i.paymentMethod === PaymentMethod.CASH)
-      .reduce((acc, i) => acc + (i.amount || 0), 0);
-    const newCounted = Number(
-      ((session.countedClosingCash ?? 0) + cashIncomesDelta).toFixed(2),
-    );
+    // El Contado es lo que el cajero contó físicamente al cierre y no se toca:
+    // los movimientos retroactivos ajustan el esperado, no el conteo.
+    const newCounted = session.countedClosingCash ?? 0;
     const newDiscrepancy = Number((newCounted - newExpected).toFixed(2));
 
     session.expectedClosingCash = newExpected;
@@ -656,6 +665,10 @@ export class CashboxService {
       source: 'sale' | 'prepaid' | 'egress' | 'income';
       type: 'ingreso' | 'egreso';
       amount: number;
+      // Desglose del `amount` por método. Para ventas MIXTO suma cada pago en
+      // ventana por su método; para el resto (seña/egreso/ingreso) cae todo en
+      // su único método. Permite reconciliar el saldo CASH fila por fila.
+      amountByMethod: { CASH: number; CARD: number; TRANSFER: number };
       description: string;
       paymentMethod: string;
       createdAt: Date;
@@ -715,11 +728,30 @@ export class CashboxService {
       return sorted[0].method;
     };
 
+    // Suma los pagos (en ventana) de una venta agrupados por método.
+    const sumByMethod = (payments: any[] | undefined) => {
+      const acc = { CASH: 0, CARD: 0, TRANSFER: 0 };
+      for (const p of payments ?? []) {
+        const m = p.method as 'CASH' | 'CARD' | 'TRANSFER';
+        if (m in acc) acc[m] += p.amount || 0;
+      }
+      return acc;
+    };
+
+    // Movimiento de un único método (seña / egreso / ingreso).
+    const singleByMethod = (method: string, amount: number) => {
+      const acc = { CASH: 0, CARD: 0, TRANSFER: 0 };
+      const m = method as 'CASH' | 'CARD' | 'TRANSFER';
+      if (m in acc) acc[m] += amount || 0;
+      return acc;
+    };
+
     const txns: Array<{
       id: string;
       source: 'sale' | 'prepaid' | 'egress' | 'income';
       type: 'ingreso' | 'egreso';
       amount: number;
+      amountByMethod: { CASH: number; CARD: number; TRANSFER: number };
       description: string;
       paymentMethod: string;
       createdAt: Date;
@@ -764,6 +796,7 @@ export class CashboxService {
         source: 'sale',
         type: 'ingreso',
         amount: amountInWindow,
+        amountByMethod: sumByMethod(paymentsInWindow),
         description: `${saleDisplay}${customerSuffix}${partialSuffix}`,
         paymentMethod: primaryMethod(paymentsInWindow),
         createdAt: lastPayment.createdAt ?? s.createdAt,
@@ -778,6 +811,7 @@ export class CashboxService {
         source: 'prepaid',
         type: 'ingreso',
         amount: p.amount,
+        amountByMethod: singleByMethod(p.paymentMethod, p.amount),
         description: p.notes || 'Seña',
         paymentMethod: p.paymentMethod,
         createdAt: p.createdAt,
@@ -792,6 +826,7 @@ export class CashboxService {
         source: 'egress',
         type: 'egreso',
         amount: e.amount,
+        amountByMethod: singleByMethod(e.paymentMethod, e.amount),
         description: `${e.egressNumber} · ${e.concept}`,
         paymentMethod: e.paymentMethod,
         createdAt: e.createdAt,
@@ -805,6 +840,7 @@ export class CashboxService {
         source: 'income',
         type: 'ingreso',
         amount: i.amount,
+        amountByMethod: singleByMethod(i.paymentMethod, i.amount),
         description: `${i.incomeNumber} · ${i.concept}`,
         paymentMethod: i.paymentMethod,
         createdAt: i.createdAt,
