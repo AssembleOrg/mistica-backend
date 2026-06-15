@@ -14,7 +14,10 @@ import { ClientsService } from './clients.service';
 import { CreateClientDto, UpdateClientDto, PaginatedDateFilterDto } from '../common/dto';
 import { Client, ClientWithPrepaids, PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { Auditory } from '../common/decorators';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
 
 @ApiTags('Clientes')
 @Controller('clients')
@@ -111,6 +114,8 @@ export class ClientsController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Client', action: 'UPDATE' })
   @ApiOperation({ summary: 'Actualizar cliente' })
   @ApiParam({ name: 'id', description: 'ID del cliente' })
@@ -131,6 +136,8 @@ export class ClientsController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Client', action: 'DELETE' })
   @ApiOperation({ summary: 'Eliminar cliente (soft delete)' })
   @ApiParam({ name: 'id', description: 'ID del cliente' })

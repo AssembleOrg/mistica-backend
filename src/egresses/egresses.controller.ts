@@ -23,6 +23,7 @@ import { EgressesService } from './egresses.service';
 import { CreateEgressDto, UpdateEgressDto, EgressPaginatedFilterDto } from '../common/dto';
 import { IEgress, PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { Auditory } from '../common/decorators';
 import { EgressStatus, EgressType, Currency } from '../common/enums';
 
 @ApiTags('Egresos')
@@ -33,6 +34,7 @@ export class EgressesController {
   constructor(private readonly egressesService: EgressesService) {}
 
   @Post()
+  @Auditory({ entity: 'Egress', action: 'CREATE' })
   @ApiOperation({ summary: 'Crear un nuevo egreso' })
   @ApiResponse({
     status: HttpStatus.CREATED,

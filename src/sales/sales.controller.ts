@@ -14,7 +14,10 @@ import { SalesService } from './sales.service';
 import { CreateSaleDto, UpdateSaleDto, SalesPaginatedFilterDto, DailySalesQueryDto, AddSalePaymentsDto, SetSaleLinksDto } from '../common/dto';
 import { Sale, PaginatedResponse, DailySalesResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { Auditory } from '../common/decorators';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
 
 @ApiTags('Ventas')
 @Controller('sales')
@@ -172,6 +175,8 @@ export class SalesController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Sale', action: 'UPDATE' })
   @ApiOperation({ summary: 'Actualizar venta' })
   @ApiParam({ name: 'id', description: 'ID de la venta' })
@@ -191,6 +196,8 @@ export class SalesController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Sale', action: 'DELETE' })
   @ApiOperation({ summary: 'Eliminar venta (soft delete)' })
   @ApiParam({ name: 'id', description: 'ID de la venta' })

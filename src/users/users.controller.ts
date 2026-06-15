@@ -15,7 +15,10 @@ import { CreateUserDto, UpdateUserDto, PaginatedDateFilterDto } from '../common/
 import { UserResponse } from '../common/interfaces';
 import { PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { Auditory } from '../common/decorators';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
 import { SaleStatus } from 'src/common/enums';
 
 @ApiTags('Usuarios')
@@ -26,6 +29,8 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'User', action: 'CREATE' })
   @ApiOperation({ summary: 'Crear nuevo usuario' })
   @ApiResponse({ status: 201, description: 'Usuario creado exitosamente' })
@@ -64,6 +69,8 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'User', action: 'UPDATE' })
   @ApiOperation({ summary: 'Actualizar usuario' })
   @ApiResponse({ status: 200, description: 'Usuario actualizado exitosamente' })
@@ -78,6 +85,8 @@ export class UsersController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'User', action: 'DELETE' })
   @ApiOperation({ summary: 'Eliminar usuario (soft delete)' })
   @ApiResponse({ status: 200, description: 'Usuario eliminado exitosamente' })

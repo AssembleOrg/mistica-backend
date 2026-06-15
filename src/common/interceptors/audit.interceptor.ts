@@ -77,9 +77,10 @@ export class AuditInterceptor implements NestInterceptor {
 
   private extractEntityId(data: any, entity: string): string | null {
     if (!data) return null;
-    
+
     // Try to extract ID from common patterns
     if (data.id) return data.id;
+    if (data.data?.id) return data.data.id;
     if (data[`${entity}Id`]) return data[`${entity}Id`];
     
     // For arrays, try to get the first item's ID

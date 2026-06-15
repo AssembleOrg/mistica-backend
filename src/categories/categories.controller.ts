@@ -12,7 +12,10 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto, UpdateCategoryDto } from '../common/dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { Auditory } from '../common/decorators';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
 
 @ApiTags('Categorías')
 @Controller('categories')
@@ -36,6 +39,8 @@ export class CategoriesController {
   }
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Category', action: 'CREATE' })
   @ApiOperation({ summary: 'Crear categoría' })
   async create(@Body() dto: CreateCategoryDto) {
@@ -44,6 +49,8 @@ export class CategoriesController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Category', action: 'UPDATE' })
   @ApiOperation({ summary: 'Actualizar categoría' })
   async update(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
@@ -52,6 +59,8 @@ export class CategoriesController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Category', action: 'DELETE' })
   @ApiOperation({ summary: 'Eliminar categoría (soft delete)' })
   async remove(@Param('id') id: string) {

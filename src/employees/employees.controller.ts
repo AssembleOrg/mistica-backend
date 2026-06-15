@@ -15,7 +15,10 @@ import { CreateEmployeeDto, UpdateEmployeeDto, PaginatedDateFilterDto } from '..
 import { Employee } from '../common/interfaces';
 import { PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { Auditory } from '../common/decorators';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
 
 @ApiTags('Empleados')
 @Controller('employees')
@@ -25,6 +28,8 @@ export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Employee', action: 'CREATE' })
   @ApiOperation({ summary: 'Crear nuevo empleado' })
   @ApiResponse({ status: 201, description: 'Empleado creado exitosamente' })
@@ -62,6 +67,8 @@ export class EmployeesController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Employee', action: 'UPDATE' })
   @ApiOperation({ summary: 'Actualizar empleado' })
   @ApiResponse({ status: 200, description: 'Empleado actualizado exitosamente' })
@@ -76,6 +83,8 @@ export class EmployeesController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Employee', action: 'DELETE' })
   @ApiOperation({ summary: 'Eliminar empleado (soft delete)' })
   @ApiResponse({ status: 200, description: 'Empleado eliminado exitosamente' })

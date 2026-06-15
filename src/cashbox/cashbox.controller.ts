@@ -27,6 +27,7 @@ import {
   UpdateCashSessionLabelDto,
 } from '../common/dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { Auditory } from '../common/decorators';
 
 interface AuthRequest extends Request {
   user?: { id: string };
@@ -55,6 +56,7 @@ export class CashboxController {
   }
 
   @Post('open')
+  @Auditory({ entity: 'Cashbox', action: 'OPEN' })
   @ApiOperation({ summary: 'Abrir caja con un monto inicial de efectivo' })
   @ApiResponse({ status: 201, description: 'Caja abierta' })
   @ApiResponse({ status: 409, description: 'Ya hay una caja abierta' })
@@ -63,6 +65,7 @@ export class CashboxController {
   }
 
   @Post('current/incomes')
+  @Auditory({ entity: 'Cashbox', action: 'INCOME' })
   @ApiOperation({
     summary:
       'Registra un ingreso puntual de efectivo a la caja abierta (aporte del dueño, cambio chico, corrección). Suma al esperado de cierre.',
@@ -77,6 +80,7 @@ export class CashboxController {
   }
 
   @Post('current/egresses')
+  @Auditory({ entity: 'Cashbox', action: 'EXPENSE' })
   @ApiOperation({
     summary:
       'Registra un egreso puntual de efectivo desde la caja abierta (retiro, pago a proveedor, gasto). Se descuenta del esperado de cierre.',
@@ -91,6 +95,7 @@ export class CashboxController {
   }
 
   @Post('close')
+  @Auditory({ entity: 'Cashbox', action: 'CLOSE' })
   @ApiOperation({
     summary: 'Cerrar la caja abierta. El backend calcula esperado y discrepancia.',
   })

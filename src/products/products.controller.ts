@@ -20,7 +20,10 @@ import {
 import { Product } from '../common/interfaces';
 import { PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { Auditory } from '../common/decorators';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
 
 @ApiTags('Productos')
 @Controller('products')
@@ -30,6 +33,8 @@ export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Product', action: 'CREATE' })
   @ApiOperation({ summary: 'Crear nuevo producto' })
   @ApiResponse({ status: 201, description: 'Producto creado exitosamente' })
@@ -40,6 +45,8 @@ export class ProductsController {
   }
 
   @Post('bulk-update')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Product', action: 'BULK_UPDATE' })
   @ApiOperation({
     summary: 'Actualización masiva por código de barras',
@@ -112,6 +119,8 @@ export class ProductsController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Product', action: 'UPDATE' })
   @ApiOperation({ summary: 'Actualizar producto' })
   @ApiResponse({ status: 200, description: 'Producto actualizado exitosamente' })
@@ -126,6 +135,8 @@ export class ProductsController {
   }
 
   @Patch(':id/stock/add')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Product', action: 'UPDATE_STOCK' })
   @ApiOperation({ summary: 'Agregar stock al producto' })
   @ApiResponse({ status: 200, description: 'Stock actualizado exitosamente' })
@@ -139,6 +150,8 @@ export class ProductsController {
   }
 
   @Patch(':id/stock/subtract')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Product', action: 'UPDATE_STOCK' })
   @ApiOperation({ summary: 'Restar stock del producto' })
   @ApiResponse({ status: 200, description: 'Stock actualizado exitosamente' })
@@ -152,6 +165,8 @@ export class ProductsController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Auditory({ entity: 'Product', action: 'DELETE' })
   @ApiOperation({ summary: 'Eliminar producto (soft delete)' })
   @ApiResponse({ status: 200, description: 'Producto eliminado exitosamente' })
