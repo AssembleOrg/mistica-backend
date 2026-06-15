@@ -5,6 +5,7 @@ export interface Client {
   email?: string;
   notes?: string;
   cuit?: string;
+  labels?: string[];
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date;

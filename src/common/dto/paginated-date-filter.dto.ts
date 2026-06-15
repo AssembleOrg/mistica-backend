@@ -1,4 +1,4 @@
-import { IsOptional, IsDateString } from 'class-validator';
+import { IsOptional, IsDateString, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaginationDto } from './pagination.dto';
 
@@ -20,4 +20,9 @@ export class PaginatedDateFilterDto extends PaginationDto {
   @IsOptional()
   @IsDateString({}, { message: 'La fecha de fin debe tener un formato válido' })
   to?: string;
+
+  @ApiPropertyOptional({ description: 'ID de etiqueta para filtrar clientes' })
+  @IsOptional()
+  @IsString()
+  labelId?: string;
 }

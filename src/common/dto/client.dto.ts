@@ -67,7 +67,13 @@ export class CreateClientDto {
   @MaxLength(13, { message: 'El CUIT no puede exceder 13 caracteres' })
   cuit?: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({ description: 'IDs de etiquetas del cliente', type: [String] })
+  @IsOptional()
+  @IsArray({ message: 'Las etiquetas deben ser un array' })
+  @IsString({ each: true, message: 'Cada etiqueta debe ser un string' })
+  labels?: string[];
+
+  @ApiPropertyOptional({
     description: 'Prepaids del cliente',
     type: [CreatePrepaidDto]
   })
@@ -110,7 +116,13 @@ export class UpdateClientDto {
   @MaxLength(13, { message: 'El CUIT no puede exceder 13 caracteres' })
   cuit?: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({ description: 'IDs de etiquetas del cliente', type: [String] })
+  @IsOptional()
+  @IsArray({ message: 'Las etiquetas deben ser un array' })
+  @IsString({ each: true, message: 'Cada etiqueta debe ser un string' })
+  labels?: string[];
+
+  @ApiPropertyOptional({
     description: 'Prepaids del cliente',
     type: [CreatePrepaidDto]
   })

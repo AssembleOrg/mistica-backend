@@ -17,6 +17,7 @@ import { FinanceModule } from './finance/finance.module';
 import { CreditNotesModule } from './credit-notes/credit-notes.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AuditModule } from './audit/audit.module';
+import { ClientLabelsModule } from './client-labels/client-labels.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { AuditModule } from './audit/audit.module';
     FinanceModule,
     CreditNotesModule,
     AuditModule,
+    ClientLabelsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

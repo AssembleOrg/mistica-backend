@@ -29,6 +29,7 @@ export class ClientsService {
       email: clientObj.email,
       notes: clientObj.notes,
       cuit: clientObj.cuit,
+      labels: (clientObj.labels || []).map((id: any) => id.toString()),
       createdAt: clientObj.createdAt,
       updatedAt: clientObj.updatedAt,
       deletedAt: clientObj.deletedAt,
@@ -147,6 +148,10 @@ export class ClientsService {
       ];
     }
     
+    if (paginationDto?.labelId) {
+      filter.labels = paginationDto.labelId;
+    }
+
     // Filtros de fecha
     const dateFilter = buildDateFilter(from, to);
     Object.assign(filter, dateFilter);

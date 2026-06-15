@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { ClientLabel } from './client-label.schema';
 
 export type ClientDocument = Client & Document;
 
@@ -23,6 +24,9 @@ export class Client {
   @Prop({ trim: true })
   cuit?: string;
 
+  @Prop({ type: [Types.ObjectId], ref: ClientLabel.name, default: [] })
+  labels: Types.ObjectId[];
+
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
 
@@ -41,3 +45,4 @@ ClientSchema.index({ email: 1 });
 ClientSchema.index({ phone: 1 });
 ClientSchema.index({ cuit: 1 });
 ClientSchema.index({ deletedAt: 1 });
+ClientSchema.index({ labels: 1 });
