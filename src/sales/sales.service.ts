@@ -658,19 +658,24 @@ export class SalesService {
       let balanceDue = 0;
 
       if (isPartial) {
-        // PAGO PARCIAL / PRECIO LIBRE: el total de la venta ES lo que se cobra
-        // ahora. La cuenta queda SALDADA: sin descuento, sin saldo, sin leyenda.
-        // El precio de lista de los productos se ignora — los ítems (si hay) se
-        // reescalan más abajo para sumar este total y que el recibo sea coherente.
-        // La venta nace PENDING (status inicializado arriba) y sigue el flujo normal.
         if (paymentsSum <= 0) {
           throw new BadRequestException('Una venta con pago parcial requiere al menos un pago > 0.');
         }
-        finalTotal = Number(paymentsSum.toFixed(2));
-        subtotal = finalTotal;
-        finalDiscount = 0;
-        prepaidUsed = 0;
-        balanceDue = 0;
+        if (processedItems.length > 0) {
+          // Seña real: hay items con precio de lista. El total es el precio real,
+          // balanceDue = lo que falta abonar. Los items se guardan sin rescalar.
+          // finalTotal ya viene de totals.total (precio de lista calculado arriba).
+          finalDiscount = 0;
+          prepaidUsed = 0;
+          balanceDue = Number(Math.max(0, finalTotal - paymentsSum).toFixed(2));
+        } else {
+          // Sin items: modo precio libre (el operador tipea lo que cobra ahora).
+          finalTotal = Number(paymentsSum.toFixed(2));
+          subtotal = finalTotal;
+          finalDiscount = 0;
+          prepaidUsed = 0;
+          balanceDue = 0;
+        }
       } else if (processedItems.length === 0) {
         // Venta sin productos (no PARTIAL): el total ES el monto pagado.
         if (paymentsSum <= 0) {
@@ -699,13 +704,14 @@ export class SalesService {
       // Normalizar pagos: 1 entrada por método, amount > 0, createdAt = now.
       const payments = this.buildSalePayments(createSaleDto.payments);
 
-      // En pago parcial (precio libre) reescalamos los ítems para que sus
-      // subtotales sumen el total cobrado: el recibo no muestra el precio de
-      // lista ni huecos. En ventas normales se guardan tal cual.
-      const itemsForSale =
-        isPartial && processedItems.length > 0
-          ? this.rescaleItemsToTotal(processedItems, finalTotal)
-          : processedItems;
+      // Si hay saldo pendiente la venta nace PARTIAL (no PENDING).
+      if (balanceDue > 0.01) {
+        saleStatus = SaleStatus.PARTIAL;
+      }
+
+      // Nunca rescalar items: en seña real se guardan al precio de lista;
+      // en precio libre (sin items) no hay items que rescalar.
+      const itemsForSale = processedItems;
 
       // Crear la venta
       const sale = await this.saleModel.create({
@@ -967,9 +973,12 @@ export class SalesService {
     if (sale.status === SaleStatus.CANCELLED) {
       throw new VentaCanceladaException(sale.saleNumber);
     }
-    // Sólo tiene sentido agregar pagos a una venta con saldo pendiente. Ya no
-    // existe el estado seña: son ventas PENDING con balanceDue > 0.
-    if (!(sale.status === SaleStatus.PENDING && (sale.balanceDue ?? 0) > 0.01)) {
+    // Sólo tiene sentido agregar pagos a una venta con saldo pendiente.
+    // Acepta tanto PENDING como PARTIAL (seña real con balanceDue > 0).
+    const canAddPayment =
+      (sale.status === SaleStatus.PENDING || sale.status === SaleStatus.PARTIAL) &&
+      (sale.balanceDue ?? 0) > 0.01;
+    if (!canAddPayment) {
       throw new BadRequestException(
         `Sólo se pueden agregar pagos a una venta pendiente con saldo. Estado actual: ${sale.status}, saldo: ${(sale.balanceDue ?? 0).toFixed(2)}.`,
       );
