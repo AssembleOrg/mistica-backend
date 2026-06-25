@@ -96,12 +96,13 @@ export class Sale {
       {
         saleId: { type: SchemaTypes.ObjectId, ref: 'Sale' },
         saleNumber: { type: String },
+        saleName: { type: String },
         amount: { type: Number, min: 0 },
       },
     ],
     default: [],
   })
-  settledLines: Array<{ saleId: Types.ObjectId; saleNumber: string; amount: number }>;
+  settledLines: Array<{ saleId: Types.ObjectId; saleNumber: string; saleName?: string; amount: number }>;
 
   @Prop({ required: true, min: 0 })
   total: number;

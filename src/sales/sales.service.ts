@@ -72,6 +72,7 @@ export class SalesService {
       settledLines: (saleObj.settledLines || []).map((l: any) => ({
         saleId: l.saleId?.toString(),
         saleNumber: l.saleNumber,
+        saleName: l.saleName,
         amount: l.amount,
       })),
       notes: saleObj.notes,
@@ -766,6 +767,7 @@ export class SalesService {
         settledLines: settlements.map((x) => ({
           saleId: x.sale._id,
           saleNumber: x.sale.saleNumber,
+          saleName: x.sale.name,
           amount: x.amount,
         })),
         notes: createSaleDto.notes,
