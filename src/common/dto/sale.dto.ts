@@ -48,6 +48,23 @@ export class CreateSaleItemDto {
 }
 
 /**
+ * Abono a cuenta de una venta anterior con saldo pendiente, cobrado DENTRO de
+ * una venta nueva. `amount` es cuánto de ese saldo se cobra ahora (puede ser
+ * parcial: el cliente puede tener varias ventas parciales abiertas y abonar de
+ * a una y por montos parciales). Debe ser > 0 y ≤ balanceDue de esa venta.
+ */
+export class SettleSaleDto {
+  @ApiProperty({ description: 'ID de la venta anterior con saldo pendiente' })
+  @IsMongoId({ message: 'El saleId debe ser un ObjectId válido' })
+  saleId: string;
+
+  @ApiProperty({ description: 'Monto del saldo a cobrar ahora (≤ balanceDue)', minimum: 0.01 })
+  @IsNumber({}, { message: 'El monto debe ser un número' })
+  @Min(0.01, { message: 'El monto a abonar debe ser mayor a 0' })
+  amount: number;
+}
+
+/**
  * Línea de pago de una venta. Una venta puede tener varias (efectivo +
  * tarjeta + transferencia, en cualquier combinación). Se permite una sola
  * entrada por método: si el cliente pone "$5 cash + $3 cash" se suma como
@@ -144,14 +161,14 @@ export class CreateSaleDto {
 
   @ApiPropertyOptional({
     description:
-      'Ids de ventas PENDING/PARTIAL del mismo cliente cuyo saldo pendiente (balanceDue) se cobra DENTRO de esta venta nueva. El saldo se suma al total de esta venta (como recargo, NO genera stock) y cada venta vieja queda saldada (COMPLETED, balanceDue=0) sin sumarle pago — la plata se contabiliza una sola vez, acá. Ambas ventas quedan vinculadas (relatedSaleIds). Sólo aplica a venta nueva NO parcial.',
-    type: [String],
-    example: ['66b0...'],
+      'Abonos a cuenta de ventas PENDING/PARTIAL del mismo cliente, cobrados DENTRO de esta venta nueva. Por cada una se indica cuánto del saldo se cobra ahora (parcial o total). Ese monto se suma al total de esta venta (como recargo, NO genera stock) y se descuenta del balanceDue de la venta vieja, bajando su total — sin sumarle pago, así la plata se contabiliza una sola vez, acá. Si el saldo de la vieja queda en 0 pasa a COMPLETED; si no, sigue con su saldo restante. Ambas ventas quedan vinculadas. Sólo aplica a venta nueva NO parcial.',
+    type: [SettleSaleDto],
   })
   @IsOptional()
-  @IsArray({ message: 'settlesSaleIds debe ser un array' })
-  @IsMongoId({ each: true, message: 'Cada id debe ser un ObjectId válido' })
-  settlesSaleIds?: string[];
+  @IsArray({ message: 'settlements debe ser un array' })
+  @ValidateNested({ each: true })
+  @Type(() => SettleSaleDto)
+  settlements?: SettleSaleDto[];
 
   @ApiPropertyOptional({ description: 'Notas adicionales' })
   @IsOptional()
