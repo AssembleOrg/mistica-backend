@@ -142,6 +142,17 @@ export class CreateSaleDto {
   @Min(0, { message: 'partialTotal debe ser ≥ 0' })
   partialTotal?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Ids de ventas PENDING/PARTIAL del mismo cliente cuyo saldo pendiente (balanceDue) se cobra DENTRO de esta venta nueva. El saldo se suma al total de esta venta (como recargo, NO genera stock) y cada venta vieja queda saldada (COMPLETED, balanceDue=0) sin sumarle pago — la plata se contabiliza una sola vez, acá. Ambas ventas quedan vinculadas (relatedSaleIds). Sólo aplica a venta nueva NO parcial.',
+    type: [String],
+    example: ['66b0...'],
+  })
+  @IsOptional()
+  @IsArray({ message: 'settlesSaleIds debe ser un array' })
+  @IsMongoId({ each: true, message: 'Cada id debe ser un ObjectId válido' })
+  settlesSaleIds?: string[];
+
   @ApiPropertyOptional({ description: 'Notas adicionales' })
   @IsOptional()
   @IsString({ message: 'Las notas deben ser una cadena de texto' })

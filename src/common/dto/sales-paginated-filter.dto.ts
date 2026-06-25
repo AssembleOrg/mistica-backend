@@ -30,4 +30,13 @@ export class SalesPaginatedFilterDto extends PaginatedDateFilterDto {
   @IsEnum(PaymentMethodFilter, { message: 'El método debe ser CASH, CARD, TRANSFER o MIXED' })
   @Transform(({ value }) => value === '' ? undefined : value)
   paymentMethod?: PaymentMethodFilter;
+
+  @ApiPropertyOptional({
+    description:
+      'Si true, la búsqueda matchea también N° de venta y nombre de producto (además del nombre amigable de la venta). Por defecto la búsqueda es sólo por nombre de venta.',
+    default: false,
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  fullSearch?: boolean;
 }

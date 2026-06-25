@@ -612,6 +612,18 @@ export class SalesService {
       // Validar y procesar items (puede venir vacío: venta sin productos).
       const processedItems = await this.validateAndProcessItems(createSaleDto.items ?? []);
 
+      // Ventas viejas cuyo saldo se cobra DENTRO de esta venta nueva. Se cargan
+      // y validan acá; el monto a saldar se suma al total como recargo (no toca
+      // stock) y las ventas viejas se saldan más abajo (sin sumarles pago).
+      const settleSales = await this.loadSettleableSales(
+        createSaleDto.settlesSaleIds ?? [],
+        createSaleDto.clientId,
+        createSaleDto.isPartial === true,
+      );
+      const settledAmount = Number(
+        settleSales.reduce((acc, s) => acc + (s.balanceDue || 0), 0).toFixed(2),
+      );
+
       // Generar número de venta único
       const saleNumber = await this.generateSaleNumber();
 
@@ -619,7 +631,9 @@ export class SalesService {
       // suma de los pagos ("monto a cobrar") — se reasigna más abajo.
       let subtotal = processedItems.reduce((sum, item) => sum + item.subtotal, 0);
       const taxPercent = createSaleDto.tax || 0;
-      const discountFlat = createSaleDto.discount || 0;
+      // El saldo transferido se pliega como recargo (descuento negativo) para
+      // que `total = subtotal + tax - discount` siga siendo consistente.
+      const discountFlat = (createSaleDto.discount || 0) - settledAmount;
       let prepaidUsed = createSaleDto.prepaidUsed || 0;
 
       // Manejar consumo de prepaids según los parámetros (solo si hay cliente)
@@ -768,6 +782,16 @@ export class SalesService {
         await this.prepaidModel.create(prepaidDocs);
       }
 
+      // Saldar las ventas viejas cuyo saldo se cobró acá y vincularlas (mutuo).
+      if (settleSales.length > 0) {
+        await this.settleTransferredSales(settleSales, sale);
+        await this.setLinks(
+          sale._id.toString(),
+          settleSales.map((s) => String(s._id)),
+        );
+        return this.findOne(sale._id.toString());
+      }
+
       return this.mapToSaleResponse(sale);
     } catch (error) {
       if (error instanceof ClienteNoEncontradoException ||
@@ -784,16 +808,28 @@ export class SalesService {
   }
 
   async findAll(paginationDto?: SalesPaginatedFilterDto): Promise<PaginatedResponse<Sale>> {
-    const { page = 1, limit = 10, search, from, to, status, clientId, paymentMethod } = paginationDto || {};
+    const { page = 1, limit = 10, search, from, to, status, clientId, paymentMethod, fullSearch } = paginationDto || {};
     const skip = (page - 1) * limit;
 
     // Construir filtros
     const filters: any = { deletedAt: { $exists: false } };
-    
-    // Filtro de búsqueda: SOLO por el nombre amigable de la venta.
-    // (Decisión del producto: bloquear búsqueda por N° de venta y por cliente.)
+
+    // Filtro de búsqueda. Por defecto SOLO por el nombre amigable de la venta
+    // (decisión de producto para la tabla global). Con `fullSearch=true` (ej.
+    // el modal de historial por cliente) además matchea N° de venta y nombre
+    // de producto. Se escapan los metacaracteres de regex para no romper.
     if (search) {
-      filters.name = { $regex: search, $options: 'i' };
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rx = { $regex: escaped, $options: 'i' };
+      if (fullSearch) {
+        filters.$or = [
+          { name: rx },
+          { saleNumber: rx },
+          { 'items.productName': rx },
+        ];
+      } else {
+        filters.name = rx;
+      }
     }
     
     // Filtro por status
@@ -933,6 +969,94 @@ export class SalesService {
     }
 
     return this.findOne(id);
+  }
+
+  /**
+   * Carga y valida las ventas viejas cuyo saldo (balanceDue) se va a cobrar
+   * dentro de una venta nueva. Reglas:
+   *  - No se permite combinar con venta nueva parcial (sería ambiguo).
+   *  - Cada venta debe existir (no borrada), ser PENDING/PARTIAL y tener
+   *    balanceDue > 0.
+   *  - Deben pertenecer al mismo cliente que la venta nueva (si ésta tiene
+   *    cliente) para evitar transferir saldo entre clientes por error.
+   * Devuelve los documentos (con balanceDue) listos para saldar.
+   */
+  private async loadSettleableSales(
+    settlesSaleIds: string[],
+    clientId: string | undefined,
+    isPartial: boolean,
+  ): Promise<SaleDocument[]> {
+    const ids = [...new Set((settlesSaleIds || []).filter(Boolean))];
+    if (ids.length === 0) return [];
+
+    if (isPartial) {
+      throw new BadRequestException(
+        'No se puede cobrar el saldo de ventas anteriores en una venta parcial. Cobrá el saldo en una venta normal.',
+      );
+    }
+
+    const sales = await this.saleModel
+      .find({ _id: { $in: ids }, deletedAt: { $exists: false } })
+      .exec();
+
+    if (sales.length !== ids.length) {
+      throw new BadRequestException(
+        'Alguna de las ventas a saldar no existe o fue eliminada.',
+      );
+    }
+
+    for (const s of sales) {
+      const canSettle =
+        (s.status === SaleStatus.PENDING || s.status === SaleStatus.PARTIAL) &&
+        (s.balanceDue ?? 0) > 0.01;
+      if (!canSettle) {
+        throw new BadRequestException(
+          `La venta ${s.saleNumber} no tiene saldo pendiente para cobrar (estado: ${s.status}, saldo: ${(s.balanceDue ?? 0).toFixed(2)}).`,
+        );
+      }
+      if (clientId && s.clientId && s.clientId.toString() !== clientId) {
+        throw new BadRequestException(
+          `La venta ${s.saleNumber} pertenece a otro cliente y no puede saldarse en esta venta.`,
+        );
+      }
+    }
+
+    return sales;
+  }
+
+  /**
+   * Salda las ventas viejas cuyo saldo se cobró dentro de `newSale`. NO les
+   * agrega pago: la plata ya quedó registrada en la venta nueva. Espeja la
+   * lógica del cierre de caja (confirmPendingSales): el saldo no cobrado en la
+   * venta vieja se vuelca a `discount`, el total baja a lo efectivamente
+   * cobrado en ella (Σ pagos) y queda COMPLETED con balanceDue = 0. Así la
+   * plata se cuenta una sola vez (en la venta nueva) y el stock no se duplica.
+   */
+  private async settleTransferredSales(
+    sales: SaleDocument[],
+    newSale: SaleDocument,
+  ): Promise<void> {
+    // Capturar los saldos ANTES de ponerlos en 0, para las notas.
+    const refs = sales.map(
+      (s) => `${s.saleNumber} ($${(s.balanceDue || 0).toFixed(2)})`,
+    );
+
+    for (const s of sales) {
+      const paid = (s.payments || []).reduce((acc, p) => acc + (p.amount || 0), 0);
+      const transferred = Number((s.balanceDue || 0).toFixed(2));
+      s.discount = Number(((s.discount || 0) + transferred).toFixed(2));
+      s.total = Number(paid.toFixed(2));
+      s.balanceDue = 0;
+      s.status = SaleStatus.COMPLETED;
+      const note = `Saldo de $${transferred.toFixed(2)} cobrado en la venta ${newSale.saleNumber}.`;
+      s.notes = s.notes ? `${s.notes}\n${note}` : note;
+      await s.save();
+    }
+
+    // Dejar registrado en la venta nueva qué saldos incluye.
+    const note = `Incluye saldo de venta(s) anterior(es): ${refs.join(', ')}.`;
+    newSale.notes = newSale.notes ? `${newSale.notes}\n${note}` : note;
+    await newSale.save();
   }
 
   /**
