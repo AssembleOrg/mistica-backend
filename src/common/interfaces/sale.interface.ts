@@ -56,6 +56,9 @@ export interface Sale {
   status: SaleStatus;
   /** Saldo pendiente. Sólo > 0 cuando status === PARTIAL. */
   balanceDue: number;
+  /** Cobros de saldo de ventas anteriores hechos en esta venta (para mostrar
+   *  como línea "Saldo pendiente V-XXX"). El monto ya está incluido en `total`. */
+  settledLines?: Array<{ saleId?: string; saleNumber: string; amount: number }>;
   notes?: string;
   seller?: string;
   afipCae?: string; // Código de Autorización Electrónico

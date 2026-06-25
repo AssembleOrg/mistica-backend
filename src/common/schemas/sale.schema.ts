@@ -85,6 +85,24 @@ export class Sale {
   @Prop({ type: [SchemaTypes.ObjectId], ref: 'Sale', default: [] })
   relatedSaleIds: Types.ObjectId[];
 
+  // Líneas de "cobro de saldo de venta anterior": cada vez que esta venta cobra
+  // (parcial o total) el saldo pendiente de otra venta, se registra acá para
+  // mostrarlo como una línea/leyenda ("Saldo pendiente V-XXX $monto") en el
+  // modal y el ticket. El monto YA está incluido en `total` (no es stock, no es
+  // descuento). Sólo informativo/display — la baja del saldo vive en la venta
+  // vieja (ver settleTransferredSales).
+  @Prop({
+    type: [
+      {
+        saleId: { type: SchemaTypes.ObjectId, ref: 'Sale' },
+        saleNumber: { type: String },
+        amount: { type: Number, min: 0 },
+      },
+    ],
+    default: [],
+  })
+  settledLines: Array<{ saleId: Types.ObjectId; saleNumber: string; amount: number }>;
+
   @Prop({ required: true, min: 0 })
   total: number;
 

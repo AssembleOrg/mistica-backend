@@ -69,6 +69,11 @@ export class SalesService {
       })),
       status: saleObj.status,
       balanceDue: saleObj.balanceDue ?? 0,
+      settledLines: (saleObj.settledLines || []).map((l: any) => ({
+        saleId: l.saleId?.toString(),
+        saleNumber: l.saleNumber,
+        amount: l.amount,
+      })),
       notes: saleObj.notes,
       seller: saleObj.seller,
       afipCae: saleObj.afipCae,
@@ -631,9 +636,11 @@ export class SalesService {
       // suma de los pagos ("monto a cobrar") — se reasigna más abajo.
       let subtotal = processedItems.reduce((sum, item) => sum + item.subtotal, 0);
       const taxPercent = createSaleDto.tax || 0;
-      // El saldo transferido se pliega como recargo (descuento negativo) para
-      // que `total = subtotal + tax - discount` siga siendo consistente.
-      const discountFlat = (createSaleDto.discount || 0) - settledAmount;
+      // El descuento es sólo el del usuario. El cobro de saldo de ventas
+      // anteriores (settledAmount) NO se pliega acá: se suma aparte al total y
+      // se guarda como `settledLines` para mostrarlo como una línea propia
+      // ("Saldo pendiente V-XXX") en el modal y el ticket.
+      const discountFlat = createSaleDto.discount || 0;
       let prepaidUsed = createSaleDto.prepaidUsed || 0;
 
       // Manejar consumo de prepaids según los parámetros (solo si hay cliente)
@@ -691,18 +698,25 @@ export class SalesService {
           balanceDue = 0;
         }
       } else if (processedItems.length === 0) {
-        // Venta sin productos (no PARTIAL): el total ES el monto pagado (que
-        // puede incluir abonos a cuenta de ventas anteriores). El subtotal se
-        // alinea al pago y el recargo pre-plegado del abono se descarta para no
-        // romper la invariante total = subtotal + tax − discount.
+        // Venta sin productos (no PARTIAL): el total ES el monto pagado. Ese
+        // monto puede incluir el cobro de saldos anteriores (settledAmount); el
+        // subtotal de productos es lo que sobra (paymentsSum − settledAmount),
+        // así el saldo se muestra como su propia línea y no infla el subtotal.
         if (paymentsSum <= 0) {
           throw new BadRequestException(
             'Una venta sin productos requiere un monto a cobrar mayor a 0.',
           );
         }
-        subtotal = paymentsSum;
+        subtotal = Number(Math.max(0, paymentsSum - settledAmount).toFixed(2));
         finalTotal = paymentsSum;
         finalDiscount = 0;
+      }
+
+      // El cobro de saldo de ventas anteriores suma al total (no es producto ni
+      // descuento; se muestra como línea propia). En venta sin productos ya
+      // quedó incluido (finalTotal = paymentsSum).
+      if (!isPartial && processedItems.length > 0 && settledAmount > 0) {
+        finalTotal = Number((finalTotal + settledAmount).toFixed(2));
       }
 
       // Ajuste automático (sólo ventas NO PARCIALES): la venta se salda con lo
@@ -749,6 +763,11 @@ export class SalesService {
         payments,
         status: saleStatus,
         balanceDue,
+        settledLines: settlements.map((x) => ({
+          saleId: x.sale._id,
+          saleNumber: x.sale.saleNumber,
+          amount: x.amount,
+        })),
         notes: createSaleDto.notes,
         seller: createSaleDto.seller,
       });
