@@ -10,3 +10,7 @@ export * from './egress.schema';
 export * from './cash-income.schema';
 export * from './cash-session.schema';
 export * from './credit-note.schema';
+export * from './experience.schema';
+export * from './experience-session.schema';
+export * from './reservation.schema';
+export * from './reservation-payment.schema';

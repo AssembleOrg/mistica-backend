@@ -14,3 +14,6 @@ export * from './egress-paginated-filter.dto';
 export * from './cash-session.dto';
 export * from './finance-summary.dto';
 export * from './credit-note.dto';
+export * from './experience.dto';
+export * from './experience-session.dto';
+export * from './reservation.dto';

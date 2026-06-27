@@ -18,6 +18,8 @@ import { CreditNotesModule } from './credit-notes/credit-notes.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AuditModule } from './audit/audit.module';
 import { ClientLabelsModule } from './client-labels/client-labels.module';
+import { ExperiencesModule } from './experiences/experiences.module';
+import { ReservationsModule } from './reservations/reservations.module';
 
 @Module({
   imports: [
@@ -40,6 +42,8 @@ import { ClientLabelsModule } from './client-labels/client-labels.module';
     CreditNotesModule,
     AuditModule,
     ClientLabelsModule,
+    ReservationsModule,
+    ExperiencesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

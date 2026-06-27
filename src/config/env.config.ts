@@ -13,4 +13,18 @@ export const envConfig = {
   swagger: {
     enabled: process.env.SWAGGER_ENABLED === 'true',
   },
-}; 
+  mercadopago: {
+    accessToken: process.env.MP_ACCESS_TOKEN || '',
+    // Secreto de la firma del webhook (Tus integraciones → Webhooks → Firma).
+    // Si está vacío, no se valida firma (sólo recomendable en dev).
+    webhookSecret: process.env.MP_WEBHOOK_SECRET || '',
+  },
+  urls: {
+    // Front público (back_urls de la preference: success/failure/pending).
+    frontend: process.env.FRONTEND_URL || 'http://localhost:3001',
+    // Base pública de este backend (notification_url del webhook).
+    backend: process.env.BACKEND_URL || 'http://localhost:3000',
+  },
+  // Zona horaria del negocio: las fechas/horas de turnos se interpretan acá.
+  timezone: process.env.TZ_BUSINESS || 'America/Argentina/Buenos_Aires',
+};
