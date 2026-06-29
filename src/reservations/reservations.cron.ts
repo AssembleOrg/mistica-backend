@@ -36,4 +36,14 @@ export class ReservationsCron {
       this.logger.error(`processPendingReservationSales falló: ${String(err)}`);
     }
   }
+
+  // Recordatorios de turnos próximos (~24 h antes). Cada hora.
+  @Cron(CronExpression.EVERY_HOUR)
+  async sendReminders(): Promise<void> {
+    try {
+      await this.reservationsService.sendDueReminders();
+    } catch (err) {
+      this.logger.error(`sendDueReminders falló: ${String(err)}`);
+    }
+  }
 }

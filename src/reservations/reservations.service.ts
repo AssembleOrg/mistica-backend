@@ -7,13 +7,17 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomInt } from 'node:crypto';
+import { DateTime } from 'luxon';
 import { Model, Types } from 'mongoose';
 import { CashboxService } from '../cashbox/cashbox.service';
+import { envConfig } from '../config/env.config';
 import {
   AdminCreateReservationDto,
+  AdminUpdateReservationDto,
   CreateHoldDto,
   ListReservationsQueryDto,
 } from '../common/dto/reservation.dto';
+import { AddSalePaymentsDto } from '../common/dto/sale.dto';
 import {
   PaymentMethod,
   ProductKind,
@@ -40,6 +44,8 @@ import {
 } from '../common/schemas/reservation-payment.schema';
 import { CreateSaleDto } from '../common/dto/sale.dto';
 import { MercadopagoService } from '../mercadopago/mercadopago.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { computeReservationAmounts } from './reservation-amounts';
 import { SalesService } from '../sales/sales.service';
 
 // Minutos que vive un hold sin pago antes de liberar el cupo.
@@ -69,6 +75,7 @@ export class ReservationsService {
     private readonly mercadopago: MercadopagoService,
     private readonly cashbox: CashboxService,
     private readonly salesService: SalesService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // ───────────────────────── Público: hold + pago ─────────────────────────
@@ -93,11 +100,13 @@ export class ReservationsService {
     ]);
 
     const unitPrice = session.price;
-    const total = unitPrice * qty;
     // Seña: en Mística se cobra el 50% al reservar; el resto queda pendiente.
     const pct = session.depositPct ?? 50;
-    const deposit = Math.round((total * pct) / 100);
-    const balanceDue = total - deposit;
+    const { total, deposit, balanceDue } = computeReservationAmounts(
+      unitPrice,
+      qty,
+      pct,
+    );
     const now = new Date();
     const expiresAt = new Date(now.getTime() + HOLD_MINUTES * 60_000);
 
@@ -299,6 +308,7 @@ export class ReservationsService {
     );
     if (won) {
       await this.createSaleForReservation(won, PaymentMethod.MERCADOPAGO);
+      await this.notifyConfirmed(won);
       return;
     }
 
@@ -715,6 +725,154 @@ export class ReservationsService {
     }
     if (created) this.logger.log(`Ventas de reservas registradas: ${created}`);
     return created;
+  }
+
+  // ───────────────────────── Notificaciones ─────────────────────────
+
+  private fmtWhen(d: Date): string {
+    return DateTime.fromJSDate(d)
+      .setZone(envConfig.timezone)
+      .setLocale('es')
+      .toFormat("cccc d 'de' LLLL 'a las' HH:mm 'hs'");
+  }
+
+  /** Aviso al cliente cuando su reserva queda confirmada (post-pago). */
+  private async notifyConfirmed(r: ReservationDocument): Promise<void> {
+    if (!r.customerPhone) return;
+    const personas = `${r.quantity} ${r.quantity > 1 ? 'personas' : 'persona'}`;
+    const saldo =
+      r.balanceDue > 0
+        ? `Abonaste la seña. Saldo a completar en el local: $${r.balanceDue}.\n\n`
+        : '';
+    const msg =
+      `¡Tu reserva quedó confirmada! 🎉\n\n` +
+      `*${r.experienceName}*\n${this.fmtWhen(r.startAt)}\n${personas}\n` +
+      `Código: *${r.code}*\n\n${saldo}¡Te esperamos! 💛`;
+    await this.notifications.notify(r.customerPhone, msg);
+  }
+
+  /** Recordatorios de turnos próximos (~24 h). Idempotente vía reminderSentAt. */
+  async sendDueReminders(): Promise<number> {
+    const now = new Date();
+    const from = new Date(now.getTime() + 18 * 3600_000);
+    const to = new Date(now.getTime() + 30 * 3600_000);
+    const due = await this.reservationModel
+      .find({
+        status: ReservationStatus.CONFIRMED,
+        startAt: { $gte: from, $lte: to },
+        reminderSentAt: { $exists: false },
+        deletedAt: { $exists: false },
+      })
+      .limit(100)
+      .exec();
+    let sent = 0;
+    for (const r of due) {
+      if (r.customerPhone) {
+        const ok = await this.notifications.notify(
+          r.customerPhone,
+          `Te recordamos tu reserva en Mística ✨\n\n*${r.experienceName}*\n` +
+            `${this.fmtWhen(r.startAt)}\nCódigo: *${r.code}*\n\n¡Te esperamos! 💛`,
+        );
+        if (ok) sent++;
+      }
+      r.reminderSentAt = now;
+      await r.save();
+    }
+    if (sent) this.logger.log(`Recordatorios enviados: ${sent}`);
+    return sent;
+  }
+
+  // ───────────────────────── Admin: acciones sobre reservas ─────────────────
+
+  async adminCancel(id: string) {
+    const r = await this.findByIdOrThrow(id);
+    if (
+      r.status === ReservationStatus.CANCELLED ||
+      r.status === ReservationStatus.EXPIRED
+    ) {
+      return this.publicView(r);
+    }
+    const wasConfirmed = r.status === ReservationStatus.CONFIRMED;
+    const won = await this.reservationModel.findOneAndUpdate(
+      {
+        _id: r._id,
+        status: {
+          $in: [
+            ReservationStatus.PENDING,
+            ReservationStatus.CONFIRMED,
+            ReservationStatus.NEEDS_REVIEW,
+          ],
+        },
+      },
+      { $set: { status: ReservationStatus.CANCELLED, cancelledAt: new Date() } },
+      { new: true },
+    );
+    if (!won) return this.publicView(await this.findByIdOrThrow(id));
+    await this.releaseSeats(won.sessionId, won.quantity);
+    if (
+      wasConfirmed &&
+      won.paymentMethod === ReservationPaymentMethod.MERCADOPAGO
+    ) {
+      await this.refundReservation(won);
+    }
+    return this.publicView(won);
+  }
+
+  async adminResolveReview(id: string, action: 'confirm' | 'cancel') {
+    const r = await this.findByIdOrThrow(id);
+    if (r.status !== ReservationStatus.NEEDS_REVIEW) {
+      throw new ConflictException('La reserva no está en revisión.');
+    }
+    if (action === 'cancel') {
+      r.status = ReservationStatus.CANCELLED;
+      r.cancelledAt = new Date();
+      await r.save();
+      if (r.paymentMethod === ReservationPaymentMethod.MERCADOPAGO) {
+        await this.refundReservation(r);
+      }
+      return this.publicView(r);
+    }
+    // confirm: re-tomar cupo y registrar venta.
+    await this.reserveSeats(String(r.sessionId), r.quantity, [
+      SessionStatus.OPEN,
+      SessionStatus.CLOSED,
+    ]);
+    r.status = ReservationStatus.CONFIRMED;
+    r.confirmedAt = new Date();
+    await r.save();
+    await this.createSaleForReservation(
+      r,
+      this.mapToSalePaymentMethod(r.paymentMethod),
+    );
+    return this.publicView(r);
+  }
+
+  async adminUpdate(id: string, dto: AdminUpdateReservationDto) {
+    const r = await this.findByIdOrThrow(id);
+    if (dto.customerName !== undefined) r.customerName = dto.customerName;
+    if (dto.customerEmail !== undefined) r.customerEmail = dto.customerEmail;
+    if (dto.customerPhone !== undefined) r.customerPhone = dto.customerPhone;
+    if (dto.notes !== undefined) r.notes = dto.notes;
+    r.updatedAt = new Date();
+    await r.save();
+    return this.publicView(r);
+  }
+
+  /** Cobra el saldo pendiente sobre la venta vinculada (flujo POS). */
+  async adminCollectBalance(id: string, dto: AddSalePaymentsDto) {
+    const r = await this.findByIdOrThrow(id);
+    if (!r.saleId) {
+      throw new BadRequestException(
+        'La reserva no tiene una venta asociada para cobrar el saldo.',
+      );
+    }
+    await this.salesService.addPayments(String(r.saleId), {
+      ...dto,
+      markCompleted: dto.markCompleted ?? true,
+    });
+    r.balanceDue = 0;
+    await r.save();
+    return this.publicView(r);
   }
 
   private async findByIdOrThrow(id: string): Promise<ReservationDocument> {

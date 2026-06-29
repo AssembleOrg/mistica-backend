@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   IsEmail,
   IsEnum,
+  IsIn,
   IsInt,
   IsMongoId,
   IsOptional,
@@ -110,6 +111,38 @@ export class AdminCreateReservationDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+}
+
+export class AdminUpdateReservationDto {
+  @ApiPropertyOptional({ description: 'Nombre del cliente' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  customerName?: string;
+
+  @ApiPropertyOptional({ description: 'Email del cliente' })
+  @IsOptional()
+  @IsEmail()
+  @MaxLength(255)
+  customerEmail?: string;
+
+  @ApiPropertyOptional({ description: 'Teléfono / WhatsApp' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  customerPhone?: string;
+
+  @ApiPropertyOptional({ description: 'Notas internas' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}
+
+export class ResolveReviewDto {
+  @ApiProperty({ description: 'confirm = re-tomar cupo y confirmar; cancel = cancelar', enum: ['confirm', 'cancel'] })
+  @IsIn(['confirm', 'cancel'])
+  action: 'confirm' | 'cancel';
 }
 
 export class ListReservationsQueryDto {

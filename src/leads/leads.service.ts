@@ -12,11 +12,13 @@ import {
   UpdateLeadDto,
 } from '../common/dto/lead.dto';
 import { LeadSource } from '../common/enums/lead.enum';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class LeadsService {
   constructor(
     @InjectModel(Lead.name) private readonly leadModel: Model<LeadDocument>,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** Alta pública de una consulta (la usa el bot y la web). */
@@ -33,6 +35,19 @@ export class LeadsService {
       customerPhone: dto.customerPhone,
       source: dto.source ?? LeadSource.WHATSAPP,
     });
+
+    // Aviso al equipo (best-effort, no bloquea el alta).
+    const detalle = [
+      `📩 *Nueva consulta*: ${doc.service}`,
+      `Cliente: ${doc.customerName}`,
+      doc.customerPhone ? `Tel: ${doc.customerPhone}` : '',
+      doc.preferredDate ? `Fecha: ${doc.preferredDate}` : '',
+      doc.quantity ? `Personas: ${doc.quantity}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    void this.notifications.notifyTeam(detalle);
+
     return { id: String(doc._id), service: doc.service, status: doc.status };
   }
 

@@ -1,7 +1,11 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { NotificationsModule } from './notifications/notifications.module';
+import { BotControlModule } from './bot-control/bot-control.module';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { EmployeesModule } from './employees/employees.module';
@@ -46,8 +50,13 @@ import { LeadsModule } from './leads/leads.module';
     ReservationsModule,
     ExperiencesModule,
     LeadsModule,
+    NotificationsModule,
+    BotControlModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    { provide: APP_FILTER, useClass: AllExceptionsFilter },
+  ],
 })
 export class AppModule { }

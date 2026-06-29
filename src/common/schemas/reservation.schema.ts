@@ -139,6 +139,10 @@ export class Reservation {
   @Prop({ type: Boolean, default: false })
   salePending?: boolean;
 
+  // Cuándo se envió el recordatorio del turno (para no mandarlo dos veces).
+  @Prop({ type: Date })
+  reminderSentAt?: Date;
+
   // Usuario admin que la creó (si source === ADMIN).
   @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   createdById?: Types.ObjectId;

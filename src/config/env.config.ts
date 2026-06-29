@@ -25,6 +25,15 @@ export const envConfig = {
     // Base pública de este backend (notification_url del webhook).
     backend: process.env.BACKEND_URL || 'http://localhost:3000',
   },
+  // Bot de WhatsApp: server de control (enviar mensajes, ver QR, reconectar).
+  botControl: {
+    // URL base del control server del bot (ej. https://mistica-bot.up.railway.app).
+    url: process.env.BOT_CONTROL_URL || '',
+    // Secreto compartido (X-Bot-Secret). Sin esto, no se notifica ni se controla.
+    secret: process.env.BOT_CONTROL_SECRET || '',
+  },
+  // WhatsApp del equipo para avisos internos (nuevas consultas, errores).
+  teamWhatsapp: process.env.TEAM_WHATSAPP || '',
   // Zona horaria del negocio: las fechas/horas de turnos se interpretan acá.
   timezone: process.env.TZ_BUSINESS || 'America/Argentina/Buenos_Aires',
 };
