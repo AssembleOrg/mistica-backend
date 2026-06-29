@@ -24,6 +24,7 @@ export interface FinanceSummary {
     CASH: number;
     CARD: number;
     TRANSFER: number;
+    MERCADOPAGO: number;
   };
 
   // Estado de venta
@@ -51,7 +52,7 @@ export interface FinanceSummary {
   expenses: {
     count: number;
     total: number;
-    byPaymentMethod: { CASH: number; CARD: number; TRANSFER: number };
+    byPaymentMethod: { CASH: number; CARD: number; TRANSFER: number; MERCADOPAGO: number };
   };
 
   // Ingresos puntuales / correcciones de saldo (no son ventas) en el rango.
@@ -60,14 +61,14 @@ export interface FinanceSummary {
   incomes: {
     count: number;
     total: number;
-    byPaymentMethod: { CASH: number; CARD: number; TRANSFER: number };
+    byPaymentMethod: { CASH: number; CARD: number; TRANSFER: number; MERCADOPAGO: number };
   };
 
   // Prepaids (señas) en el rango
   prepaids: {
     count: number;
     total: number;
-    byPaymentMethod: { CASH: number; CARD: number; TRANSFER: number };
+    byPaymentMethod: { CASH: number; CARD: number; TRANSFER: number; MERCADOPAGO: number };
   };
 
   // Saldo neto del rango (revenue + prepaids + ingresos − egresos)
@@ -141,6 +142,7 @@ export class FinanceService {
       CASH: 0,
       CARD: 0,
       TRANSFER: 0,
+      MERCADOPAGO: 0,
     };
     const byStatus: FinanceSummary['byStatus'] = {
       PENDING: 0,
@@ -209,7 +211,7 @@ export class FinanceService {
     };
     if (query.paymentMethod) egressMatch.paymentMethod = query.paymentMethod;
     const egresses = await this.egressModel.find(egressMatch).lean().exec();
-    const expensesByPm = { CASH: 0, CARD: 0, TRANSFER: 0 };
+    const expensesByPm = { CASH: 0, CARD: 0, TRANSFER: 0, MERCADOPAGO: 0 };
     let expensesTotal = 0;
     for (const e of egresses) {
       expensesTotal += e.amount || 0;
@@ -225,7 +227,7 @@ export class FinanceService {
     };
     if (query.paymentMethod) incomeMatch.paymentMethod = query.paymentMethod;
     const incomes = await this.cashIncomeModel.find(incomeMatch).lean().exec();
-    const incomesByPm = { CASH: 0, CARD: 0, TRANSFER: 0 };
+    const incomesByPm = { CASH: 0, CARD: 0, TRANSFER: 0, MERCADOPAGO: 0 };
     let incomesTotal = 0;
     for (const i of incomes) {
       incomesTotal += i.amount || 0;
@@ -243,7 +245,7 @@ export class FinanceService {
     if (query.clientId === 'anonymous') prepaidMatch.clientId = { $exists: false };
     else if (query.clientId) prepaidMatch.clientId = new Types.ObjectId(query.clientId);
     const prepaids = await this.prepaidModel.find(prepaidMatch).lean().exec();
-    const prepaidsByPm = { CASH: 0, CARD: 0, TRANSFER: 0 };
+    const prepaidsByPm = { CASH: 0, CARD: 0, TRANSFER: 0, MERCADOPAGO: 0 };
     let prepaidsTotal = 0;
     for (const p of prepaids) {
       prepaidsTotal += p.amount || 0;

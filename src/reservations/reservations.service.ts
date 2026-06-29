@@ -16,6 +16,7 @@ import {
 } from '../common/dto/reservation.dto';
 import {
   PaymentMethod,
+  ProductKind,
   ReservationPaymentMethod,
   ReservationSource,
   ReservationStatus,
@@ -26,6 +27,10 @@ import {
   ExperienceSessionDocument,
 } from '../common/schemas/experience-session.schema';
 import {
+  Product,
+  ProductDocument,
+} from '../common/schemas/product.schema';
+import {
   Reservation,
   ReservationDocument,
 } from '../common/schemas/reservation.schema';
@@ -33,7 +38,9 @@ import {
   ReservationPayment,
   ReservationPaymentDocument,
 } from '../common/schemas/reservation-payment.schema';
+import { CreateSaleDto } from '../common/dto/sale.dto';
 import { MercadopagoService } from '../mercadopago/mercadopago.service';
+import { SalesService } from '../sales/sales.service';
 
 // Minutos que vive un hold sin pago antes de liberar el cupo.
 const HOLD_MINUTES = 10;
@@ -57,8 +64,11 @@ export class ReservationsService {
     private readonly sessionModel: Model<ExperienceSessionDocument>,
     @InjectModel(ReservationPayment.name)
     private readonly paymentModel: Model<ReservationPaymentDocument>,
+    @InjectModel(Product.name)
+    private readonly productModel: Model<ProductDocument>,
     private readonly mercadopago: MercadopagoService,
     private readonly cashbox: CashboxService,
+    private readonly salesService: SalesService,
   ) {}
 
   // ───────────────────────── Público: hold + pago ─────────────────────────
@@ -287,7 +297,10 @@ export class ReservationsService {
       { $set: { status: ReservationStatus.CONFIRMED, confirmedAt: now } },
       { new: true },
     );
-    if (won) return;
+    if (won) {
+      await this.createSaleForReservation(won, PaymentMethod.MERCADOPAGO);
+      return;
+    }
 
     // No estaba PENDING. Ver por qué.
     const r = await this.reservationModel.findById(reservationId).exec();
@@ -313,6 +326,7 @@ export class ReservationsService {
         r.confirmedAt = now;
         await r.save();
         this.logger.log(`Reserva ${reservationId} re-tomada tras pago tardío`);
+        await this.createSaleForReservation(r, PaymentMethod.MERCADOPAGO);
       } catch {
         // Sin cupo: marcar para revisión y reembolsar.
         r.status = ReservationStatus.NEEDS_REVIEW;
@@ -409,27 +423,13 @@ export class ReservationsService {
       throw err;
     }
 
-    // Impacto en caja (sólo si hay cobro real).
+    // Registrar la VENTA (experiencia como servicio + pago de seña/total). Para
+    // control. Cortesía no genera venta. Si la caja está cerrada, queda diferida.
     if (!isCourtesy && amount > 0) {
-      try {
-        const income = await this.cashbox.createIncome(
-          {
-            concept: `Reserva ${reservation.code} · ${session.experienceName}`,
-            amount,
-            paymentMethod: this.toCashPaymentMethod(dto.paymentMethod),
-            notes: dto.notes,
-          },
-          userId,
-        );
-        reservation.cashIncomeId = new Types.ObjectId(income.id);
-        await reservation.save();
-      } catch (err) {
-        // Caja cerrada u otro error: revertimos la reserva para no dejar un
-        // cobro sin respaldo en caja.
-        await this.releaseSeats(session._id as Types.ObjectId, qty);
-        await this.reservationModel.deleteOne({ _id: reservation._id });
-        throw err;
-      }
+      await this.createSaleForReservation(
+        reservation,
+        this.mapToSalePaymentMethod(dto.paymentMethod),
+      );
     }
 
     return this.publicView(reservation);
@@ -590,8 +590,10 @@ export class ReservationsService {
     );
   }
 
-  private toCashPaymentMethod(m: ReservationPaymentMethod): PaymentMethod {
+  private mapToSalePaymentMethod(m: ReservationPaymentMethod): PaymentMethod {
     switch (m) {
+      case ReservationPaymentMethod.MERCADOPAGO:
+        return PaymentMethod.MERCADOPAGO;
       case ReservationPaymentMethod.TRANSFER:
         return PaymentMethod.TRANSFER;
       case ReservationPaymentMethod.CARD:
@@ -599,6 +601,120 @@ export class ReservationsService {
       default:
         return PaymentMethod.CASH;
     }
+  }
+
+  /**
+   * Asegura que exista un Product (kind=SERVICE) para la experiencia, para poder
+   * usarla como línea de venta. Idempotente por barcode `EXP-<experienceId>`.
+   */
+  private async ensureExperienceProduct(
+    experienceId: Types.ObjectId,
+    name: string,
+    price: number,
+  ): Promise<Types.ObjectId> {
+    const barcode = `EXP-${String(experienceId)}`;
+    const existing = await this.productModel.findOne({ barcode }).exec();
+    if (existing) return existing._id as Types.ObjectId;
+    const created = await this.productModel.create({
+      name,
+      barcode,
+      category: 'Experiencias',
+      price,
+      stock: 0,
+      kind: ProductKind.SERVICE,
+    });
+    return created._id as Types.ObjectId;
+  }
+
+  /**
+   * Registra una VENTA para la reserva (experiencia como servicio + pago parcial
+   * de la seña). Nace PARTIAL si queda saldo, así sobrevive al cierre de caja y
+   * el saldo se cobra luego por el flujo POS (`addPayments`).
+   *
+   * Si la caja está cerrada (típico en webhooks 24/7), NO crea la venta: marca
+   * `salePending` y un cron la crea al abrir caja. Nunca lanza: un fallo de venta
+   * no debe tumbar la confirmación de la reserva.
+   */
+  private async createSaleForReservation(
+    reservation: ReservationDocument,
+    method: PaymentMethod,
+  ): Promise<void> {
+    if (reservation.saleId) return; // ya tiene venta
+    if (!reservation.depositAmount || reservation.depositAmount <= 0) return;
+
+    const openSession = await this.cashbox.findOpenSession();
+    if (!openSession) {
+      reservation.salePending = true;
+      await reservation.save();
+      this.logger.log(
+        `Reserva ${reservation.code}: caja cerrada ⇒ venta diferida`,
+      );
+      return;
+    }
+
+    try {
+      const productId = await this.ensureExperienceProduct(
+        reservation.experienceId,
+        reservation.experienceName,
+        reservation.unitPrice,
+      );
+      const dto: CreateSaleDto = {
+        customerName: reservation.customerName,
+        customerEmail: reservation.customerEmail,
+        customerPhone: reservation.customerPhone,
+        items: [
+          {
+            productId: String(productId),
+            quantity: reservation.quantity,
+            unitPrice: reservation.unitPrice,
+          },
+        ],
+        payments: [{ method, amount: reservation.depositAmount }],
+        isPartial: true,
+        seller: 'Reservas',
+        notes: `Reserva ${reservation.code} · ${reservation.experienceName}`,
+      };
+      const sale = await this.salesService.create(dto);
+      const saleId = (sale as unknown as { _id: Types.ObjectId })._id;
+      reservation.saleId = saleId;
+      reservation.salePending = false;
+      await reservation.save();
+      this.logger.log(`Reserva ${reservation.code}: venta registrada`);
+    } catch (err) {
+      reservation.salePending = true;
+      await reservation.save();
+      this.logger.error(
+        `Reserva ${reservation.code}: no se pudo registrar la venta: ${String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Cron: registra las ventas pendientes de reservas confirmadas, una vez que la
+   * caja está abierta. Idempotente (cada venta se crea una sola vez).
+   */
+  async processPendingReservationSales(): Promise<number> {
+    const openSession = await this.cashbox.findOpenSession();
+    if (!openSession) return 0;
+    const pending = await this.reservationModel
+      .find({
+        salePending: true,
+        saleId: { $exists: false },
+        status: ReservationStatus.CONFIRMED,
+        deletedAt: { $exists: false },
+      })
+      .limit(50)
+      .exec();
+    let created = 0;
+    for (const r of pending) {
+      await this.createSaleForReservation(
+        r,
+        this.mapToSalePaymentMethod(r.paymentMethod),
+      );
+      if (r.saleId) created++;
+    }
+    if (created) this.logger.log(`Ventas de reservas registradas: ${created}`);
+    return created;
   }
 
   private async findByIdOrThrow(id: string): Promise<ReservationDocument> {

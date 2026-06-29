@@ -4,12 +4,15 @@ import { CashboxModule } from '../cashbox/cashbox.module';
 import {
   ExperienceSession,
   ExperienceSessionSchema,
+  Product,
+  ProductSchema,
   Reservation,
   ReservationSchema,
   ReservationPayment,
   ReservationPaymentSchema,
 } from '../common/schemas';
 import { MercadopagoModule } from '../mercadopago/mercadopago.module';
+import { SalesModule } from '../sales/sales.module';
 import { ReservationsController } from './reservations.controller';
 import { ReservationsWebhookController } from './reservations-webhook.controller';
 import { ReservationsService } from './reservations.service';
@@ -21,9 +24,11 @@ import { ReservationsCron } from './reservations.cron';
       { name: Reservation.name, schema: ReservationSchema },
       { name: ExperienceSession.name, schema: ExperienceSessionSchema },
       { name: ReservationPayment.name, schema: ReservationPaymentSchema },
+      { name: Product.name, schema: ProductSchema },
     ]),
     MercadopagoModule,
     CashboxModule,
+    SalesModule,
   ],
   controllers: [ReservationsController, ReservationsWebhookController],
   providers: [ReservationsService, ReservationsCron],

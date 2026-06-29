@@ -1514,6 +1514,7 @@ export class SalesService {
           [PaymentMethod.CASH]: 0,
           [PaymentMethod.CARD]: 0,
           [PaymentMethod.TRANSFER]: 0,
+          [PaymentMethod.MERCADOPAGO]: 0,
         },
         totalByStatus: {
           [SaleStatus.PENDING]: 0,

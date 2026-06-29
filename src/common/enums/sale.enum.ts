@@ -2,6 +2,9 @@ export enum PaymentMethod {
   CASH = 'CASH',
   CARD = 'CARD',
   TRANSFER = 'TRANSFER',
+  // Pago online por MercadoPago (señas de reservas confirmadas por webhook).
+  // Es un método electrónico, separado del efectivo en el arqueo (como CARD/TRANSFER).
+  MERCADOPAGO = 'MERCADOPAGO',
 }
 
 // Solo para filtros — nunca se guarda en la BD. No modificar PaymentMethod.

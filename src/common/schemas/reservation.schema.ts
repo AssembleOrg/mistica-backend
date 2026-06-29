@@ -129,6 +129,16 @@ export class Reservation {
   @Prop({ type: SchemaTypes.ObjectId, ref: 'CashIncome' })
   cashIncomeId?: Types.ObjectId;
 
+  // Venta generada por esta reserva (para control: experiencia como servicio +
+  // pago parcial de la seña). Ver `salePending` cuando aún no se pudo crear.
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Sale' })
+  saleId?: Types.ObjectId;
+
+  // true = la reserva está CONFIRMED pero la venta todavía no se registró
+  // (caja cerrada al confirmarse por webhook). Un cron la crea al abrir caja.
+  @Prop({ type: Boolean, default: false })
+  salePending?: boolean;
+
   // Usuario admin que la creó (si source === ADMIN).
   @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   createdById?: Types.ObjectId;

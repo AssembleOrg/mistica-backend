@@ -25,4 +25,15 @@ export class ReservationsCron {
       this.running = false;
     }
   }
+
+  // Registra las ventas de reservas que quedaron pendientes por caja cerrada,
+  // una vez que hay caja abierta. Cada 5 minutos alcanza.
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async processPendingSales(): Promise<void> {
+    try {
+      await this.reservationsService.processPendingReservationSales();
+    } catch (err) {
+      this.logger.error(`processPendingReservationSales falló: ${String(err)}`);
+    }
+  }
 }

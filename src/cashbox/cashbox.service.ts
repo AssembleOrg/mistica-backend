@@ -668,7 +668,7 @@ export class CashboxService {
       // Desglose del `amount` por método. Para ventas MIXTO suma cada pago en
       // ventana por su método; para el resto (seña/egreso/ingreso) cae todo en
       // su único método. Permite reconciliar el saldo CASH fila por fila.
-      amountByMethod: { CASH: number; CARD: number; TRANSFER: number };
+      amountByMethod: { CASH: number; CARD: number; TRANSFER: number; MERCADOPAGO: number };
       description: string;
       paymentMethod: string;
       createdAt: Date;
@@ -730,9 +730,9 @@ export class CashboxService {
 
     // Suma los pagos (en ventana) de una venta agrupados por método.
     const sumByMethod = (payments: any[] | undefined) => {
-      const acc = { CASH: 0, CARD: 0, TRANSFER: 0 };
+      const acc = { CASH: 0, CARD: 0, TRANSFER: 0, MERCADOPAGO: 0 };
       for (const p of payments ?? []) {
-        const m = p.method as 'CASH' | 'CARD' | 'TRANSFER';
+        const m = p.method as 'CASH' | 'CARD' | 'TRANSFER' | 'MERCADOPAGO';
         if (m in acc) acc[m] += p.amount || 0;
       }
       return acc;
@@ -740,8 +740,8 @@ export class CashboxService {
 
     // Movimiento de un único método (seña / egreso / ingreso).
     const singleByMethod = (method: string, amount: number) => {
-      const acc = { CASH: 0, CARD: 0, TRANSFER: 0 };
-      const m = method as 'CASH' | 'CARD' | 'TRANSFER';
+      const acc = { CASH: 0, CARD: 0, TRANSFER: 0, MERCADOPAGO: 0 };
+      const m = method as 'CASH' | 'CARD' | 'TRANSFER' | 'MERCADOPAGO';
       if (m in acc) acc[m] += amount || 0;
       return acc;
     };
@@ -751,7 +751,7 @@ export class CashboxService {
       source: 'sale' | 'prepaid' | 'egress' | 'income';
       type: 'ingreso' | 'egreso';
       amount: number;
-      amountByMethod: { CASH: number; CARD: number; TRANSFER: number };
+      amountByMethod: { CASH: number; CARD: number; TRANSFER: number; MERCADOPAGO: number };
       description: string;
       paymentMethod: string;
       createdAt: Date;
