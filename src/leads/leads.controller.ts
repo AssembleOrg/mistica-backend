@@ -9,7 +9,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Public } from '../common/decorators';
+import { Public, Throttle } from '../common/decorators';
+import { SimpleThrottleGuard } from '../common/guards/simple-throttle.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
   CreateLeadDto,
@@ -23,12 +24,14 @@ import { LeadsService } from './leads.service';
 
 @ApiTags('Consultas (leads)')
 @Controller('leads')
+@UseGuards(SimpleThrottleGuard)
 export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
   // ── Público: el bot / la web captan la consulta ──
   @Post()
   @Public()
+  @Throttle(5, 60) // máx 5 consultas por IP por minuto (anti-spam de leads)
   @ApiOperation({ summary: 'Crear consulta (lead) para servicios no online' })
   async create(@Body() dto: CreateLeadDto) {
     return this.leadsService.create(dto);
