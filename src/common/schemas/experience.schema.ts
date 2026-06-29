@@ -32,6 +32,11 @@ export class Experience {
   @Prop({ required: true, min: 1 })
   defaultCapacity: number;
 
+  // Porcentaje de SEÑA que se cobra al reservar (el resto es saldo pendiente).
+  // En Mística toda reserva es con seña del 50%. 100 = se cobra el total.
+  @Prop({ required: true, min: 0, max: 100, default: 50 })
+  depositPct: number;
+
   @Prop({ type: [String], default: [] })
   images: string[];
 

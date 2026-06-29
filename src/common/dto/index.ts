@@ -17,3 +17,4 @@ export * from './credit-note.dto';
 export * from './experience.dto';
 export * from './experience-session.dto';
 export * from './reservation.dto';
+export * from './lead.dto';

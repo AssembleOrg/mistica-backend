@@ -14,3 +14,4 @@ export * from './experience.schema';
 export * from './experience-session.schema';
 export * from './reservation.schema';
 export * from './reservation-payment.schema';
+export * from './lead.schema';

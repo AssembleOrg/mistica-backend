@@ -92,6 +92,7 @@ export class ExperiencesService {
         experienceName: exp.name,
         durationMinutes,
         price: slot.price ?? exp.basePrice,
+        depositPct: exp.depositPct ?? 50,
         startAt: start.toJSDate(),
         endAt: end.toJSDate(),
         capacity: slot.capacity ?? exp.defaultCapacity,
@@ -201,6 +202,7 @@ export class ExperiencesService {
       experienceName: s.experienceName,
       durationMinutes: s.durationMinutes,
       price: s.price,
+      depositPct: s.depositPct ?? 50,
       startAt: s.startAt,
       endAt: s.endAt,
       capacity: s.capacity,
@@ -219,6 +221,7 @@ interface SessionLike {
   experienceName: string;
   durationMinutes: number;
   price: number;
+  depositPct?: number;
   startAt: Date;
   endAt: Date;
   capacity: number;

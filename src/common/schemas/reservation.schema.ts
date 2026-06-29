@@ -48,9 +48,23 @@ export class Reservation {
   @Prop({ required: true, min: 1 })
   quantity: number;
 
-  // Total = unitPrice * quantity.
+  // `amount` = lo que se COBRA en esta operación (la seña en reservas públicas;
+  // lo que cobró el admin en reservas de admin). Es lo que va a MercadoPago y a
+  // caja. Se mantiene por compatibilidad histórica.
   @Prop({ required: true, min: 0 })
   amount: number;
+
+  // Total de la experiencia = unitPrice * quantity (el 100%).
+  @Prop({ required: true, min: 0, default: 0 })
+  totalAmount: number;
+
+  // Seña cobrada al reservar (== amount en el flujo público).
+  @Prop({ required: true, min: 0, default: 0 })
+  depositAmount: number;
+
+  // Saldo pendiente a abonar luego = totalAmount - depositAmount.
+  @Prop({ required: true, min: 0, default: 0 })
+  balanceDue: number;
 
   @Prop({
     required: true,

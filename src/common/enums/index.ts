@@ -9,3 +9,4 @@ export * from './prepaid.enum';
 export * from './currency.enum';
 export * from './egress.enum';
 export * from './reservation.enum';
+export * from './lead.enum';

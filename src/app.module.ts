@@ -20,6 +20,7 @@ import { AuditModule } from './audit/audit.module';
 import { ClientLabelsModule } from './client-labels/client-labels.module';
 import { ExperiencesModule } from './experiences/experiences.module';
 import { ReservationsModule } from './reservations/reservations.module';
+import { LeadsModule } from './leads/leads.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { ReservationsModule } from './reservations/reservations.module';
     ClientLabelsModule,
     ReservationsModule,
     ExperiencesModule,
+    LeadsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

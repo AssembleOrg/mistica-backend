@@ -34,6 +34,11 @@ export class ExperienceSession {
   @Prop({ required: true, min: 0 })
   price: number;
 
+  // Seña (%) que se cobra al reservar este turno. Copiada de la plantilla al
+  // crear; el resto queda como saldo pendiente. Default 50.
+  @Prop({ required: true, min: 0, max: 100, default: 50 })
+  depositPct: number;
+
   // Inicio del turno (datetime, fuente de verdad). Calculado desde {fecha, hora}
   // en zona America/Argentina/Buenos_Aires al momento de crear.
   @Prop({ type: Date, required: true })

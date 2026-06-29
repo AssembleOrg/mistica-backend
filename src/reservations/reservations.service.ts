@@ -83,7 +83,11 @@ export class ReservationsService {
     ]);
 
     const unitPrice = session.price;
-    const amount = unitPrice * qty;
+    const total = unitPrice * qty;
+    // Seña: en Mística se cobra el 50% al reservar; el resto queda pendiente.
+    const pct = session.depositPct ?? 50;
+    const deposit = Math.round((total * pct) / 100);
+    const balanceDue = total - deposit;
     const now = new Date();
     const expiresAt = new Date(now.getTime() + HOLD_MINUTES * 60_000);
 
@@ -96,7 +100,10 @@ export class ReservationsService {
         startAt: session.startAt,
         unitPrice,
         quantity: qty,
-        amount,
+        amount: deposit,
+        totalAmount: total,
+        depositAmount: deposit,
+        balanceDue,
         status: ReservationStatus.PENDING,
         source: ReservationSource.PUBLIC,
         paymentMethod: ReservationPaymentMethod.MERCADOPAGO,
@@ -123,11 +130,15 @@ export class ReservationsService {
     // Crear la preference de MercadoPago. Si falla, no hay forma de pagar:
     // cancelamos la reserva y liberamos el cupo.
     try {
+      const personas = `${qty} ${qty > 1 ? 'personas' : 'persona'}`;
+      const seniaLabel =
+        pct >= 100 ? '' : ` · Seña ${pct}%`;
       const pref = await this.mercadopago.createPreference({
         reservationId: String(reservation._id),
-        title: `${session.experienceName} (${qty} ${qty > 1 ? 'personas' : 'persona'})`,
-        quantity: qty,
-        unitPrice,
+        title: `${session.experienceName} (${personas})${seniaLabel}`,
+        // Cobramos la seña como un único ítem (no el total).
+        quantity: 1,
+        unitPrice: deposit,
         expiresAt,
         payer: { name: dto.customerName, email: dto.customerEmail },
       });
@@ -363,7 +374,10 @@ export class ReservationsService {
     ]);
 
     const unitPrice = session.price;
-    const amount = dto.amount ?? unitPrice * qty;
+    const total = unitPrice * qty;
+    // El admin puede cobrar el total o una seña (dto.amount). El saldo es el resto.
+    const amount = dto.amount ?? total;
+    const balanceDue = Math.max(0, total - amount);
     const isCourtesy = dto.paymentMethod === ReservationPaymentMethod.COURTESY;
 
     let reservation: ReservationDocument;
@@ -376,6 +390,9 @@ export class ReservationsService {
         unitPrice,
         quantity: qty,
         amount,
+        totalAmount: total,
+        depositAmount: isCourtesy ? 0 : amount,
+        balanceDue: isCourtesy ? 0 : balanceDue,
         status: ReservationStatus.CONFIRMED,
         source: ReservationSource.ADMIN,
         paymentMethod: dto.paymentMethod,
@@ -597,7 +614,10 @@ export class ReservationsService {
       reservationId: String(r._id),
       code: r.code,
       status: r.status,
-      amount: r.amount,
+      amount: r.amount, // seña cobrada
+      depositAmount: r.depositAmount,
+      totalAmount: r.totalAmount,
+      balanceDue: r.balanceDue,
       quantity: r.quantity,
       expiresAt: r.expiresAt,
       initPoint: r.mpInitPoint,
@@ -615,6 +635,9 @@ export class ReservationsService {
       quantity: r.quantity,
       unitPrice: r.unitPrice,
       amount: r.amount,
+      depositAmount: r.depositAmount,
+      totalAmount: r.totalAmount,
+      balanceDue: r.balanceDue,
       paymentMethod: r.paymentMethod,
       source: r.source,
       customerName: r.customerName,
