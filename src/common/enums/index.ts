@@ -10,3 +10,4 @@ export * from './currency.enum';
 export * from './egress.enum';
 export * from './reservation.enum';
 export * from './lead.enum';
+export * from './closed-date.enum';

@@ -22,6 +22,7 @@ import {
   ExperienceSession,
   ExperienceSessionDocument,
 } from '../common/schemas/experience-session.schema';
+import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 
 @Injectable()
 export class ExperiencesService {
@@ -30,6 +31,7 @@ export class ExperiencesService {
     private readonly experienceModel: Model<ExperienceDocument>,
     @InjectModel(ExperienceSession.name)
     private readonly sessionModel: Model<ExperienceSessionDocument>,
+    private readonly closedDates: ClosedDatesService,
   ) {}
 
   // ───────────────────────── Experiencias (plantillas) ─────────────────────
@@ -78,16 +80,24 @@ export class ExperiencesService {
     const status =
       dto.publish === false ? SessionStatus.DRAFT : SessionStatus.OPEN;
 
-    const docs = dto.slots.map((slot) => {
+    const docs: Array<Record<string, unknown>> = [];
+    for (const slot of dto.slots) {
       const start = DateTime.fromISO(`${slot.date}T${slot.time}`, { zone: tz });
       if (!start.isValid) {
         throw new BadRequestException(
           `Fecha/hora inválida: ${slot.date} ${slot.time}`,
         );
       }
+      // No dejamos crear turnos en días marcados como cerrados.
+      const closed = await this.closedDates.isClosed(start.toJSDate());
+      if (closed.closed) {
+        throw new BadRequestException(
+          `El ${slot.date} el local está marcado como cerrado${closed.reason ? ` (${closed.reason})` : ''}. Quitá ese día o eliminá la regla de cierre.`,
+        );
+      }
       const durationMinutes = exp.durationMinutes;
       const end = start.plus({ minutes: durationMinutes });
-      return {
+      docs.push({
         experienceId: exp._id,
         experienceName: exp.name,
         durationMinutes,
@@ -99,8 +109,8 @@ export class ExperiencesService {
         seatsTaken: 0,
         status,
         notes: slot.notes,
-      };
-    });
+      });
+    }
 
     const created = await this.sessionModel.insertMany(docs);
     return created.map((s) => this.sessionView(s as unknown as SessionLike));

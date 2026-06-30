@@ -13,6 +13,7 @@ import {
 } from '../common/schemas';
 import { MercadopagoModule } from '../mercadopago/mercadopago.module';
 import { SalesModule } from '../sales/sales.module';
+import { ClosedDatesModule } from '../closed-dates/closed-dates.module';
 import { ReservationsController } from './reservations.controller';
 import { ReservationsWebhookController } from './reservations-webhook.controller';
 import { ReservationsService } from './reservations.service';
@@ -29,6 +30,7 @@ import { ReservationsCron } from './reservations.cron';
     MercadopagoModule,
     CashboxModule,
     SalesModule,
+    ClosedDatesModule,
   ],
   controllers: [ReservationsController, ReservationsWebhookController],
   providers: [ReservationsService, ReservationsCron],

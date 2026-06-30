@@ -47,6 +47,7 @@ import { MercadopagoService } from '../mercadopago/mercadopago.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { computeReservationAmounts } from './reservation-amounts';
 import { SalesService } from '../sales/sales.service';
+import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 
 // Minutos que vive un hold sin pago antes de liberar el cupo.
 const HOLD_MINUTES = 10;
@@ -76,6 +77,7 @@ export class ReservationsService {
     private readonly cashbox: CashboxService,
     private readonly salesService: SalesService,
     private readonly notifications: NotificationsService,
+    private readonly closedDates: ClosedDatesService,
   ) {}
 
   // ───────────────────────── Público: hold + pago ─────────────────────────
@@ -98,6 +100,17 @@ export class ReservationsService {
     const session = await this.reserveSeats(dto.sessionId, qty, [
       SessionStatus.OPEN,
     ]);
+
+    // Guarda de día cerrado: aunque exista el turno, si la fecha quedó marcada
+    // como cerrada (se cargó después), no permitimos reservar. Devolvemos el
+    // cupo recién tomado.
+    const closed = await this.closedDates.isClosed(session.startAt);
+    if (closed.closed) {
+      await this.releaseSeats(session._id as Types.ObjectId, qty);
+      throw new BadRequestException(
+        `Ese día el local no abre${closed.reason ? ` (${closed.reason})` : ''}. Elegí otra fecha.`,
+      );
+    }
 
     const unitPrice = session.price;
     // Seña: en Mística se cobra el 50% al reservar; el resto queda pendiente.

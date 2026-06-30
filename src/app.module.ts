@@ -25,6 +25,7 @@ import { ClientLabelsModule } from './client-labels/client-labels.module';
 import { ExperiencesModule } from './experiences/experiences.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { LeadsModule } from './leads/leads.module';
+import { ClosedDatesModule } from './closed-dates/closed-dates.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { LeadsModule } from './leads/leads.module';
     ReservationsModule,
     ExperiencesModule,
     LeadsModule,
+    ClosedDatesModule,
     NotificationsModule,
     BotControlModule,
   ],
