@@ -40,6 +40,12 @@ export class Experience {
   @Prop({ type: [String], default: [] })
   images: string[];
 
+  // ¿Se reserva online por acá (genera turnos + seña)? Si es false, es un
+  // servicio que se COORDINA: el bot/web solo informa y capta la consulta
+  // (mensuales, eventos, escuelita, facilitadores, tienda). Default true.
+  @Prop({ type: Boolean, default: true })
+  bookableOnline: boolean;
+
   @Prop({ type: Boolean, default: true })
   isActive: boolean;
 

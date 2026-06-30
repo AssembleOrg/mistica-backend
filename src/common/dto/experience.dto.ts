@@ -61,6 +61,15 @@ export class CreateExperienceDto {
   @IsString({ each: true })
   images?: string[];
 
+  @ApiPropertyOptional({
+    description:
+      'Se reserva online (genera turnos + seña). false = servicio coordinado (solo info + consulta)',
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  bookableOnline?: boolean;
+
   @ApiPropertyOptional({ description: 'Activa', default: true })
   @IsOptional()
   @IsBoolean()
