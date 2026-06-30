@@ -132,6 +132,30 @@ export class ClientsService {
     }
   }
 
+  /**
+   * Busca un cliente por teléfono, tolerante al formato de guardado (espacios,
+   * guiones, +, código de país). Compara por los últimos 8 dígitos (el número
+   * local) permitiendo separadores. Devuelve sólo lo mínimo (nombre/email).
+   * Uso interno del bot para autocompletar los datos del cliente.
+   */
+  async findByPhone(
+    phone: string,
+  ): Promise<{ found: boolean; fullName?: string; email?: string }> {
+    const digits = (phone || '').replace(/\D/g, '');
+    if (digits.length < 6) return { found: false };
+    const tail = digits.slice(-8);
+    // Inserta \D* entre cada dígito para matchear "11 3658-5581", "+54 9 11..."
+    const pattern = tail.split('').join('\\D*');
+    const client = await this.clientModel
+      .findOne({
+        deletedAt: { $exists: false },
+        phone: { $regex: pattern },
+      })
+      .lean();
+    if (!client) return { found: false };
+    return { found: true, fullName: client.fullName, email: client.email };
+  }
+
   async findAll(paginationDto?: PaginatedDateFilterDto): Promise<PaginatedResponse<Client>> {
     const { page = 1, limit = 10, search, from, to } = paginationDto || {};
     const skip = (page - 1) * limit;

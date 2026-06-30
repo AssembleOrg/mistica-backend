@@ -7,6 +7,8 @@ import {
   Param,
   Delete,
   Query,
+  Headers,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiParam } from '@nestjs/swagger';
@@ -15,9 +17,10 @@ import { CreateClientDto, UpdateClientDto, PaginatedDateFilterDto } from '../com
 import { Client, ClientWithPrepaids, PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { Auditory } from '../common/decorators';
+import { Auditory, Public } from '../common/decorators';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
+import { envConfig } from '../config/env.config';
 
 @ApiTags('Clientes')
 @Controller('clients')
@@ -25,6 +28,25 @@ import { UserRole } from '../common/enums/user-role.enum';
 @ApiBearerAuth()
 export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
+
+  // Uso INTERNO del bot de WhatsApp: autocompletar datos del cliente por su
+  // propio número. Protegido por el secreto compartido bot↔backend (no JWT).
+  // No expone listados ni permite enumerar: sólo devuelve nombre/email de UN
+  // teléfono. El bot envía SIEMPRE el número verificado del WhatsApp, no input
+  // del usuario.
+  @Get('lookup/by-phone')
+  @Public()
+  @ApiOperation({ summary: 'Buscar cliente por teléfono (interno del bot)' })
+  async lookupByPhone(
+    @Query('phone') phone: string,
+    @Headers('x-bot-secret') secret?: string,
+  ): Promise<{ found: boolean; fullName?: string; email?: string }> {
+    const expected = envConfig.botControl.secret;
+    if (!expected || secret !== expected) {
+      throw new UnauthorizedException('No autorizado');
+    }
+    return this.clientsService.findByPhone(phone || '');
+  }
 
   @Post()
   @Auditory({ entity: 'Client', action: 'CREATE' })
