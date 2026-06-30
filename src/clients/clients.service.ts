@@ -133,26 +133,40 @@ export class ClientsService {
   }
 
   /**
+   * Núcleo local de un teléfono argentino: saca separadores, el código de país
+   * (54) y el prefijo de móvil (9). Así "5491136585581", "+54 9 11 3658-5581",
+   * "541136585581" y "1136585581" quedan todos como "1136585581".
+   */
+  private phoneCore(raw: string): string {
+    let d = (raw || '').replace(/\D/g, '');
+    if (d.startsWith('54')) d = d.slice(2); // código país AR
+    if (d.length > 10 && d.startsWith('9')) d = d.slice(1); // móvil
+    return d;
+  }
+
+  /**
    * Busca un cliente por teléfono, tolerante al formato de guardado (espacios,
-   * guiones, +, código de país). Compara por los últimos 8 dígitos (el número
-   * local) permitiendo separadores. Devuelve sólo lo mínimo (nombre/email).
-   * Uso interno del bot para autocompletar los datos del cliente.
+   * guiones, +, con o sin código de país / prefijo móvil 9). Normaliza ambos
+   * lados al número local y compara por los últimos 8 dígitos (el abonado).
+   * Devuelve sólo lo mínimo (nombre/email). Uso interno del bot.
    */
   async findByPhone(
     phone: string,
   ): Promise<{ found: boolean; fullName?: string; email?: string }> {
-    const digits = (phone || '').replace(/\D/g, '');
-    if (digits.length < 6) return { found: false };
-    const tail = digits.slice(-8);
-    // Inserta \D* entre cada dígito para matchear "11 3658-5581", "+54 9 11..."
+    const core = this.phoneCore(phone);
+    if (core.length < 6) return { found: false };
+    // Últimos 8 dígitos del abonado: estables entre formatos (con/sin 54, con/sin 9).
+    const tail = core.slice(-8);
+    // \D* entre cada dígito para matchear "11 3658-5581", "+54 9 11..." en el guardado.
     const pattern = tail.split('').join('\\D*');
-    const client = await this.clientModel
-      .findOne({
-        deletedAt: { $exists: false },
-        phone: { $regex: pattern },
-      })
+    const candidates = await this.clientModel
+      .find({ deletedAt: { $exists: false }, phone: { $regex: pattern } })
       .lean();
-    if (!client) return { found: false };
+    if (!candidates.length) return { found: false };
+    // Si hay varios, preferimos el que coincide en el núcleo completo (no solo
+    // en los últimos 8): evita un match cruzado por área distinta.
+    const exact = candidates.find((c) => this.phoneCore(c.phone || '') === core);
+    const client = exact ?? candidates[0];
     return { found: true, fullName: client.fullName, email: client.email };
   }
 
