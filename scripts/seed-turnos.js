@@ -150,7 +150,7 @@ async function main() {
         const dup = await sessionsCol.findOne({
           experienceId: exp._id,
           startAt,
-          deletedAt: null,
+          deletedAt: { $exists: false },
         });
         if (dup) {
           console.log('    [dup ] ' + fmtAr(startAt) + ' (ya existe)');
@@ -181,7 +181,8 @@ async function main() {
           status: 'OPEN',
           createdAt: now,
           updatedAt: now,
-          deletedAt: null,
+          // OJO: NO seteamos deletedAt. Las queries filtran { deletedAt: { $exists:
+          // false } }, así que un `deletedAt: null` haría el turno INVISIBLE.
         });
         inserted++;
       }
