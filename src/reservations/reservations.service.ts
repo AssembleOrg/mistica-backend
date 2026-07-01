@@ -60,6 +60,11 @@ interface MongoDupError {
   keyPattern?: Record<string, number>;
 }
 
+/** Escapa metacaracteres para usar un texto libre dentro de un RegExp. */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 @Injectable()
 export class ReservationsService {
   private readonly logger = new Logger(ReservationsService.name);
@@ -467,6 +472,20 @@ export class ReservationsService {
     if (query.sessionId) filter.sessionId = new Types.ObjectId(query.sessionId);
     if (query.experienceId)
       filter.experienceId = new Types.ObjectId(query.experienceId);
+
+    // Búsqueda libre: por nombre (con el texto tal cual) y por código/teléfono
+    // (sin separadores, así "LKU-867" matchea el code guardado "LKU867").
+    const term = query.search?.trim();
+    if (term) {
+      const nameRx = new RegExp(escapeRegex(term), 'i');
+      const or: Record<string, unknown>[] = [{ customerName: nameRx }];
+      const compact = term.replace(/[^a-zA-Z0-9]/g, '');
+      if (compact) {
+        const rx = new RegExp(escapeRegex(compact), 'i');
+        or.push({ code: rx }, { customerPhone: rx });
+      }
+      filter.$or = or;
+    }
 
     const [items, total] = await Promise.all([
       this.reservationModel

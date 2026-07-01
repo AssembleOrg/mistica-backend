@@ -174,4 +174,10 @@ export class ListReservationsQueryDto {
   @IsInt()
   @Min(1)
   limit?: number;
+
+  @ApiPropertyOptional({ description: 'Busca por código, nombre o teléfono' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  search?: string;
 }
