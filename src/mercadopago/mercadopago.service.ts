@@ -112,9 +112,13 @@ export class MercadopagoService {
       init_point: string;
       sandbox_init_point: string;
     };
+    // Con credenciales de TEST (token TEST-...), el init_point de producción NO
+    // resuelve (el link da "Id does not exist"): hay que usar el sandbox. Con
+    // credenciales de producción (APP_USR-...), el init_point normal.
+    const isTest = this.token.startsWith('TEST-');
     return {
       id: data.id,
-      initPoint: data.init_point,
+      initPoint: isTest ? data.sandbox_init_point : data.init_point,
       sandboxInitPoint: data.sandbox_init_point,
     };
   }
