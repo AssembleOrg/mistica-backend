@@ -54,6 +54,20 @@ export class MercadopagoService {
     input: CreatePreferenceInput,
   ): Promise<CreatePreferenceResult> {
     const { frontend, backend } = envConfig.urls;
+    const isTest = this.token.startsWith('TEST-');
+    // Diagnóstico: modo de credenciales + URLs efectivas. Si el token es de
+    // producción pero las back_urls/notification quedaron en localhost (envs
+    // FRONTEND_URL/BACKEND_URL sin setear), MP puede rechazar auto_return o el
+    // redirect/webhook no funciona: lo dejamos visible en los logs.
+    const looksLocal = /localhost|127\.0\.0\.1|http:\/\//.test(
+      `${frontend} ${backend}`,
+    );
+    this.logger.log(
+      `createPreference modo=${isTest ? 'TEST' : 'PROD'} front=${frontend} back=${backend}` +
+        (looksLocal && !isTest
+          ? ' ⚠️ URLs no-HTTPS/localhost con token de PRODUCCIÓN (seteá FRONTEND_URL y BACKEND_URL públicas)'
+          : ''),
+    );
     const expiration = DateTime.fromJSDate(input.expiresAt)
       .setZone(envConfig.timezone)
       .toISO();
@@ -115,10 +129,13 @@ export class MercadopagoService {
     // Con credenciales de TEST (token TEST-...), el init_point de producción NO
     // resuelve (el link da "Id does not exist"): hay que usar el sandbox. Con
     // credenciales de producción (APP_USR-...), el init_point normal.
-    const isTest = this.token.startsWith('TEST-');
+    const initPoint = isTest ? data.sandbox_init_point : data.init_point;
+    this.logger.log(
+      `preference creada id=${data.id} modo=${isTest ? 'TEST' : 'PROD'} link=${initPoint}`,
+    );
     return {
       id: data.id,
-      initPoint: isTest ? data.sandbox_init_point : data.init_point,
+      initPoint,
       sandboxInitPoint: data.sandbox_init_point,
     };
   }
