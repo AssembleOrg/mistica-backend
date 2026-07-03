@@ -34,6 +34,9 @@ export const envConfig = {
   },
   // WhatsApp del equipo para avisos internos (nuevas consultas, errores).
   teamWhatsapp: process.env.TEAM_WHATSAPP || '',
+  // Días/horarios de retiro de piezas (texto libre). Se usa en el aviso de
+  // "piezas listas". Ej: "de martes a viernes de 15 a 19 h".
+  pickupInfo: process.env.PICKUP_INFO || 'en nuestro horario de atención',
   // Zona horaria del negocio: las fechas/horas de turnos se interpretan acá.
   timezone: process.env.TZ_BUSINESS || 'America/Argentina/Buenos_Aires',
 };

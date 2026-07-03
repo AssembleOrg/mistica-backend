@@ -46,4 +46,15 @@ export class ReservationsCron {
       this.logger.error(`sendDueReminders falló: ${String(err)}`);
     }
   }
+
+  // Agradecimiento post-experiencia (el día después del turno). Cada hora;
+  // idempotente vía thankedAt.
+  @Cron(CronExpression.EVERY_HOUR)
+  async sendThanks(): Promise<void> {
+    try {
+      await this.reservationsService.sendPostExperienceThanks();
+    } catch (err) {
+      this.logger.error(`sendPostExperienceThanks falló: ${String(err)}`);
+    }
+  }
 }

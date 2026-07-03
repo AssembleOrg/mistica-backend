@@ -18,3 +18,4 @@ export * from './experience.dto';
 export * from './experience-session.dto';
 export * from './reservation.dto';
 export * from './lead.dto';
+export * from './piece.dto';

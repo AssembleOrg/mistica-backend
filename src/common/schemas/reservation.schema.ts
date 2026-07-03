@@ -143,6 +143,10 @@ export class Reservation {
   @Prop({ type: Date })
   reminderSentAt?: Date;
 
+  // Cuándo se envió el agradecimiento post-experiencia (idempotencia).
+  @Prop({ type: Date })
+  thankedAt?: Date;
+
   // Usuario admin que la creó (si source === ADMIN).
   @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   createdById?: Types.ObjectId;

@@ -814,6 +814,45 @@ export class ReservationsService {
     return sent;
   }
 
+  /**
+   * Agradecimiento post-experiencia: el día DESPUÉS del turno, un mensaje cálido
+   * (seguimiento). Idempotente vía thankedAt. Ventana: turnos terminados entre
+   * ~6 h y ~48 h atrás (evita mandarlo apenas termina y no revive reservas viejas).
+   */
+  async sendPostExperienceThanks(): Promise<number> {
+    const now = new Date();
+    const from = new Date(now.getTime() - 48 * 3600_000);
+    const to = new Date(now.getTime() - 6 * 3600_000);
+    const due = await this.reservationModel
+      .find({
+        status: ReservationStatus.CONFIRMED,
+        startAt: { $gte: from, $lte: to },
+        thankedAt: { $exists: false },
+        deletedAt: { $exists: false },
+      })
+      .limit(100)
+      .exec();
+    let sent = 0;
+    for (const r of due) {
+      if (r.customerPhone) {
+        const name = r.customerName
+          ? ` ${r.customerName.split(' ')[0]}`
+          : '';
+        const ok = await this.notifications.notify(
+          r.customerPhone,
+          `¡Hola${name}! ¿Cómo la pasaste en Mística? 🎨\n\n` +
+            `Ojalá te hayas llevado un lindo recuerdo. Cuando quieras volver a ` +
+            `crear, escribinos y lo vemos juntos 💛`,
+        );
+        if (ok) sent++;
+      }
+      r.thankedAt = now;
+      await r.save();
+    }
+    if (sent) this.logger.log(`Agradecimientos post-experiencia enviados: ${sent}`);
+    return sent;
+  }
+
   // ───────────────────────── Admin: acciones sobre reservas ─────────────────
 
   async adminCancel(id: string) {
