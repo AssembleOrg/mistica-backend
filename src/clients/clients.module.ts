@@ -6,6 +6,10 @@ import { Client, ClientSchema } from '../common/schemas/client.schema';
 import { Prepaid, PrepaidSchema } from '../common/schemas/prepaid.schema';
 import { Sale, SaleSchema } from '../common/schemas/sale.schema';
 import { ClientLabel, ClientLabelSchema } from '../common/schemas/client-label.schema';
+import {
+  Reservation,
+  ReservationSchema,
+} from '../common/schemas/reservation.schema';
 
 @Module({
   imports: [
@@ -14,6 +18,8 @@ import { ClientLabel, ClientLabelSchema } from '../common/schemas/client-label.s
       { name: Prepaid.name, schema: PrepaidSchema },
       { name: Sale.name, schema: SaleSchema },
       { name: ClientLabel.name, schema: ClientLabelSchema },
+      // Solo lectura: contexto del cliente para el bot (reservas por teléfono).
+      { name: Reservation.name, schema: ReservationSchema },
     ]),
   ],
   controllers: [ClientsController],

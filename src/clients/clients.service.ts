@@ -8,9 +8,14 @@ import {
   EmailClienteYaExisteException,
   CuitClienteYaExisteException
 } from '../common/exceptions';
-import { ClientDocument, PrepaidDocument, SaleDocument } from '../common/schemas';
+import {
+  ClientDocument,
+  PrepaidDocument,
+  SaleDocument,
+  ReservationDocument,
+} from '../common/schemas';
 import { buildDateFilter } from '../common/utils';
-import { PrepaidStatus } from '../common/enums';
+import { PrepaidStatus, ReservationStatus } from '../common/enums';
 
 @Injectable()
 export class ClientsService {
@@ -18,6 +23,8 @@ export class ClientsService {
     @InjectModel('Client') private readonly clientModel: Model<ClientDocument>,
     @InjectModel('Prepaid') private readonly prepaidModel: Model<PrepaidDocument>,
     @InjectModel('Sale') private readonly saleModel: Model<SaleDocument>,
+    @InjectModel('Reservation')
+    private readonly reservationModel: Model<ReservationDocument>,
   ) {}
 
   private mapToClientResponse(client: ClientDocument, prepaidAmount?: number, transactionCount?: number): Client {
@@ -168,6 +175,73 @@ export class ClientsService {
     const exact = candidates.find((c) => this.phoneCore(c.phone || '') === core);
     const client = exact ?? candidates[0];
     return { found: true, fullName: client.fullName, email: client.email };
+  }
+
+  /**
+   * Contexto del cliente para el bot: nombre + si es recurrente + reservas
+   * próximas + experiencias ya realizadas + última visita. Todo por teléfono
+   * (uso interno del bot). Sólo lectura; no expone datos de terceros: matchea el
+   * mismo número que envía el WhatsApp del que escribe.
+   */
+  async contextByPhone(phone: string): Promise<{
+    found: boolean;
+    fullName?: string;
+    email?: string;
+    recurrent: boolean;
+    visits: number;
+    lastVisit: Date | null;
+    upcoming: {
+      experience: string;
+      startAt: Date;
+      code: string;
+      people: number;
+    }[];
+    pastExperiences: string[];
+  }> {
+    const base = await this.findByPhone(phone);
+    const core = this.phoneCore(phone);
+    const empty = {
+      ...base,
+      recurrent: false,
+      visits: 0,
+      lastVisit: null,
+      upcoming: [],
+      pastExperiences: [],
+    };
+    if (core.length < 6) return empty;
+
+    const pattern = core.slice(-8).split('').join('\\D*');
+    const now = new Date();
+    const res = await this.reservationModel
+      .find({
+        deletedAt: { $exists: false },
+        status: ReservationStatus.CONFIRMED,
+        customerPhone: { $regex: pattern },
+      })
+      .select('experienceName startAt code quantity')
+      .sort({ startAt: 1 })
+      .lean();
+
+    const upcoming = res
+      .filter((r) => new Date(r.startAt) >= now)
+      .map((r) => ({
+        experience: r.experienceName,
+        startAt: r.startAt,
+        code: r.code,
+        people: r.quantity,
+      }));
+    const past = res.filter((r) => new Date(r.startAt) < now);
+    const pastExperiences = [
+      ...new Set(past.map((r) => r.experienceName).filter(Boolean)),
+    ];
+    return {
+      ...base,
+      recurrent: past.length > 0,
+      visits: past.length,
+      lastVisit: past.length ? past[past.length - 1].startAt : null,
+      upcoming,
+      pastExperiences,
+    };
   }
 
   async findAll(paginationDto?: PaginatedDateFilterDto): Promise<PaginatedResponse<Client>> {

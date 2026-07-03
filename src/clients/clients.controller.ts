@@ -48,6 +48,24 @@ export class ClientsController {
     return this.clientsService.findByPhone(phone || '');
   }
 
+  // Uso INTERNO del bot: contexto del cliente (nombre + recurrente + reservas
+  // próximas + experiencias hechas + última visita) por su propio teléfono.
+  // Mismo secreto compartido. El bot lo usa como contexto para personalizar, no
+  // para recitarle datos al cliente.
+  @Get('context/by-phone')
+  @Public()
+  @ApiOperation({ summary: 'Contexto del cliente por teléfono (interno del bot)' })
+  async contextByPhone(
+    @Query('phone') phone: string,
+    @Headers('x-bot-secret') secret?: string,
+  ) {
+    const expected = envConfig.botControl.secret;
+    if (!expected || secret !== expected) {
+      throw new UnauthorizedException('No autorizado');
+    }
+    return this.clientsService.contextByPhone(phone || '');
+  }
+
   @Post()
   @Auditory({ entity: 'Client', action: 'CREATE' })
   @ApiOperation({ summary: 'Crear nuevo cliente' })
