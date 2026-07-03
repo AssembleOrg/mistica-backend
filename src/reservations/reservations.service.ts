@@ -117,6 +117,19 @@ export class ReservationsService {
       );
     }
 
+    // Guarda de CAPACIDAD DEL LOCAL: la suma de personas de todas las actividades
+    // que se solapan en el horario no puede superar el tope del salón. El cupo ya
+    // fue tomado arriba (reserveSeats); si con eso el local queda sobrevendido,
+    // devolvemos el cupo y rechazamos. (Chequeo con compensación; en standalone no
+    // hay transacción multi-doc, el riesgo de carrera es mínimo con este volumen.)
+    const venueOver = await this.venueOverCapacity(session);
+    if (venueOver) {
+      await this.releaseSeats(session._id as Types.ObjectId, qty);
+      throw new BadRequestException(
+        'En ese horario el local ya está completo. Elegí otra fecha u horario.',
+      );
+    }
+
     const unitPrice = session.price;
     // Seña: en Mística se cobra el 50% al reservar; el resto queda pendiente.
     const pct = session.depositPct ?? 50;
@@ -573,6 +586,28 @@ export class ReservationsService {
         `releaseSeats no aplicó (session ${String(sessionId)}, qty ${qty}). Revisar conteo.`,
       );
     }
+  }
+
+  /**
+   * ¿El local quedó sobre-vendido en el horario de `session`? Suma las personas
+   * de todas las actividades (turnos OPEN/CLOSED con reservas activas) que se
+   * solapan en el tiempo y compara contra el tope del salón. La `session` que se
+   * acaba de reservar ya está incluida (su seatsTaken trae la reserva nueva).
+   */
+  private async venueOverCapacity(
+    session: ExperienceSessionDocument,
+  ): Promise<boolean> {
+    const overlapping = await this.sessionModel
+      .find({
+        deletedAt: { $exists: false },
+        status: { $in: [SessionStatus.OPEN, SessionStatus.CLOSED] },
+        startAt: { $lt: session.endAt },
+        endAt: { $gt: session.startAt },
+      })
+      .select('seatsTaken')
+      .lean();
+    const occupancy = overlapping.reduce((a, o) => a + (o.seatsTaken || 0), 0);
+    return occupancy > envConfig.venueMaxCapacity;
   }
 
   /** Crea la reserva generando un código único, reintentando ante colisión. */

@@ -39,4 +39,8 @@ export const envConfig = {
   pickupInfo: process.env.PICKUP_INFO || 'en nuestro horario de atención',
   // Zona horaria del negocio: las fechas/horas de turnos se interpretan acá.
   timezone: process.env.TZ_BUSINESS || 'America/Argentina/Buenos_Aires',
+  // Capacidad MÁXIMA de personas en el local al mismo tiempo. Tope compartido:
+  // la suma de personas de todos los turnos/actividades que se solapan en el
+  // horario no puede superarlo (independiente del cupo de cada turno).
+  venueMaxCapacity: Number.parseInt(process.env.VENUE_MAX_CAPACITY || '40', 10),
 };

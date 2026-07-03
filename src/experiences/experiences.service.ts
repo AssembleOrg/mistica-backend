@@ -143,7 +143,32 @@ export class ExperiencesService {
       .find(filter)
       .sort({ startAt: 1 })
       .lean();
-    return sessions.map((s) => this.sessionView(s as unknown as SessionLike));
+
+    // Tope de LOCAL: la disponibilidad de cada turno se limita también por la
+    // capacidad compartida del salón. Traemos todos los turnos OPEN/CLOSED
+    // vigentes (con reservas activas) para calcular cuántas personas hay en cada
+    // franja que se solapa. seatsAvailable = min(cupo del turno, lugar en el local).
+    const activeSessions = await this.sessionModel
+      .find({
+        deletedAt: { $exists: false },
+        status: { $in: [SessionStatus.OPEN, SessionStatus.CLOSED] },
+        endAt: { $gt: new Date() },
+      })
+      .select('startAt endAt seatsTaken')
+      .lean();
+    const venueMax = envConfig.venueMaxCapacity;
+
+    return sessions.map((s) => {
+      const view = this.sessionView(s as unknown as SessionLike);
+      const otherOccupancy = activeSessions.reduce((acc, o) => {
+        if (String(o._id) === String(s._id)) return acc;
+        const overlaps = o.startAt < s.endAt && o.endAt > s.startAt;
+        return overlaps ? acc + (o.seatsTaken || 0) : acc;
+      }, 0);
+      const venueRemaining = Math.max(0, venueMax - otherOccupancy - s.seatsTaken);
+      view.seatsAvailable = Math.min(view.seatsAvailable, venueRemaining);
+      return view;
+    });
   }
 
   async getSession(id: string) {
