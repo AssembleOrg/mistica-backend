@@ -48,6 +48,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { computeReservationAmounts } from './reservation-amounts';
 import { SalesService } from '../sales/sales.service';
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
+import { SpaceBlocksService } from '../space-blocks/space-blocks.service';
 
 // Minutos que vive un hold sin pago antes de liberar el cupo.
 const HOLD_MINUTES = 10;
@@ -83,6 +84,7 @@ export class ReservationsService {
     private readonly salesService: SalesService,
     private readonly notifications: NotificationsService,
     private readonly closedDates: ClosedDatesService,
+    private readonly spaceBlocks: SpaceBlocksService,
   ) {}
 
   // ───────────────────────── Público: hold + pago ─────────────────────────
@@ -606,8 +608,16 @@ export class ReservationsService {
       })
       .select('seatsTaken')
       .lean();
-    const occupancy = overlapping.reduce((a, o) => a + (o.seatsTaken || 0), 0);
-    return occupancy > envConfig.venueMaxCapacity;
+    const sessionsOccupancy = overlapping.reduce(
+      (a, o) => a + (o.seatsTaken || 0),
+      0,
+    );
+    // Sumamos los lugares que bloquean talleres/eventos en esa misma franja.
+    const blocked = await this.spaceBlocks.blockedSeatsFor(
+      session.startAt,
+      session.endAt,
+    );
+    return sessionsOccupancy + blocked > envConfig.venueMaxCapacity;
   }
 
   /** Crea la reserva generando un código único, reintentando ante colisión. */

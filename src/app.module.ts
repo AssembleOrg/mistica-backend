@@ -27,6 +27,7 @@ import { ReservationsModule } from './reservations/reservations.module';
 import { LeadsModule } from './leads/leads.module';
 import { ClosedDatesModule } from './closed-dates/closed-dates.module';
 import { PiecesModule } from './pieces/pieces.module';
+import { SpaceBlocksModule } from './space-blocks/space-blocks.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { PiecesModule } from './pieces/pieces.module';
     LeadsModule,
     ClosedDatesModule,
     PiecesModule,
+    SpaceBlocksModule,
     NotificationsModule,
     BotControlModule,
   ],

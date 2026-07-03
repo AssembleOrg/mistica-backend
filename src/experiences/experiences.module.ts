@@ -8,6 +8,7 @@ import {
 } from '../common/schemas';
 import { ReservationsModule } from '../reservations/reservations.module';
 import { ClosedDatesModule } from '../closed-dates/closed-dates.module';
+import { SpaceBlocksModule } from '../space-blocks/space-blocks.module';
 import { ExperienceSessionsController } from './experience-sessions.controller';
 import { ExperiencesController } from './experiences.controller';
 import { ExperiencesService } from './experiences.service';
@@ -21,6 +22,7 @@ import { ReservationsAdminController } from './reservations-admin.controller';
     ]),
     ReservationsModule,
     ClosedDatesModule,
+    SpaceBlocksModule,
   ],
   controllers: [
     ExperiencesController,

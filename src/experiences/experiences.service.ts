@@ -23,6 +23,7 @@ import {
   ExperienceSessionDocument,
 } from '../common/schemas/experience-session.schema';
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
+import { SpaceBlocksService } from '../space-blocks/space-blocks.service';
 
 @Injectable()
 export class ExperiencesService {
@@ -32,6 +33,7 @@ export class ExperiencesService {
     @InjectModel(ExperienceSession.name)
     private readonly sessionModel: Model<ExperienceSessionDocument>,
     private readonly closedDates: ClosedDatesService,
+    private readonly spaceBlocks: SpaceBlocksService,
   ) {}
 
   // ───────────────────────── Experiencias (plantillas) ─────────────────────
@@ -158,17 +160,27 @@ export class ExperiencesService {
       .lean();
     const venueMax = envConfig.venueMaxCapacity;
 
-    return sessions.map((s) => {
-      const view = this.sessionView(s as unknown as SessionLike);
-      const otherOccupancy = activeSessions.reduce((acc, o) => {
-        if (String(o._id) === String(s._id)) return acc;
-        const overlaps = o.startAt < s.endAt && o.endAt > s.startAt;
-        return overlaps ? acc + (o.seatsTaken || 0) : acc;
-      }, 0);
-      const venueRemaining = Math.max(0, venueMax - otherOccupancy - s.seatsTaken);
-      view.seatsAvailable = Math.min(view.seatsAvailable, venueRemaining);
-      return view;
-    });
+    return Promise.all(
+      sessions.map(async (s) => {
+        const view = this.sessionView(s as unknown as SessionLike);
+        const otherOccupancy = activeSessions.reduce((acc, o) => {
+          if (String(o._id) === String(s._id)) return acc;
+          const overlaps = o.startAt < s.endAt && o.endAt > s.startAt;
+          return overlaps ? acc + (o.seatsTaken || 0) : acc;
+        }, 0);
+        // Talleres/eventos que bloquean lugares del salón en esa franja.
+        const blocked = await this.spaceBlocks.blockedSeatsFor(
+          s.startAt,
+          s.endAt,
+        );
+        const venueRemaining = Math.max(
+          0,
+          venueMax - otherOccupancy - blocked - s.seatsTaken,
+        );
+        view.seatsAvailable = Math.min(view.seatsAvailable, venueRemaining);
+        return view;
+      }),
+    );
   }
 
   async getSession(id: string) {

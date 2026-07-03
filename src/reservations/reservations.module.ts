@@ -14,6 +14,7 @@ import {
 import { MercadopagoModule } from '../mercadopago/mercadopago.module';
 import { SalesModule } from '../sales/sales.module';
 import { ClosedDatesModule } from '../closed-dates/closed-dates.module';
+import { SpaceBlocksModule } from '../space-blocks/space-blocks.module';
 import { ReservationsController } from './reservations.controller';
 import { ReservationsWebhookController } from './reservations-webhook.controller';
 import { ReservationsService } from './reservations.service';
@@ -31,6 +32,7 @@ import { ReservationsCron } from './reservations.cron';
     CashboxModule,
     SalesModule,
     ClosedDatesModule,
+    SpaceBlocksModule,
   ],
   controllers: [ReservationsController, ReservationsWebhookController],
   providers: [ReservationsService, ReservationsCron],
