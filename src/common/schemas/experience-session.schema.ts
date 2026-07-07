@@ -56,6 +56,12 @@ export class ExperienceSession {
   @Prop({ required: true, min: 0, default: 0 })
   seatsTaken: number;
 
+  // Snapshot de Experience.venueSeats: lugares FIJOS del salón que ocupa este
+  // turno abierto (ej. mesa de taller = 10), independiente de los anotados. El
+  // control de capacidad del salón usa max(seatsTaken, venueSeats).
+  @Prop({ required: true, min: 0, default: 0 })
+  venueSeats: number;
+
   @Prop({ required: true, enum: SessionStatus, default: SessionStatus.DRAFT })
   status: SessionStatus;
 

@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsEmail,
   IsEnum,
   IsIn,
@@ -52,6 +53,43 @@ export class CreateHoldDto {
   @IsString()
   @MaxLength(100)
   idempotencyKey: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Cómo paga la seña. MERCADOPAGO (default) genera link de pago; TRANSFER ' +
+      'deja el hold esperando el comprobante de transferencia (flujo del bot).',
+    enum: [ReservationPaymentMethod.MERCADOPAGO, ReservationPaymentMethod.TRANSFER],
+    default: ReservationPaymentMethod.MERCADOPAGO,
+  })
+  @IsOptional()
+  @IsIn([ReservationPaymentMethod.MERCADOPAGO, ReservationPaymentMethod.TRANSFER])
+  paymentMethod?:
+    | ReservationPaymentMethod.MERCADOPAGO
+    | ReservationPaymentMethod.TRANSFER;
+}
+
+/**
+ * Resolución del comprobante de transferencia de un hold TRANSFER (interno del
+ * bot). approved=true confirma la reserva; false la manda a revisión del admin.
+ */
+export class TransferProofDto {
+  @ApiProperty({ description: '¿El comprobante validó contra los datos esperados?' })
+  @IsBoolean()
+  approved: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Resumen/razón de la detección (queda en las notas para auditoría).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(600)
+  note?: string;
+
+  @ApiPropertyOptional({ description: 'Monto detectado en el comprobante.' })
+  @IsOptional()
+  @Type(() => Number)
+  @Min(0)
+  amountDetected?: number;
 }
 
 /**
@@ -111,6 +149,23 @@ export class AdminCreateReservationDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+}
+
+/**
+ * Reprogramación de una reserva a otro turno. Política: se acepta hasta
+ * 48 h antes del turno original; `force` permite al admin saltear esa regla.
+ */
+export class AdminRescheduleReservationDto {
+  @ApiProperty({ description: 'ID del nuevo turno (ExperienceSession)' })
+  @IsMongoId()
+  sessionId: string;
+
+  @ApiPropertyOptional({
+    description: 'Saltear la regla de 48 h antes del turno (override admin).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  force?: boolean;
 }
 
 export class AdminUpdateReservationDto {

@@ -143,6 +143,10 @@ export class Reservation {
   @Prop({ type: Date })
   reminderSentAt?: Date;
 
+  // Última reprogramación (cambio de turno desde el admin).
+  @Prop({ type: Date })
+  rescheduledAt?: Date;
+
   // Cuándo se envió el agradecimiento post-experiencia (idempotencia).
   @Prop({ type: Date })
   thankedAt?: Date;

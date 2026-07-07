@@ -28,11 +28,14 @@ const SERVICES = [
   {
     name: 'Taller mensual de cerámica',
     description:
-      'Cursada mensual en grupos reducidos. Día nuevo: martes de 18 a 20 h (otros días suelen estar completos). La primera clase es de prueba y gratis (se reserva con anticipación). Cuota mensual $65.000 (efectivo/transferencia). Seña 50% + saldo antes del día 10. Coordinamos por acá.',
+      'Cursada mensual en grupos reducidos, de martes a viernes en dos franjas: 15:30 a 17:30 h o 18:00 a 20:00 h. Los próximos cupos se abren a partir de agosto: dejanos tu nombre, un teléfono de contacto, qué día te queda más cómodo y qué franja preferís, y apenas se liberen te contactamos con prioridad según la disponibilidad que nos indiques. La primera clase es de prueba y gratis (se reserva con anticipación). Cuota mensual $65.000 (efectivo/transferencia). Seña 50% + saldo antes del día 10. Coordinamos por acá.',
     durationMinutes: 120,
     basePrice: 65000,
     defaultCapacity: 10,
     depositPct: 50,
+    // La mesa grande del taller ocupa sí o sí 10 lugares del salón (de los 40),
+    // aunque haya menos inscriptos. Ver venueSeats en Experience.
+    venueSeats: 10,
   },
   {
     name: 'Escuelita de Arte (niños 7 a 13)',

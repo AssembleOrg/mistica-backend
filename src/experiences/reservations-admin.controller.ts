@@ -14,6 +14,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
   AdminCreateReservationDto,
+  AdminRescheduleReservationDto,
   AdminUpdateReservationDto,
   ListReservationsQueryDto,
   ResolveReviewDto,
@@ -66,6 +67,20 @@ export class ReservationsAdminController {
   @ApiOperation({ summary: 'Resolver una reserva en revisión (confirm | cancel)' })
   async resolve(@Param('id') id: string, @Body() dto: ResolveReviewDto) {
     return this.reservationsService.adminResolveReview(id, dto.action);
+  }
+
+  @Post(':id/reschedule')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary:
+      'Reprogramar reserva a otro turno (hasta 48 h antes; force = override)',
+  })
+  async reschedule(
+    @Param('id') id: string,
+    @Body() dto: AdminRescheduleReservationDto,
+  ) {
+    return this.reservationsService.adminReschedule(id, dto);
   }
 
   @Patch(':id')

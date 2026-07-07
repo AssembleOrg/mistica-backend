@@ -109,6 +109,7 @@ export class ExperiencesService {
         endAt: end.toJSDate(),
         capacity: slot.capacity ?? exp.defaultCapacity,
         seatsTaken: 0,
+        venueSeats: exp.venueSeats ?? 0,
         status,
         notes: slot.notes,
       });
@@ -167,7 +168,7 @@ export class ExperiencesService {
         status: { $in: [SessionStatus.OPEN, SessionStatus.CLOSED] },
         endAt: { $gt: new Date() },
       })
-      .select('startAt endAt seatsTaken')
+      .select('startAt endAt seatsTaken venueSeats')
       .lean();
     const venueMax = envConfig.venueMaxCapacity;
 
@@ -177,10 +178,14 @@ export class ExperiencesService {
           s as unknown as SessionLike,
           colorByExp.get(String(s.experienceId)),
         );
+        // Cada turno ocupa max(anotados, lugares fijos): un taller con mesa
+        // fija resta sus lugares aunque tenga menos inscriptos.
         const otherOccupancy = activeSessions.reduce((acc, o) => {
           if (String(o._id) === String(s._id)) return acc;
           const overlaps = o.startAt < s.endAt && o.endAt > s.startAt;
-          return overlaps ? acc + (o.seatsTaken || 0) : acc;
+          return overlaps
+            ? acc + Math.max(o.seatsTaken || 0, o.venueSeats || 0)
+            : acc;
         }, 0);
         // Talleres/eventos que bloquean lugares del salón en esa franja.
         const blocked = await this.spaceBlocks.blockedSeatsFor(

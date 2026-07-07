@@ -51,6 +51,13 @@ export class Experience {
   @Prop({ type: Boolean, default: true })
   bookableOnline: boolean;
 
+  // Lugares FIJOS del salón que ocupa un turno abierto de esta experiencia,
+  // independiente de los anotados (ej. la mesa grande del taller = 10: no se
+  // puede mover, resta capacidad aunque haya menos inscriptos). 0 = ninguno,
+  // el control del salón usa los anotados (seatsTaken).
+  @Prop({ required: true, min: 0, default: 0 })
+  venueSeats: number;
+
   @Prop({ type: Boolean, default: true })
   isActive: boolean;
 

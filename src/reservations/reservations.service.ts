@@ -13,9 +13,11 @@ import { CashboxService } from '../cashbox/cashbox.service';
 import { envConfig } from '../config/env.config';
 import {
   AdminCreateReservationDto,
+  AdminRescheduleReservationDto,
   AdminUpdateReservationDto,
   CreateHoldDto,
   ListReservationsQueryDto,
+  TransferProofDto,
 } from '../common/dto/reservation.dto';
 import { AddSalePaymentsDto } from '../common/dto/sale.dto';
 import {
@@ -52,6 +54,13 @@ import { SpaceBlocksService } from '../space-blocks/space-blocks.service';
 
 // Minutos que vive un hold sin pago antes de liberar el cupo.
 const HOLD_MINUTES = 10;
+
+// Minutos que vive un hold por TRANSFERENCIA esperando el comprobante (el
+// cliente tiene que transferir y mandar la captura por WhatsApp).
+const TRANSFER_HOLD_MINUTES = 60;
+
+// Política de modificaciones: se aceptan hasta 48 h antes del turno original.
+const RESCHEDULE_MIN_HOURS = 48;
 
 // Error de clave duplicada de MongoDB.
 const DUP_KEY = 11000;
@@ -140,8 +149,11 @@ export class ReservationsService {
       qty,
       pct,
     );
+    const isTransfer =
+      dto.paymentMethod === ReservationPaymentMethod.TRANSFER;
+    const holdMinutes = isTransfer ? TRANSFER_HOLD_MINUTES : HOLD_MINUTES;
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + HOLD_MINUTES * 60_000);
+    const expiresAt = new Date(now.getTime() + holdMinutes * 60_000);
 
     let reservation: ReservationDocument;
     try {
@@ -158,7 +170,9 @@ export class ReservationsService {
         balanceDue,
         status: ReservationStatus.PENDING,
         source: ReservationSource.PUBLIC,
-        paymentMethod: ReservationPaymentMethod.MERCADOPAGO,
+        paymentMethod: isTransfer
+          ? ReservationPaymentMethod.TRANSFER
+          : ReservationPaymentMethod.MERCADOPAGO,
         customerName: dto.customerName,
         customerEmail: dto.customerEmail,
         customerPhone: dto.customerPhone,
@@ -177,6 +191,12 @@ export class ReservationsService {
         if (winner) return this.holdResponse(winner);
       }
       throw err;
+    }
+
+    // TRANSFERENCIA: no hay preference de MP; el hold queda esperando el
+    // comprobante (el bot lo valida con IA y llama resolveTransferProof).
+    if (isTransfer) {
+      return this.holdResponse(reservation);
     }
 
     // Crear la preference de MercadoPago. Si falla, no hay forma de pagar:
@@ -212,6 +232,98 @@ export class ReservationsService {
     }
 
     return this.holdResponse(reservation);
+  }
+
+  // ───────────────────── Transferencia (interno del bot) ─────────────────────
+
+  /**
+   * Último hold PENDING por TRANSFERENCIA (no vencido) del teléfono. El bot lo
+   * usa para asociar un comprobante que llega por WhatsApp con su reserva.
+   * Matcheo por sufijo de dígitos (el número puede venir con o sin 549/9).
+   */
+  async pendingTransferByPhone(phone: string) {
+    const digits = (phone || '').replace(/\D/g, '');
+    if (digits.length < 6) return { found: false };
+    const candidates = await this.reservationModel
+      .find({
+        status: ReservationStatus.PENDING,
+        paymentMethod: ReservationPaymentMethod.TRANSFER,
+        expiresAt: { $gt: new Date() },
+        deletedAt: { $exists: false },
+      })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+    const suffix = digits.slice(-10);
+    const match = candidates.find((r) =>
+      (r.customerPhone || '').replace(/\D/g, '').endsWith(suffix),
+    );
+    if (!match) return { found: false };
+    return {
+      found: true,
+      reservation: {
+        reservationId: String(match._id),
+        code: match.code,
+        experienceName: match.experienceName,
+        startAt: match.startAt,
+        quantity: match.quantity,
+        depositAmount: match.depositAmount,
+        totalAmount: match.totalAmount,
+        balanceDue: match.balanceDue,
+        expiresAt: match.expiresAt,
+      },
+    };
+  }
+
+  /**
+   * Resuelve el comprobante de transferencia de un hold TRANSFER (lo llama el
+   * bot tras validar la imagen con IA). approved=true ⇒ CONFIRMED + venta;
+   * approved=false ⇒ NEEDS_REVIEW (libera cupo; el admin re-toma al confirmar).
+   * La nota queda en la reserva para la auditoría humana de fin de día.
+   */
+  async resolveTransferProof(id: string, dto: TransferProofDto) {
+    const r = await this.findByIdOrThrow(id);
+    if (r.paymentMethod !== ReservationPaymentMethod.TRANSFER) {
+      throw new ConflictException('La reserva no es por transferencia.');
+    }
+    if (r.status !== ReservationStatus.PENDING) {
+      throw new ConflictException('La reserva ya no está pendiente.');
+    }
+
+    const stamp = new Date();
+    const noteLine =
+      `[comprobante ${stamp.toISOString()}] ` +
+      `${dto.approved ? 'OK' : 'A REVISAR'}` +
+      `${dto.amountDetected != null ? ` · monto detectado $${dto.amountDetected}` : ''}` +
+      `${dto.note ? ` · ${dto.note}` : ''}`;
+    const notes = [r.notes, noteLine].filter(Boolean).join('\n');
+
+    const won = await this.reservationModel.findOneAndUpdate(
+      { _id: r._id, status: ReservationStatus.PENDING },
+      {
+        $set: dto.approved
+          ? {
+              status: ReservationStatus.CONFIRMED,
+              confirmedAt: stamp,
+              notes,
+            }
+          : { status: ReservationStatus.NEEDS_REVIEW, notes },
+      },
+      { new: true },
+    );
+    if (!won) {
+      // Carrera con el cron de expiración: ya no estaba PENDING.
+      throw new ConflictException('La reserva ya no está pendiente.');
+    }
+
+    if (dto.approved) {
+      await this.createSaleForReservation(won, PaymentMethod.TRANSFER);
+    } else {
+      // Igual que el flujo de revisión existente: el cupo se libera y
+      // adminResolveReview lo re-toma si el admin confirma.
+      await this.releaseSeats(won.sessionId, won.quantity);
+    }
+    return this.publicView(won);
   }
 
   /** Estado de una reserva por id (para polling del front). */
@@ -595,6 +707,8 @@ export class ReservationsService {
    * de todas las actividades (turnos OPEN/CLOSED con reservas activas) que se
    * solapan en el tiempo y compara contra el tope del salón. La `session` que se
    * acaba de reservar ya está incluida (su seatsTaken trae la reserva nueva).
+   * Cada turno ocupa max(seatsTaken, venueSeats): un taller con mesa fija resta
+   * sus lugares aunque tenga menos anotados.
    */
   private async venueOverCapacity(
     session: ExperienceSessionDocument,
@@ -606,10 +720,10 @@ export class ReservationsService {
         startAt: { $lt: session.endAt },
         endAt: { $gt: session.startAt },
       })
-      .select('seatsTaken')
+      .select('seatsTaken venueSeats')
       .lean();
     const sessionsOccupancy = overlapping.reduce(
-      (a, o) => a + (o.seatsTaken || 0),
+      (a, o) => a + Math.max(o.seatsTaken || 0, o.venueSeats || 0),
       0,
     );
     // Sumamos los lugares que bloquean talleres/eventos en esa misma franja.
@@ -971,6 +1085,78 @@ export class ReservationsService {
     if (dto.notes !== undefined) r.notes = dto.notes;
     r.updatedAt = new Date();
     await r.save();
+    return this.publicView(r);
+  }
+
+  /**
+   * Reprograma una reserva CONFIRMED a otro turno. Política: las modificaciones
+   * se aceptan hasta RESCHEDULE_MIN_HOURS (48 h) antes del turno original;
+   * `force` permite al admin saltear la regla. El precio del nuevo turno debe
+   * coincidir (la seña/venta ya registradas no se recalculan). Toma cupo en el
+   * turno nuevo antes de liberar el viejo (compensación, sin transacciones).
+   */
+  async adminReschedule(id: string, dto: AdminRescheduleReservationDto) {
+    const r = await this.findByIdOrThrow(id);
+    if (r.status !== ReservationStatus.CONFIRMED) {
+      throw new ConflictException(
+        'Sólo se pueden reprogramar reservas confirmadas.',
+      );
+    }
+    if (String(r.sessionId) === dto.sessionId) {
+      throw new BadRequestException('La reserva ya está en ese turno.');
+    }
+
+    const now = new Date();
+    const limit = new Date(
+      r.startAt.getTime() - RESCHEDULE_MIN_HOURS * 3600_000,
+    );
+    if (now > limit && !dto.force) {
+      throw new ConflictException(
+        `Las modificaciones se aceptan hasta ${RESCHEDULE_MIN_HOURS} h antes del turno.`,
+      );
+    }
+
+    // Toma cupo en el turno nuevo (atómico). Igual que adminCreate, el admin
+    // puede anotar también en turnos CLOSED/DRAFT.
+    const target = await this.reserveSeats(dto.sessionId, r.quantity, [
+      SessionStatus.OPEN,
+      SessionStatus.CLOSED,
+      SessionStatus.DRAFT,
+    ]);
+
+    if (target.price !== r.unitPrice) {
+      await this.releaseSeats(target._id as Types.ObjectId, r.quantity);
+      throw new ConflictException(
+        'El nuevo turno tiene otro precio. Cancelá la reserva y creá una nueva.',
+      );
+    }
+
+    const oldSessionId = r.sessionId;
+    const oldStartAt = r.startAt;
+    try {
+      r.sessionId = target._id as Types.ObjectId;
+      r.experienceId = target.experienceId;
+      r.experienceName = target.experienceName;
+      r.startAt = target.startAt;
+      r.rescheduledAt = now;
+      // Re-armar el recordatorio para la nueva fecha.
+      r.set('reminderSentAt', undefined);
+      r.updatedAt = now;
+      await r.save();
+    } catch (err) {
+      await this.releaseSeats(target._id as Types.ObjectId, r.quantity);
+      throw err;
+    }
+    await this.releaseSeats(oldSessionId, r.quantity);
+
+    if (r.customerPhone) {
+      await this.notifications.notify(
+        r.customerPhone,
+        `Tu reserva fue reprogramada ✨\n\n*${r.experienceName}*\n` +
+          `Nuevo turno: ${this.fmtWhen(r.startAt)}\n(antes: ${this.fmtWhen(oldStartAt)})\n` +
+          `Código: *${r.code}*\n\n¡Te esperamos! 💛`,
+      );
+    }
     return this.publicView(r);
   }
 

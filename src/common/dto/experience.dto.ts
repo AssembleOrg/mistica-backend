@@ -81,6 +81,17 @@ export class CreateExperienceDto {
   @IsBoolean()
   bookableOnline?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Lugares FIJOS del salón que ocupa un turno abierto (ej. mesa de taller = 10). 0 = usa los anotados.',
+    minimum: 0,
+    default: 0,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  venueSeats?: number;
+
   @ApiPropertyOptional({ description: 'Activa', default: true })
   @IsOptional()
   @IsBoolean()
