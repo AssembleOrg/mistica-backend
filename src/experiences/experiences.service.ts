@@ -115,7 +115,9 @@ export class ExperiencesService {
     }
 
     const created = await this.sessionModel.insertMany(docs);
-    return created.map((s) => this.sessionView(s as unknown as SessionLike));
+    return created.map((s) =>
+      this.sessionView(s as unknown as SessionLike, exp.color),
+    );
   }
 
   async listSessions(params: {
@@ -146,6 +148,15 @@ export class ExperiencesService {
       .sort({ startAt: 1 })
       .lean();
 
+    // Color actual de cada experiencia (join dinámico: si el admin cambia el
+    // color de la plantilla, la agenda entera se repinta sin migrar turnos).
+    const expIds = [...new Set(sessions.map((s) => String(s.experienceId)))];
+    const exps = await this.experienceModel
+      .find({ _id: { $in: expIds } })
+      .select('color')
+      .lean();
+    const colorByExp = new Map(exps.map((e) => [String(e._id), e.color]));
+
     // Tope de LOCAL: la disponibilidad de cada turno se limita también por la
     // capacidad compartida del salón. Traemos todos los turnos OPEN/CLOSED
     // vigentes (con reservas activas) para calcular cuántas personas hay en cada
@@ -162,7 +173,10 @@ export class ExperiencesService {
 
     return Promise.all(
       sessions.map(async (s) => {
-        const view = this.sessionView(s as unknown as SessionLike);
+        const view = this.sessionView(
+          s as unknown as SessionLike,
+          colorByExp.get(String(s.experienceId)),
+        );
         const otherOccupancy = activeSessions.reduce((acc, o) => {
           if (String(o._id) === String(s._id)) return acc;
           const overlaps = o.startAt < s.endAt && o.endAt > s.startAt;
@@ -185,7 +199,10 @@ export class ExperiencesService {
 
   async getSession(id: string) {
     const s = await this.findSessionOrThrow(id);
-    return this.sessionView(s as unknown as SessionLike);
+    return this.sessionView(
+      s as unknown as SessionLike,
+      await this.experienceColor(s.experienceId),
+    );
   }
 
   async updateSession(id: string, dto: UpdateSessionDto) {
@@ -204,7 +221,10 @@ export class ExperiencesService {
     if (dto.notes !== undefined) s.notes = dto.notes;
     s.updatedAt = new Date();
     await s.save();
-    return this.sessionView(s as unknown as SessionLike);
+    return this.sessionView(
+      s as unknown as SessionLike,
+      await this.experienceColor(s.experienceId),
+    );
   }
 
   /** Baja de turno: sólo si no tiene asientos tomados. Si tiene, cancelar. */
@@ -242,11 +262,22 @@ export class ExperiencesService {
     return s;
   }
 
-  private sessionView(s: SessionLike) {
+  private async experienceColor(
+    experienceId: unknown,
+  ): Promise<string | undefined> {
+    const exp = await this.experienceModel
+      .findById(experienceId)
+      .select('color')
+      .lean();
+    return exp?.color;
+  }
+
+  private sessionView(s: SessionLike, experienceColor?: string) {
     return {
       id: String(s._id),
       experienceId: String(s.experienceId),
       experienceName: s.experienceName,
+      experienceColor: experienceColor ?? '#9d684e',
       durationMinutes: s.durationMinutes,
       price: s.price,
       depositPct: s.depositPct ?? 50,

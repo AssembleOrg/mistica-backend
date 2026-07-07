@@ -37,6 +37,11 @@ export class Experience {
   @Prop({ required: true, min: 0, max: 100, default: 50 })
   depositPct: number;
 
+  // Color hex (#RRGGBB) para identificar la experiencia en la agenda.
+  // Obligatorio; docs viejos se backfillean con scripts/backfill-experience-colors.js.
+  @Prop({ required: true, trim: true, default: '#9d684e' })
+  color: string;
+
   @Prop({ type: [String], default: [] })
   images: string[];
 

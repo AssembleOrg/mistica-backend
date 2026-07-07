@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -54,6 +55,16 @@ export class CreateExperienceDto {
   @Min(0)
   @Max(100)
   depositPct?: number;
+
+  @ApiProperty({
+    description: 'Color hex (#RRGGBB) para la agenda',
+    example: '#9d684e',
+  })
+  @IsString()
+  @Matches(/^#[0-9a-fA-F]{6}$/, {
+    message: 'color debe ser un hex tipo #RRGGBB',
+  })
+  color: string;
 
   @ApiPropertyOptional({ description: 'URLs de imágenes', type: [String] })
   @IsOptional()
