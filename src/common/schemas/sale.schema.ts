@@ -37,7 +37,10 @@ export class Sale {
   // es válido.
   @Prop({
     type: [{
-      productId: { type: SchemaTypes.ObjectId, ref: 'Product', required: true },
+      // Opcional: los "ítems libres" (promos o productos fuera de catálogo)
+      // no referencian un Product. En ese caso `productName` viene del payload
+      // y la línea no toca stock. Los ítems normales sí lo llevan.
+      productId: { type: SchemaTypes.ObjectId, ref: 'Product', required: false },
       productName: { type: String, required: true, trim: true },
       quantity: { type: Number, required: true, min: 1 },
       unitPrice: { type: Number, required: true, min: 0 },
@@ -50,7 +53,7 @@ export class Sale {
     default: [],
   })
   items: Array<{
-    productId: Types.ObjectId;
+    productId?: Types.ObjectId;
     productName: string;
     quantity: number;
     unitPrice: number;

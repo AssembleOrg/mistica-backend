@@ -164,6 +164,7 @@ export class EgressesController {
   }
 
   @Patch(':id/cancel')
+  @Auditory({ entity: 'Egress', action: 'CANCEL' })
   @ApiOperation({ summary: 'Cancelar un egreso' })
   @ApiParam({ name: 'id', description: 'ID del egreso' })
   @ApiResponse({

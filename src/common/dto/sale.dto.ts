@@ -20,10 +20,21 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentMethod, SaleStatus, InvoiceType, TaxCondition } from '../enums';
 
 export class CreateSaleItemDto {
-  @ApiProperty({ description: 'ID del producto' })
+  @ApiPropertyOptional({
+    description:
+      'ID del producto. Ausente en ítems libres (promo o producto fuera de catálogo); en ese caso `productName` es obligatorio y la línea no toca stock.',
+  })
+  @IsOptional()
   @IsString({ message: 'El ID del producto debe ser una cadena de texto' })
-  @IsNotEmpty({ message: 'El ID del producto es requerido' })
-  productId: string;
+  @IsNotEmpty({ message: 'El ID del producto no puede ser vacío' })
+  productId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Nombre del ítem libre (obligatorio cuando no hay productId).',
+  })
+  @IsOptional()
+  @IsString({ message: 'El nombre del producto debe ser una cadena de texto' })
+  productName?: string;
 
   @ApiProperty({ description: 'Cantidad del producto', minimum: 1 })
   @IsNumber({}, { message: 'La cantidad debe ser un número' })

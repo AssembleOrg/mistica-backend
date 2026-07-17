@@ -18,4 +18,9 @@ export interface Product {
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date;
+  // Motivo del movimiento de stock (ej. "Consumo taller — Mel"). Sólo se
+  // completa en updateStock cuando el request lo envía; queda en el registro
+  // de auditoría (AuditInterceptor lee la respuesta). No se persiste en el
+  // documento del producto.
+  stockChangeReason?: string;
 }
