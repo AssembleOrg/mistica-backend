@@ -52,12 +52,16 @@ import { SalesService } from '../sales/sales.service';
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { SpaceBlocksService } from '../space-blocks/space-blocks.service';
 
-// Minutos que vive un hold sin pago antes de liberar el cupo.
-const HOLD_MINUTES = 10;
+// Minutos que vive un hold sin pago antes de liberar el cupo. También define
+// el vencimiento del link de MercadoPago (la preference expira junto con el
+// hold). 30 min: amigable — son reservas aisladas, no hay presión de cupo por
+// minuto que justifique apurar al cliente.
+const HOLD_MINUTES = 30;
 
 // Minutos que vive un hold por TRANSFERENCIA esperando el comprobante (el
-// cliente tiene que transferir y mandar la captura por WhatsApp).
-const TRANSFER_HOLD_MINUTES = 60;
+// cliente transfiere y manda la captura por WhatsApp). Mismo tiempo que el
+// link de MercadoPago: ambos métodos apartan el cupo por igual.
+const TRANSFER_HOLD_MINUTES = HOLD_MINUTES;
 
 // Política de modificaciones: se aceptan hasta 48 h antes del turno original.
 const RESCHEDULE_MIN_HOURS = 48;

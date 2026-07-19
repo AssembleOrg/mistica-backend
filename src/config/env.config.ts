@@ -43,4 +43,16 @@ export const envConfig = {
   // la suma de personas de todos los turnos/actividades que se solapan en el
   // horario no puede superarlo (independiente del cupo de cada turno).
   venueMaxCapacity: Number.parseInt(process.env.VENUE_MAX_CAPACITY || '40', 10),
+  // DigitalOcean Spaces (S3-compatible): guarda las imágenes de comprobantes
+  // de transferencia que llegan por WhatsApp sin reserva pendiente, para
+  // verificación humana posterior. Sin bucket/keys, la subida se omite (la
+  // consulta se registra igual, sin imagen).
+  spaces: {
+    key: process.env.DO_SPACES_KEY || '',
+    secret: process.env.DO_SPACES_SECRET || '',
+    region: process.env.DO_SPACES_REGION || 'nyc3',
+    bucket: process.env.DO_SPACES_BUCKET || '',
+    // Ej: https://nyc3.digitaloceanspaces.com (endpoint del REGION, sin bucket).
+    endpoint: process.env.DO_SPACES_ENDPOINT || '',
+  },
 };

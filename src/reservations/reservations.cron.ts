@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { ReservationsService } from './reservations.service';
 
 /**
- * Libera cupo de los holds vencidos. Corre cada minuto: el hold dura 10 min, así
+ * Libera cupo de los holds vencidos. Corre cada minuto: el hold dura 30 min, así
  * que el cupo se libera a más tardar ~1 min después del vencimiento.
  */
 @Injectable()

@@ -1,10 +1,12 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsEmail,
   IsEnum,
   IsInt,
   IsMongoId,
+  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
@@ -63,6 +65,60 @@ export class CreateLeadDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+}
+
+/**
+ * Comprobante de transferencia recibido por WhatsApp SIN reserva (hold) que lo
+ * espere. Lo manda el bot (X-Bot-Secret) con lo extraído por visión: el backend
+ * matchea el monto contra las últimas reservas del teléfono, guarda la imagen
+ * en Spaces y registra la consulta para verificación humana.
+ */
+export class OrphanReceiptDto {
+  @ApiProperty({ description: 'Teléfono verificado del WhatsApp que lo envió' })
+  @IsString()
+  @MaxLength(40)
+  phone: string;
+
+  @ApiProperty({
+    description: 'Si el destinatario del comprobante coincide con la cuenta de Mística (lo valida el bot contra su config)',
+  })
+  @IsBoolean()
+  destinatarioOk: boolean;
+
+  @ApiPropertyOptional({ description: 'Monto leído del comprobante' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  amountDetected?: number;
+
+  @ApiPropertyOptional({ description: 'Número de operación leído' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  operationNumber?: string;
+
+  @ApiPropertyOptional({ description: 'Fecha leída del comprobante (texto)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  receiptDate?: string;
+
+  @ApiProperty({ description: 'Imagen del comprobante en base64' })
+  @IsString()
+  imageBase64: string;
+
+  @ApiPropertyOptional({ description: 'MIME de la imagen', default: 'image/jpeg' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  imageMime?: string;
+
+  @ApiPropertyOptional({ description: 'Detalle extra del bot' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  note?: string;
 }
 
 export class UpdateLeadDto extends PartialType(CreateLeadDto) {

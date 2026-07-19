@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as cookieParser from 'cookie-parser';
+import { json } from 'express';
 import { AppModule } from './app.module';
 import { envConfig } from './config/env.config';
 
@@ -9,6 +10,10 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
   app.use(cookieParser());
+  // El comprobante huérfano llega como imagen base64 (~hasta 8 MB de imagen ⇒
+  // ~11 MB de JSON): subimos el límite de body SOLO para esa ruta; el resto
+  // conserva el default de Express (100 kb).
+  app.use('/api/leads/orphan-receipt', json({ limit: '12mb' }));
 
   // Global error handling
   process.on('uncaughtException', (error) => {
