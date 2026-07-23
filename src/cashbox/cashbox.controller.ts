@@ -25,6 +25,7 @@ import {
   OpenCashSessionDto,
   PaginationDto,
   UpdateCashSessionLabelDto,
+  UpdateTransactionCheckedDto,
 } from '../common/dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Auditory } from '../common/decorators';
@@ -115,6 +116,23 @@ export class CashboxController {
   @ApiOperation({ summary: 'Obtener caja pendiente de arqueo' })
   async getPendingAutoClosure() {
     return this.cashboxService.findPendingAutoClosure();
+  }
+
+  @Patch('transactions/:source/:id/checked')
+  @ApiOperation({
+    summary:
+      'Marcar/desmarcar un movimiento (checkbox tipo Excel del detalle de sesión). Sólo estado, no afecta cálculos.',
+  })
+  async setTransactionChecked(
+    @Param('source') source: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateTransactionCheckedDto,
+  ) {
+    // El `source` se valida dentro del service (modelBySource → 400 si es
+    // inválido). No usamos un DTO de params porque el ValidationPipe global
+    // (whitelist + forbidNonWhitelisted) rechazaría el `id` como propiedad
+    // no declarada en ese DTO y devolvería 400 en cada request.
+    return this.cashboxService.setTransactionChecked(source, id, dto.checked);
   }
 
   @Get(':id')

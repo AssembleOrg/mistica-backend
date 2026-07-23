@@ -653,6 +653,39 @@ export class CashboxService {
   }
 
   /**
+   * Marca/desmarca un movimiento (checkbox tipo Excel del detalle de sesión).
+   * Es sólo estado visual persistido: no toca ningún cálculo, saldo ni arqueo.
+   * El movimiento no es un documento propio: vive en la colección de su
+   * `source`, así que elegimos el modelo según ese source.
+   */
+  async setTransactionChecked(
+    source: string,
+    id: string,
+    checked: boolean,
+  ): Promise<{ id: string; source: string; checked: boolean }> {
+    const modelBySource: Record<string, Model<any>> = {
+      sale: this.saleModel,
+      prepaid: this.prepaidModel,
+      egress: this.egressModel,
+      income: this.cashIncomeModel,
+    };
+
+    const model = modelBySource[source];
+    if (!model) {
+      throw new BadRequestException(`Fuente de movimiento inválida: ${source}`);
+    }
+
+    const updated = await model
+      .findByIdAndUpdate(id, { checked }, { new: true })
+      .exec();
+    if (!updated) {
+      throw new BadRequestException(`Movimiento no encontrado: ${id}`);
+    }
+
+    return { id, source, checked };
+  }
+
+  /**
    * Lista cronológica de movimientos (ventas + señas + egresos) ocurridos
    * durante una sesión de caja. Para sesiones abiertas usa `now` como límite
    * superior. Pensado para la vista "Transacciones" del tab de Ventas y para
@@ -675,6 +708,7 @@ export class CashboxService {
       reference?: string;
       afipCae?: string;
       isSena?: boolean;
+      checked: boolean;
     }>;
   }> {
     const session = await this.cashSessionModel.findById(sessionId).exec();
@@ -761,6 +795,8 @@ export class CashboxService {
       // venta con saldo pendiente (status PARTIAL). El front lo usa para el
       // chip "Seña" unificado en el detalle de sesión.
       isSena?: boolean;
+      // Marca manual del checkbox tipo Excel. Sólo estado; no afecta cálculos.
+      checked: boolean;
     }> = [];
 
     for (const s of sales as any[]) {
@@ -802,6 +838,7 @@ export class CashboxService {
         createdAt: lastPayment.createdAt ?? s.createdAt,
         reference: s.saleNumber,
         afipCae: s.afipCae,
+        checked: s.checked ?? false,
       });
     }
 
@@ -817,6 +854,7 @@ export class CashboxService {
         createdAt: p.createdAt,
         reference: p._id.toString(),
         isSena: true,
+        checked: p.checked ?? false,
       });
     }
 
@@ -831,6 +869,7 @@ export class CashboxService {
         paymentMethod: e.paymentMethod,
         createdAt: e.createdAt,
         reference: e.egressNumber,
+        checked: e.checked ?? false,
       });
     }
 
@@ -845,6 +884,7 @@ export class CashboxService {
         paymentMethod: i.paymentMethod,
         createdAt: i.createdAt,
         reference: i.incomeNumber,
+        checked: i.checked ?? false,
       });
     }
 
