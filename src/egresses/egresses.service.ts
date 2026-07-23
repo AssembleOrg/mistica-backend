@@ -2,14 +2,18 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { DateTime } from 'luxon';
-import { CreateEgressDto, UpdateEgressDto, EgressPaginatedFilterDto } from '../common/dto';
+import {
+  CreateEgressDto,
+  UpdateEgressDto,
+  EgressPaginatedFilterDto,
+} from '../common/dto';
 import { IEgress, PaginatedResponse } from '../common/interfaces';
-import { 
+import {
   EgressNotFoundException,
   EgressNumberAlreadyExistsException,
   EgressCannotBeUpdatedException,
   EgressCannotBeDeletedException,
-  InvalidEgressDataException
+  InvalidEgressDataException,
 } from '../common/exceptions';
 import { Egress, EgressDocument } from '../common/schemas';
 import { EgressStatus } from '../common/enums';
@@ -18,7 +22,8 @@ import { buildDateFilter } from '../common/utils';
 @Injectable()
 export class EgressesService {
   constructor(
-    @InjectModel(Egress.name) private readonly egressModel: Model<EgressDocument>,
+    @InjectModel(Egress.name)
+    private readonly egressModel: Model<EgressDocument>,
   ) {}
 
   private mapToEgressResponse(egress: EgressDocument | any): IEgress {
@@ -45,12 +50,12 @@ export class EgressesService {
   private async generateEgressNumber(): Promise<string> {
     const today = DateTime.now().toFormat('yyyyMMdd');
     const prefix = `EGR-${today}`;
-    
+
     // Find the latest egress number for today
     const latestEgress = await this.egressModel
       .findOne({
         egressNumber: { $regex: `^${prefix}` },
-        deletedAt: null
+        deletedAt: null,
       })
       .sort({ egressNumber: -1 })
       .lean();
@@ -83,8 +88,19 @@ export class EgressesService {
     return this.mapToEgressResponse(createdEgress);
   }
 
-  async findAll(filterDto: EgressPaginatedFilterDto): Promise<PaginatedResponse<IEgress>> {
-    const { page = 1, limit = 10, search, from, to, status, type, currency } = filterDto;
+  async findAll(
+    filterDto: EgressPaginatedFilterDto,
+  ): Promise<PaginatedResponse<IEgress>> {
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      from,
+      to,
+      status,
+      type,
+      currency,
+    } = filterDto;
     const skip = (page - 1) * limit;
 
     // Build the filter - remove deletedAt filter temporarily
@@ -97,7 +113,7 @@ export class EgressesService {
       filter.$or = [
         { concept: { $regex: search, $options: 'i' } },
         { notes: { $regex: search, $options: 'i' } },
-        { authorizedBy: { $regex: search, $options: 'i' } }
+        { authorizedBy: { $regex: search, $options: 'i' } },
       ];
     }
 
@@ -135,10 +151,17 @@ export class EgressesService {
     ]);
 
     // Debug: Log the results
-    console.log('Found egresses:', egresses.length, 'Total with filter:', total);
+    console.log(
+      'Found egresses:',
+      egresses.length,
+      'Total with filter:',
+      total,
+    );
     console.log('Raw egresses:', JSON.stringify(egresses, null, 2));
 
-    const mappedEgresses = egresses.map(egress => this.mapToEgressResponse(egress as EgressDocument));
+    const mappedEgresses = egresses.map((egress) =>
+      this.mapToEgressResponse(egress as EgressDocument),
+    );
 
     return {
       data: mappedEgresses,
@@ -175,7 +198,9 @@ export class EgressesService {
 
     // Check if egress can be updated
     if (egress.status === EgressStatus.COMPLETED) {
-      throw new EgressCannotBeUpdatedException('No se puede modificar un egreso completado');
+      throw new EgressCannotBeUpdatedException(
+        'No se puede modificar un egreso completado',
+      );
     }
 
     // Validate amount if provided
@@ -183,8 +208,16 @@ export class EgressesService {
       throw new InvalidEgressDataException('El monto debe ser mayor que 0');
     }
 
-    // Update the egress
-    Object.assign(egress, updateEgressDto);
+    // Update the egress. Sólo aplicamos los campos realmente enviados: si
+    // copiáramos el DTO entero, los campos ausentes (undefined) pisarían
+    // valores existentes como `status`, y `save()` fallaría con
+    // "Path `status` is required" al revalidar el documento completo.
+    const definedFields = Object.fromEntries(
+      Object.entries(updateEgressDto).filter(
+        ([, value]) => value !== undefined,
+      ),
+    );
+    Object.assign(egress, definedFields);
     egress.updatedAt = new Date();
 
     await egress.save();
@@ -200,7 +233,9 @@ export class EgressesService {
 
     // Check if egress can be deleted
     if (egress.status === EgressStatus.COMPLETED) {
-      throw new EgressCannotBeDeletedException('No se puede eliminar un egreso completado');
+      throw new EgressCannotBeDeletedException(
+        'No se puede eliminar un egreso completado',
+      );
     }
 
     // Soft delete
@@ -221,12 +256,14 @@ export class EgressesService {
     }
 
     if (egress.status === EgressStatus.CANCELLED) {
-      throw new EgressCannotBeUpdatedException('No se puede completar un egreso cancelado');
+      throw new EgressCannotBeUpdatedException(
+        'No se puede completar un egreso cancelado',
+      );
     }
 
     egress.status = EgressStatus.COMPLETED;
     egress.updatedAt = new Date();
-    
+
     await egress.save();
     return this.mapToEgressResponse(egress);
   }
@@ -239,7 +276,9 @@ export class EgressesService {
     }
 
     if (egress.status === EgressStatus.COMPLETED) {
-      throw new EgressCannotBeUpdatedException('No se puede cancelar un egreso completado');
+      throw new EgressCannotBeUpdatedException(
+        'No se puede cancelar un egreso completado',
+      );
     }
 
     if (egress.status === EgressStatus.CANCELLED) {
@@ -248,14 +287,20 @@ export class EgressesService {
 
     egress.status = EgressStatus.CANCELLED;
     egress.updatedAt = new Date();
-    
+
     await egress.save();
     return this.mapToEgressResponse(egress);
   }
 
   // Statistics methods
-  async getTotalByPeriod(from?: string, to?: string): Promise<{ total: number; currency: string }[]> {
-    const filter: any = { deletedAt: { $exists: false }, status: EgressStatus.COMPLETED };
+  async getTotalByPeriod(
+    from?: string,
+    to?: string,
+  ): Promise<{ total: number; currency: string }[]> {
+    const filter: any = {
+      deletedAt: { $exists: false },
+      status: EgressStatus.COMPLETED,
+    };
 
     const dateFilter = buildDateFilter(from, to);
     if (dateFilter && Object.keys(dateFilter).length > 0) {
@@ -267,16 +312,16 @@ export class EgressesService {
       {
         $group: {
           _id: '$currency',
-          total: { $sum: '$amount' }
-        }
+          total: { $sum: '$amount' },
+        },
       },
       {
         $project: {
           _id: 0,
           currency: '$_id',
-          total: 1
-        }
-      }
+          total: 1,
+        },
+      },
     ]);
 
     return result;
