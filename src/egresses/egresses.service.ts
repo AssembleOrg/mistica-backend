@@ -15,15 +15,35 @@ import {
   EgressCannotBeDeletedException,
   InvalidEgressDataException,
 } from '../common/exceptions';
-import { Egress, EgressDocument } from '../common/schemas';
+import { Egress, EgressDocument, AuditLog, AuditLogDocument } from '../common/schemas';
 import { EgressStatus } from '../common/enums';
 import { buildDateFilter } from '../common/utils';
+import { SettingsService } from '../settings/settings.service';
+import { CashboxService } from '../cashbox/cashbox.service';
+
+/**
+ * Contexto de quién autoriza y por qué un borrado de egreso. Con cuenta admin
+ * compartida, el borrado es sensible: exige PIN o contraseña del admin y deja
+ * rastro (motivo + auditoría). Ver [[SettingsService.authorizeSensitiveAction]].
+ */
+export interface RemoveEgressContext {
+  userId?: string;
+  userEmail?: string;
+  ipAddress?: string;
+  reason: string;
+  pin?: string;
+  adminPassword?: string;
+}
 
 @Injectable()
 export class EgressesService {
   constructor(
     @InjectModel(Egress.name)
     private readonly egressModel: Model<EgressDocument>,
+    @InjectModel(AuditLog.name)
+    private readonly auditLogModel: Model<AuditLogDocument>,
+    private readonly settingsService: SettingsService,
+    private readonly cashboxService: CashboxService,
   ) {}
 
   private mapToEgressResponse(egress: EgressDocument | any): IEgress {
@@ -224,24 +244,78 @@ export class EgressesService {
     return this.mapToEgressResponse(egress);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, ctx: RemoveEgressContext): Promise<void> {
     const egress = await this.egressModel.findOne({ _id: id, deletedAt: null });
 
     if (!egress) {
       throw new EgressNotFoundException(id);
     }
 
-    // Check if egress can be deleted
-    if (egress.status === EgressStatus.COMPLETED) {
-      throw new EgressCannotBeDeletedException(
-        'No se puede eliminar un egreso completado',
-      );
-    }
+    // Autorización: PIN del dueño o, como respaldo, contraseña del admin. El
+    // cajero no tiene ninguno, así que no puede borrar aunque comparta el login.
+    // Lanza excepción si no autoriza (incluye bloqueo por fuerza bruta del PIN).
+    await this.settingsService.authorizeSensitiveAction(
+      ctx.userId,
+      ctx.pin,
+      ctx.adminPassword,
+    );
+
+    // A diferencia del borrado casual, una corrección autorizada SÍ puede borrar
+    // un egreso COMPLETED (es justo el caso: un egreso ya confirmado de una caja
+    // cerrada, cargado por error). El PIN/contraseña es la salvaguarda.
+
+    // Snapshot ANTES de marcar el borrado, para auditoría y para el historial de
+    // la caja afectada.
+    const snapshot = {
+      _id: egress._id,
+      egressNumber: egress.egressNumber,
+      concept: egress.concept,
+      amount: egress.amount,
+      currency: egress.currency,
+      type: egress.type,
+      status: egress.status,
+      paymentMethod: egress.paymentMethod,
+      createdAt: egress.createdAt,
+    };
 
     // Soft delete
     egress.deletedAt = new Date();
     egress.updatedAt = new Date();
     await egress.save();
+
+    // Ajustar la caja CERRADA afectada (recalcula esperado/discrepancia y deja
+    // snapshot en editHistory). El egreso ya tiene deletedAt, así que el
+    // recálculo lo excluye. No falla el borrado si esto tiene un problema.
+    try {
+      await this.cashboxService.handleEgressDeleted(
+        snapshot,
+        ctx.userId,
+        ctx.reason,
+      );
+    } catch (err) {
+      console.error(
+        'Error ajustando la caja tras borrar el egreso',
+        egress.egressNumber,
+        err,
+      );
+    }
+
+    // Auditoría explícita: guarda el egreso borrado (oldValues) + el motivo.
+    // El interceptor global sólo captura newValues, inútil para un DELETE.
+    try {
+      await this.auditLogModel.create({
+        entity: 'Egress',
+        entityId: String(egress._id),
+        action: 'DELETE',
+        userId: ctx.userId ? (ctx.userId as any) : undefined,
+        userEmail: ctx.userEmail,
+        ipAddress: ctx.ipAddress ?? 'unknown',
+        oldValues: snapshot,
+        newValues: { reason: ctx.reason, deletedAt: egress.deletedAt },
+      });
+    } catch (err) {
+      console.error('Error registrando auditoría de borrado de egreso', err);
+    }
   }
 
   async complete(id: string): Promise<IEgress> {

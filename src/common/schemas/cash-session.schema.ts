@@ -89,6 +89,9 @@ export class CashSession {
       {
         editedAt: { type: Date, required: true, default: Date.now },
         editedByUserId: { type: SchemaTypes.ObjectId, ref: 'User' },
+        // Motivo de la edición. Obligatorio a nivel de negocio en el borrado de
+        // egresos (corrección autorizada); queda como rastro junto al snapshot.
+        reason: { type: String },
         addedEgresses: [
           {
             egressId: { type: SchemaTypes.ObjectId, ref: 'Egress' },
@@ -107,6 +110,18 @@ export class CashSession {
             paymentMethod: { type: String },
           },
         ],
+        // Egresos borrados retroactivamente sobre esta sesión cerrada. Se guarda
+        // el snapshot del egreso eliminado para poder auditar qué se sacó y por
+        // qué, aunque el documento original quede con `deletedAt`.
+        removedEgresses: [
+          {
+            egressId: { type: SchemaTypes.ObjectId, ref: 'Egress' },
+            egressNumber: { type: String },
+            concept: { type: String },
+            amount: { type: Number },
+            paymentMethod: { type: String },
+          },
+        ],
       },
     ],
     default: [],
@@ -114,6 +129,7 @@ export class CashSession {
   editHistory: Array<{
     editedAt: Date;
     editedByUserId?: Types.ObjectId;
+    reason?: string;
     addedEgresses: Array<{
       egressId: Types.ObjectId;
       egressNumber: string;
@@ -124,6 +140,13 @@ export class CashSession {
     addedIncomes: Array<{
       incomeId: Types.ObjectId;
       incomeNumber: string;
+      concept: string;
+      amount: number;
+      paymentMethod: string;
+    }>;
+    removedEgresses: Array<{
+      egressId: Types.ObjectId;
+      egressNumber: string;
       concept: string;
       amount: number;
       paymentMethod: string;

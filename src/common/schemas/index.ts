@@ -18,3 +18,4 @@ export * from './lead.schema';
 export * from './closed-date.schema';
 export * from './piece.schema';
 export * from './space-block.schema';
+export * from './app-setting.schema';

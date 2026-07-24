@@ -28,6 +28,7 @@ import { LeadsModule } from './leads/leads.module';
 import { ClosedDatesModule } from './closed-dates/closed-dates.module';
 import { PiecesModule } from './pieces/pieces.module';
 import { SpaceBlocksModule } from './space-blocks/space-blocks.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { SpaceBlocksModule } from './space-blocks/space-blocks.module';
     SpaceBlocksModule,
     NotificationsModule,
     BotControlModule,
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [
