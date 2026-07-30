@@ -26,6 +26,19 @@ export class CreateExperienceDto {
   @MaxLength(2000)
   description?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Apodos/abreviaturas con los que la nombran los clientes ("AYD", ' +
+      '"cerámica y brunch"). El bot los usa para reconocerla en la charla. ' +
+      'No pueden repetirse entre experiencias.',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  aliases?: string[];
+
   @ApiProperty({ description: 'Duración en minutos', minimum: 1 })
   @IsInt()
   @Min(1)

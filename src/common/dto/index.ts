@@ -20,3 +20,4 @@ export * from './reservation.dto';
 export * from './lead.dto';
 export * from './piece.dto';
 export * from './space-block.dto';
+export * from './table.dto';

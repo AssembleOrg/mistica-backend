@@ -9,6 +9,7 @@ import {
   IsMongoId,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -17,15 +18,119 @@ import {
   ReservationStatus,
 } from '../enums/reservation.enum';
 
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Días y turnos donde se puede reservar una experiencia. */
+export class AvailabilityQueryDto {
+  @ApiProperty({ description: 'Experiencia a consultar' })
+  @IsMongoId()
+  experienceId: string;
+
+  @ApiPropertyOptional({ description: 'Desde, YYYY-MM-DD (default: hoy)' })
+  @IsOptional()
+  @Matches(YMD, { message: 'from debe ser YYYY-MM-DD' })
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'Hasta, YYYY-MM-DD' })
+  @IsOptional()
+  @Matches(YMD, { message: 'to debe ser YYYY-MM-DD' })
+  to?: string;
+
+  @ApiPropertyOptional({
+    description: 'Cuántos días mirar desde `from` si no se manda `to`.',
+    default: 30,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  days?: number;
+
+  @ApiPropertyOptional({
+    description: 'Incluir los turnos sin lugar (para mostrarlos agotados).',
+    default: false,
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  includeFull?: boolean;
+}
+
+/**
+ * Consulta de disponibilidad de MESAS de un turno para un grupo. No reserva:
+ * la usa el bot para saber si puede ofrecer el turno, y si la única opción es
+ * la mesa grande compartida (que requiere preguntarle al cliente).
+ */
+export class PreviewTablesDto {
+  @ApiPropertyOptional({
+    description:
+      'ID del turno ya existente. Alternativa a experienceId + date + shiftKey.',
+  })
+  @IsOptional()
+  @IsMongoId()
+  sessionId?: string;
+
+  @ApiPropertyOptional({ description: 'Experiencia a reservar' })
+  @IsOptional()
+  @IsMongoId()
+  experienceId?: string;
+
+  @ApiPropertyOptional({ description: 'Día, YYYY-MM-DD (hora de Argentina)' })
+  @IsOptional()
+  @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })
+  date?: string;
+
+  @ApiPropertyOptional({ description: "Turno del día ('T1', 'T2')" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  shiftKey?: string;
+
+  @ApiProperty({ description: 'Cantidad de personas', minimum: 1 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  quantity: number;
+
+  @ApiPropertyOptional({
+    description: 'El cliente ya aceptó compartir mesa grande.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  acceptSharedTable?: boolean;
+}
+
 /**
  * Hold público: crea una reserva PENDING que descuenta cupo y arranca el flujo
  * de pago con MercadoPago. `idempotencyKey` (UUID generado por el front) evita
  * doble consumo de cupo ante doble-click / reintentos.
  */
 export class CreateHoldDto {
-  @ApiProperty({ description: 'ID del turno (ExperienceSession)' })
+  // Dos formas de indicar QUÉ se reserva:
+  //  · el trío (experienceId + date + shiftKey) — el turno se crea solo si hace
+  //    falta. Es el camino normal: el equipo ya no carga turnos a mano.
+  //  · `sessionId`, para un turno puntual que el admin creó a mano.
+  @ApiPropertyOptional({ description: 'ID de un turno ya existente' })
+  @IsOptional()
   @IsMongoId()
-  sessionId: string;
+  sessionId?: string;
+
+  @ApiPropertyOptional({ description: 'Experiencia a reservar' })
+  @IsOptional()
+  @IsMongoId()
+  experienceId?: string;
+
+  @ApiPropertyOptional({ description: 'Día, YYYY-MM-DD (hora de Argentina)' })
+  @IsOptional()
+  @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })
+  date?: string;
+
+  @ApiPropertyOptional({ description: "Turno del día ('T1', 'T2')" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  shiftKey?: string;
 
   @ApiProperty({ description: 'Cantidad de personas', minimum: 1 })
   @IsInt()
@@ -54,18 +159,19 @@ export class CreateHoldDto {
   @MaxLength(100)
   idempotencyKey: string;
 
+  // No hay `paymentMethod`: el hold público es SIEMPRE por transferencia con
+  // comprobante. MercadoPago quedó fuera del flujo del cliente.
+
   @ApiPropertyOptional({
     description:
-      'Cómo paga la seña. MERCADOPAGO (default) genera link de pago; TRANSFER ' +
-      'deja el hold esperando el comprobante de transferencia (flujo del bot).',
-    enum: [ReservationPaymentMethod.MERCADOPAGO, ReservationPaymentMethod.TRANSFER],
-    default: ReservationPaymentMethod.MERCADOPAGO,
+      'El cliente aceptó expresamente compartir una mesa grande con otro ' +
+      'grupo. Sin esto, cuando la única opción es la mesa compartida la ' +
+      'reserva se rechaza para que el bot/front pregunte primero.',
+    default: false,
   })
   @IsOptional()
-  @IsIn([ReservationPaymentMethod.MERCADOPAGO, ReservationPaymentMethod.TRANSFER])
-  paymentMethod?:
-    | ReservationPaymentMethod.MERCADOPAGO
-    | ReservationPaymentMethod.TRANSFER;
+  @IsBoolean()
+  acceptSharedTable?: boolean;
 }
 
 /**
@@ -73,12 +179,15 @@ export class CreateHoldDto {
  * bot). approved=true confirma la reserva; false la manda a revisión del admin.
  */
 export class TransferProofDto {
-  @ApiProperty({ description: '¿El comprobante validó contra los datos esperados?' })
+  @ApiProperty({
+    description: '¿El comprobante validó contra los datos esperados?',
+  })
   @IsBoolean()
   approved: boolean;
 
   @ApiPropertyOptional({
-    description: 'Resumen/razón de la detección (queda en las notas para auditoría).',
+    description:
+      'Resumen/razón de la detección (queda en las notas para auditoría).',
   })
   @IsOptional()
   @IsString()
@@ -97,9 +206,28 @@ export class TransferProofDto {
  * atómico). Si el método no es COURTESY, impacta caja con un ingreso.
  */
 export class AdminCreateReservationDto {
-  @ApiProperty({ description: 'ID del turno (ExperienceSession)' })
+  // Igual que el hold público: o un turno existente, o el trío
+  // (experiencia, día, bloque) y el turno se crea solo.
+  @ApiPropertyOptional({ description: 'ID de un turno ya existente' })
+  @IsOptional()
   @IsMongoId()
-  sessionId: string;
+  sessionId?: string;
+
+  @ApiPropertyOptional({ description: 'Experiencia a reservar' })
+  @IsOptional()
+  @IsMongoId()
+  experienceId?: string;
+
+  @ApiPropertyOptional({ description: 'Día, YYYY-MM-DD (hora de Argentina)' })
+  @IsOptional()
+  @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })
+  date?: string;
+
+  @ApiPropertyOptional({ description: "Turno del día ('T1', 'T2')" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  shiftKey?: string;
 
   @ApiProperty({ description: 'Cantidad de personas', minimum: 1 })
   @IsInt()
@@ -156,9 +284,27 @@ export class AdminCreateReservationDto {
  * 48 h antes del turno original; `force` permite al admin saltear esa regla.
  */
 export class AdminRescheduleReservationDto {
-  @ApiProperty({ description: 'ID del nuevo turno (ExperienceSession)' })
+  // Turno destino: existente, o (experiencia, día, bloque).
+  @ApiPropertyOptional({ description: 'ID de un turno ya existente' })
+  @IsOptional()
   @IsMongoId()
-  sessionId: string;
+  sessionId?: string;
+
+  @ApiPropertyOptional({ description: 'Experiencia a reservar' })
+  @IsOptional()
+  @IsMongoId()
+  experienceId?: string;
+
+  @ApiPropertyOptional({ description: 'Día, YYYY-MM-DD (hora de Argentina)' })
+  @IsOptional()
+  @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })
+  date?: string;
+
+  @ApiPropertyOptional({ description: "Turno del día ('T1', 'T2')" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  shiftKey?: string;
 
   @ApiPropertyOptional({
     description: 'Saltear la regla de 48 h antes del turno (override admin).',
@@ -195,7 +341,10 @@ export class AdminUpdateReservationDto {
 }
 
 export class ResolveReviewDto {
-  @ApiProperty({ description: 'confirm = re-tomar cupo y confirmar; cancel = cancelar', enum: ['confirm', 'cancel'] })
+  @ApiProperty({
+    description: 'confirm = re-tomar cupo y confirmar; cancel = cancelar',
+    enum: ['confirm', 'cancel'],
+  })
   @IsIn(['confirm', 'cancel'])
   action: 'confirm' | 'cancel';
 }

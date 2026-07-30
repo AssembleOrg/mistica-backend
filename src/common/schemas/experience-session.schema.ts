@@ -39,6 +39,16 @@ export class ExperienceSession {
   @Prop({ required: true, min: 0, max: 100, default: 50 })
   depositPct: number;
 
+  // Fecha de negocio 'YYYY-MM-DD' (hora AR) y clave del turno del día ('T1').
+  // Juntas identifican el bloque: son la clave con la que el turno se crea solo
+  // la primera vez que alguien reserva esa experiencia ese día en ese bloque.
+  // Ausentes en los turnos viejos, cargados a mano antes del modelo de turnos.
+  @Prop({ trim: true })
+  dateKey?: string;
+
+  @Prop({ trim: true })
+  shiftKey?: string;
+
   // Inicio del turno (datetime, fuente de verdad). Calculado desde {fecha, hora}
   // en zona America/Argentina/Buenos_Aires al momento de crear.
   @Prop({ type: Date, required: true })
@@ -86,3 +96,10 @@ ExperienceSessionSchema.index({ startAt: 1 });
 ExperienceSessionSchema.index({ status: 1 });
 ExperienceSessionSchema.index({ deletedAt: 1 });
 ExperienceSessionSchema.index({ status: 1, startAt: 1 });
+// Un único turno por (experiencia, día, bloque): es la guarda que hace que la
+// creación automática sea idempotente aunque dos personas reserven a la vez.
+// Parcial, porque los turnos viejos no tienen dateKey y colisionarían entre sí.
+ExperienceSessionSchema.index(
+  { experienceId: 1, dateKey: 1, shiftKey: 1 },
+  { unique: true, partialFilterExpression: { dateKey: { $type: 'string' } } },
+);

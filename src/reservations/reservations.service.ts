@@ -32,10 +32,7 @@ import {
   ExperienceSession,
   ExperienceSessionDocument,
 } from '../common/schemas/experience-session.schema';
-import {
-  Product,
-  ProductDocument,
-} from '../common/schemas/product.schema';
+import { Product, ProductDocument } from '../common/schemas/product.schema';
 import {
   Reservation,
   ReservationDocument,
@@ -50,18 +47,15 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { computeReservationAmounts } from './reservation-amounts';
 import { SalesService } from '../sales/sales.service';
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
-import { SpaceBlocksService } from '../space-blocks/space-blocks.service';
+import { TablesService } from '../tables/tables.service';
+import { AvailabilityService } from './availability.service';
+import { businessDateKey } from '../tables/shifts';
 
-// Minutos que vive un hold sin pago antes de liberar el cupo. También define
-// el vencimiento del link de MercadoPago (la preference expira junto con el
-// hold). 30 min: amigable — son reservas aisladas, no hay presión de cupo por
-// minuto que justifique apurar al cliente.
-const HOLD_MINUTES = 30;
-
-// Minutos que vive un hold por TRANSFERENCIA esperando el comprobante (el
-// cliente transfiere y manda la captura por WhatsApp). Mismo tiempo que el
-// link de MercadoPago: ambos métodos apartan el cupo por igual.
-const TRANSFER_HOLD_MINUTES = HOLD_MINUTES;
+// Minutos que vive un hold esperando el comprobante de transferencia antes de
+// liberar el cupo y las mesas (el cliente transfiere y manda la captura por
+// WhatsApp). 30 min: amigable — son reservas aisladas, no hay presión de cupo
+// por minuto que justifique apurar al cliente.
+const TRANSFER_HOLD_MINUTES = 30;
 
 // Política de modificaciones: se aceptan hasta 48 h antes del turno original.
 const RESCHEDULE_MIN_HOURS = 48;
@@ -97,7 +91,8 @@ export class ReservationsService {
     private readonly salesService: SalesService,
     private readonly notifications: NotificationsService,
     private readonly closedDates: ClosedDatesService,
-    private readonly spaceBlocks: SpaceBlocksService,
+    private readonly tables: TablesService,
+    private readonly availability: AvailabilityService,
   ) {}
 
   // ───────────────────────── Público: hold + pago ─────────────────────────
@@ -117,7 +112,10 @@ export class ReservationsService {
     }
 
     const qty = dto.quantity;
-    const session = await this.reserveSeats(dto.sessionId, qty, [
+    // El turno se resuelve del trío (experiencia, día, bloque) y se crea solo
+    // si todavía no existe: el equipo ya no carga turnos a mano.
+    const sessionId = await this.resolveSessionId(dto);
+    const session = await this.reserveSeats(sessionId, qty, [
       SessionStatus.OPEN,
     ]);
 
@@ -132,17 +130,18 @@ export class ReservationsService {
       );
     }
 
-    // Guarda de CAPACIDAD DEL LOCAL: la suma de personas de todas las actividades
-    // que se solapan en el horario no puede superar el tope del salón. El cupo ya
-    // fue tomado arriba (reserveSeats); si con eso el local queda sobrevendido,
-    // devolvemos el cupo y rechazamos. (Chequeo con compensación; en standalone no
-    // hay transacción multi-doc, el riesgo de carrera es mínimo con este volumen.)
-    const venueOver = await this.venueOverCapacity(session);
-    if (venueOver) {
+    // Guarda de MESAS: el grupo tiene que entrar en las mesas libres del turno.
+    // Se chequea antes de crear la reserva para fallar barato y con un mensaje
+    // útil (incluido el pedido de aceptar mesa compartida).
+    const preview = await this.tables.previewAssignment({
+      qty,
+      startAt: session.startAt,
+      durationMinutes: session.durationMinutes,
+      sharedAccepted: dto.acceptSharedTable,
+    });
+    if (!preview.fits) {
       await this.releaseSeats(session._id as Types.ObjectId, qty);
-      throw new BadRequestException(
-        'En ese horario el local ya está completo. Elegí otra fecha u horario.',
-      );
+      throw this.tableError(preview.reason);
     }
 
     const unitPrice = session.price;
@@ -153,9 +152,9 @@ export class ReservationsService {
       qty,
       pct,
     );
-    const isTransfer =
-      dto.paymentMethod === ReservationPaymentMethod.TRANSFER;
-    const holdMinutes = isTransfer ? TRANSFER_HOLD_MINUTES : HOLD_MINUTES;
+    // El único medio de pago del cliente es la TRANSFERENCIA con comprobante:
+    // MercadoPago quedó fuera del flujo público (ver docs y env.config).
+    const holdMinutes = TRANSFER_HOLD_MINUTES;
     const now = new Date();
     const expiresAt = new Date(now.getTime() + holdMinutes * 60_000);
 
@@ -174,9 +173,7 @@ export class ReservationsService {
         balanceDue,
         status: ReservationStatus.PENDING,
         source: ReservationSource.PUBLIC,
-        paymentMethod: isTransfer
-          ? ReservationPaymentMethod.TRANSFER
-          : ReservationPaymentMethod.MERCADOPAGO,
+        paymentMethod: ReservationPaymentMethod.TRANSFER,
         customerName: dto.customerName,
         customerEmail: dto.customerEmail,
         customerPhone: dto.customerPhone,
@@ -197,45 +194,164 @@ export class ReservationsService {
       throw err;
     }
 
-    // TRANSFERENCIA: no hay preference de MP; el hold queda esperando el
-    // comprobante (el bot lo valida con IA y llama resolveTransferProof).
-    if (isTransfer) {
-      return this.holdResponse(reservation);
-    }
-
-    // Crear la preference de MercadoPago. Si falla, no hay forma de pagar:
-    // cancelamos la reserva y liberamos el cupo.
+    // Asignación REAL de mesas (atómica, todo-o-nada). Si perdimos la carrera
+    // contra otra reserva entre el preview y acá, se cancela y se devuelve cupo.
     try {
-      const personas = `${qty} ${qty > 1 ? 'personas' : 'persona'}`;
-      const seniaLabel =
-        pct >= 100 ? '' : ` · Seña ${pct}%`;
-      const pref = await this.mercadopago.createPreference({
-        reservationId: String(reservation._id),
-        title: `${session.experienceName} (${personas})${seniaLabel}`,
-        // Cobramos la seña como un único ítem (no el total).
-        quantity: 1,
-        unitPrice: deposit,
-        expiresAt,
-        payer: { name: dto.customerName, email: dto.customerEmail },
-      });
-      reservation.preferenceId = pref.id;
-      reservation.mpInitPoint = pref.initPoint;
-      reservation.mpExternalReference = String(reservation._id);
-      await reservation.save();
+      await this.attachTables(reservation, session, dto.acceptSharedTable);
     } catch (err) {
-      this.logger.error(
-        `Preference falló para reserva ${String(reservation._id)}: ${String(err)}`,
-      );
       reservation.status = ReservationStatus.CANCELLED;
       reservation.cancelledAt = new Date();
       await reservation.save();
       await this.releaseSeats(session._id as Types.ObjectId, qty);
+      throw err;
+    }
+
+    // El hold queda esperando el comprobante de transferencia: el bot lo lee
+    // con visión y llama resolveTransferProof para confirmarlo.
+    return this.holdResponse(reservation);
+  }
+
+  /**
+   * Turno sobre el que se calcula un preview. Si todavía no existe (nadie
+   * reservó ese día en ese bloque), se arma uno EN MEMORIA con los datos de la
+   * experiencia: consultar disponibilidad no debe crear nada en la base.
+   */
+  private async sessionForPreview(dto: {
+    sessionId?: string;
+    experienceId?: string;
+    date?: string;
+    shiftKey?: string;
+  }): Promise<{
+    startAt: Date;
+    durationMinutes: number;
+    capacity: number;
+    seatsTaken: number;
+  }> {
+    if (dto.sessionId) {
+      if (!Types.ObjectId.isValid(dto.sessionId)) {
+        throw new BadRequestException('sessionId inválido');
+      }
+      const found = await this.sessionModel.findById(dto.sessionId).lean();
+      if (!found || found.deletedAt) {
+        throw new NotFoundException('Turno no encontrado');
+      }
+      return found;
+    }
+
+    if (!dto.experienceId || !dto.date || !dto.shiftKey) {
       throw new BadRequestException(
-        'No se pudo iniciar el pago. Intentá de nuevo.',
+        'Indicá el turno: experienceId + date + shiftKey (o un sessionId).',
       );
     }
 
-    return this.holdResponse(reservation);
+    const slot = await this.availability.slotOrThrow(
+      dto.experienceId,
+      dto.date,
+      dto.shiftKey,
+    );
+    const existing = await this.sessionModel
+      .findOne({
+        experienceId: new Types.ObjectId(dto.experienceId),
+        dateKey: dto.date,
+        shiftKey: dto.shiftKey.toUpperCase(),
+        deletedAt: { $exists: false },
+      })
+      .lean();
+
+    return {
+      startAt: slot.startAt,
+      durationMinutes: slot.durationMinutes,
+      capacity: existing?.capacity ?? slot.capacity,
+      seatsTaken: existing?.seatsTaken ?? 0,
+    };
+  }
+
+  /**
+   * De dónde sale el turno de un hold: o un `sessionId` explícito (turno que el
+   * admin cargó a mano), o el trío (experiencia, día, bloque), en cuyo caso el
+   * turno se crea solo la primera vez que alguien reserva ahí.
+   */
+  private async resolveSessionId(dto: {
+    sessionId?: string;
+    experienceId?: string;
+    date?: string;
+    shiftKey?: string;
+  }): Promise<string> {
+    if (dto.sessionId) return dto.sessionId;
+    if (!dto.experienceId || !dto.date || !dto.shiftKey) {
+      throw new BadRequestException(
+        'Indicá el turno: experienceId + date + shiftKey (o un sessionId).',
+      );
+    }
+    const session = await this.availability.ensureSession(
+      dto.experienceId,
+      dto.date,
+      dto.shiftKey,
+    );
+    return String(session._id);
+  }
+
+  /**
+   * ¿Entra un grupo de `qty` en el turno? No reserva nada: es lo que el bot
+   * consulta antes de ofrecer. Distingue los tres desenlaces que le importan al
+   * cliente: entra normal, entra sólo compartiendo mesa grande (hay que
+   * preguntarle), o no entra.
+   */
+  async previewTables(dto: {
+    sessionId?: string;
+    experienceId?: string;
+    date?: string;
+    shiftKey?: string;
+    quantity: number;
+    acceptSharedTable?: boolean;
+  }) {
+    const qty = dto.quantity;
+    const acceptShared = dto.acceptSharedTable ?? false;
+
+    // Igual que el hold: por turno existente o por (experiencia, día, bloque).
+    // Acá NO se crea nada: sólo se calcula dónde caería.
+    const session = await this.sessionForPreview(dto);
+
+    const placement = this.tables.placementFor(
+      session.startAt,
+      session.durationMinutes,
+    );
+    const [preview, remaining, venueMax] = await Promise.all([
+      this.tables.previewAssignment({
+        qty,
+        startAt: session.startAt,
+        durationMinutes: session.durationMinutes,
+        sharedAccepted: acceptShared,
+      }),
+      this.tables.remainingPartySize(placement.dateKey, placement.shiftKey),
+      this.tables.venueMaxParty(),
+    ]);
+
+    const seatsLeftInSession = Math.max(
+      0,
+      (session.capacity ?? 0) - (session.seatsTaken ?? 0),
+    );
+
+    if (preview.fits) {
+      return {
+        fits: true,
+        shiftKey: preview.shiftKey,
+        tables: preview.plan.tables.map((t) => t.code),
+        sharedTable: preview.plan.shared,
+        maxPartySize: Math.min(remaining, seatsLeftInSession),
+      };
+    }
+
+    return {
+      fits: false,
+      reason: preview.reason,
+      /** true ⇒ hay lugar, pero sólo compartiendo mesa grande con otro grupo. */
+      needsSharedConsent: preview.reason === 'NEEDS_SHARED_CONSENT',
+      sharedOffer: preview.offer?.tables.map((t) => t.code),
+      maxPartySize: Math.min(remaining, seatsLeftInSession),
+      /** Tope físico del salón, para distinguir "hoy no entra" de "nunca entra". */
+      venueMaxPartySize: venueMax,
+    };
   }
 
   // ───────────────────── Transferencia (interno del bot) ─────────────────────
@@ -325,6 +441,7 @@ export class ReservationsService {
     } else {
       // Igual que el flujo de revisión existente: el cupo se libera y
       // adminResolveReview lo re-toma si el admin confirma.
+      await this.tables.release(won._id as Types.ObjectId, won.startAt);
       await this.releaseSeats(won.sessionId, won.quantity);
     }
     return this.publicView(won);
@@ -390,6 +507,7 @@ export class ReservationsService {
     );
     if (!won) return this.publicView(await this.findByIdOrThrow(String(r._id)));
 
+    await this.tables.release(won._id as Types.ObjectId, won.startAt);
     await this.releaseSeats(won.sessionId, won.quantity);
 
     if (
@@ -475,23 +593,30 @@ export class ReservationsService {
       r.status === ReservationStatus.EXPIRED ||
       r.status === ReservationStatus.CANCELLED
     ) {
-      // Pago llegó tarde. Intentamos re-tomar cupo.
+      // Pago llegó tarde. Intentamos re-tomar cupo y mesas.
       try {
-        await this.reserveSeats(String(r.sessionId), r.quantity, [
-          SessionStatus.OPEN,
-          SessionStatus.CLOSED,
-        ]);
+        const session = await this.reserveSeats(
+          String(r.sessionId),
+          r.quantity,
+          [SessionStatus.OPEN, SessionStatus.CLOSED],
+        );
+        try {
+          await this.attachTables(r, session);
+        } catch (err) {
+          await this.releaseSeats(session._id as Types.ObjectId, r.quantity);
+          throw err;
+        }
         r.status = ReservationStatus.CONFIRMED;
         r.confirmedAt = now;
         await r.save();
         this.logger.log(`Reserva ${reservationId} re-tomada tras pago tardío`);
         await this.createSaleForReservation(r, PaymentMethod.MERCADOPAGO);
       } catch {
-        // Sin cupo: marcar para revisión y reembolsar.
+        // Sin cupo o sin mesas: marcar para revisión y reembolsar.
         r.status = ReservationStatus.NEEDS_REVIEW;
         await r.save();
         this.logger.warn(
-          `Reserva ${reservationId}: pago tardío sin cupo ⇒ NEEDS_REVIEW + refund`,
+          `Reserva ${reservationId}: pago tardío sin lugar ⇒ NEEDS_REVIEW + refund`,
         );
         await this.refundReservation(r);
       }
@@ -521,6 +646,7 @@ export class ReservationsService {
         { new: true },
       );
       if (won) {
+        await this.tables.release(won._id as Types.ObjectId, won.startAt);
         await this.releaseSeats(won.sessionId, won.quantity);
         released++;
       }
@@ -540,7 +666,8 @@ export class ReservationsService {
     userId?: string,
   ) {
     const qty = dto.quantity;
-    const session = await this.reserveSeats(dto.sessionId, qty, [
+    const sessionId = await this.resolveSessionId(dto);
+    const session = await this.reserveSeats(sessionId, qty, [
       SessionStatus.OPEN,
       SessionStatus.CLOSED,
       SessionStatus.DRAFT,
@@ -578,6 +705,18 @@ export class ReservationsService {
         confirmedAt: new Date(),
       });
     } catch (err) {
+      await this.releaseSeats(session._id as Types.ObjectId, qty);
+      throw err;
+    }
+
+    // Mesas. El admin ve el salón y decide, así que puede forzar la mesa
+    // compartida sin el ida y vuelta que hace el bot con el cliente.
+    try {
+      await this.attachTables(reservation, session, true);
+    } catch (err) {
+      reservation.status = ReservationStatus.CANCELLED;
+      reservation.cancelledAt = new Date();
+      await reservation.save();
       await this.releaseSeats(session._id as Types.ObjectId, qty);
       throw err;
     }
@@ -707,35 +846,42 @@ export class ReservationsService {
   }
 
   /**
-   * ¿El local quedó sobre-vendido en el horario de `session`? Suma las personas
-   * de todas las actividades (turnos OPEN/CLOSED con reservas activas) que se
-   * solapan en el tiempo y compara contra el tope del salón. La `session` que se
-   * acaba de reservar ya está incluida (su seatsTaken trae la reserva nueva).
-   * Cada turno ocupa max(seatsTaken, venueSeats): un taller con mesa fija resta
-   * sus lugares aunque tenga menos anotados.
+   * Asigna las mesas del turno a una reserva ya creada y las guarda en ella.
+   * La asignación es atómica sobre el documento del día: o entran todas las
+   * mesas que el grupo necesita, o no entra ninguna.
    */
-  private async venueOverCapacity(
+  private async attachTables(
+    reservation: ReservationDocument,
     session: ExperienceSessionDocument,
-  ): Promise<boolean> {
-    const overlapping = await this.sessionModel
-      .find({
-        deletedAt: { $exists: false },
-        status: { $in: [SessionStatus.OPEN, SessionStatus.CLOSED] },
-        startAt: { $lt: session.endAt },
-        endAt: { $gt: session.startAt },
-      })
-      .select('seatsTaken venueSeats')
-      .lean();
-    const sessionsOccupancy = overlapping.reduce(
-      (a, o) => a + Math.max(o.seatsTaken || 0, o.venueSeats || 0),
-      0,
+    sharedAccepted?: boolean,
+  ): Promise<void> {
+    const assignment = await this.tables.assign({
+      reservationId: reservation._id as Types.ObjectId,
+      qty: reservation.quantity,
+      startAt: session.startAt,
+      durationMinutes: session.durationMinutes,
+      sharedAccepted,
+    });
+    reservation.shiftKey = assignment.shiftKey;
+    reservation.tableCodes = assignment.tables.map((t) => t.code);
+    reservation.sharedTable = assignment.shared;
+    if (assignment.shared) reservation.sharedConsentAt = new Date();
+    await reservation.save();
+  }
+
+  /** Mensaje al cliente según por qué no entró el grupo en las mesas. */
+  private tableError(reason: string): Error {
+    if (reason === 'NEEDS_SHARED_CONSENT') {
+      return new ConflictException(
+        'Para ese horario no quedan mesas individuales. Podemos ofrecer un lugar en una mesa grande compartida con otro grupo: hay que aceptarlo expresamente para continuar.',
+      );
+    }
+    if (reason === 'INVALID_QTY') {
+      return new BadRequestException('La cantidad de personas no es válida.');
+    }
+    return new ConflictException(
+      'No quedan mesas para ese grupo en ese horario. Elegí otro turno u otra fecha.',
     );
-    // Sumamos los lugares que bloquean talleres/eventos en esa misma franja.
-    const blocked = await this.spaceBlocks.blockedSeatsFor(
-      session.startAt,
-      session.endAt,
-    );
-    return sessionsOccupancy + blocked > envConfig.venueMaxCapacity;
   }
 
   /** Crea la reserva generando un código único, reintentando ante colisión. */
@@ -998,9 +1144,7 @@ export class ReservationsService {
     let sent = 0;
     for (const r of due) {
       if (r.customerPhone) {
-        const name = r.customerName
-          ? ` ${r.customerName.split(' ')[0]}`
-          : '';
+        const name = r.customerName ? ` ${r.customerName.split(' ')[0]}` : '';
         const ok = await this.notifications.notify(
           r.customerPhone,
           `¡Hola${name}! ¿Cómo la pasaste en Mística? 🎨\n\n` +
@@ -1012,7 +1156,8 @@ export class ReservationsService {
       r.thankedAt = now;
       await r.save();
     }
-    if (sent) this.logger.log(`Agradecimientos post-experiencia enviados: ${sent}`);
+    if (sent)
+      this.logger.log(`Agradecimientos post-experiencia enviados: ${sent}`);
     return sent;
   }
 
@@ -1038,10 +1183,13 @@ export class ReservationsService {
           ],
         },
       },
-      { $set: { status: ReservationStatus.CANCELLED, cancelledAt: new Date() } },
+      {
+        $set: { status: ReservationStatus.CANCELLED, cancelledAt: new Date() },
+      },
       { new: true },
     );
     if (!won) return this.publicView(await this.findByIdOrThrow(id));
+    await this.tables.release(won._id as Types.ObjectId, won.startAt);
     await this.releaseSeats(won.sessionId, won.quantity);
     if (
       wasConfirmed &&
@@ -1066,11 +1214,17 @@ export class ReservationsService {
       }
       return this.publicView(r);
     }
-    // confirm: re-tomar cupo y registrar venta.
-    await this.reserveSeats(String(r.sessionId), r.quantity, [
+    // confirm: re-tomar cupo y mesas, y registrar venta.
+    const session = await this.reserveSeats(String(r.sessionId), r.quantity, [
       SessionStatus.OPEN,
       SessionStatus.CLOSED,
     ]);
+    try {
+      await this.attachTables(r, session);
+    } catch (err) {
+      await this.releaseSeats(session._id as Types.ObjectId, r.quantity);
+      throw err;
+    }
     r.status = ReservationStatus.CONFIRMED;
     r.confirmedAt = new Date();
     await r.save();
@@ -1106,10 +1260,8 @@ export class ReservationsService {
         'Sólo se pueden reprogramar reservas confirmadas.',
       );
     }
-    if (String(r.sessionId) === dto.sessionId) {
-      throw new BadRequestException('La reserva ya está en ese turno.');
-    }
-
+    // La política se chequea ANTES de resolver el turno destino: si la
+    // reprogramación no se acepta, no queremos haber creado un turno al pedo.
     const now = new Date();
     const limit = new Date(
       r.startAt.getTime() - RESCHEDULE_MIN_HOURS * 3600_000,
@@ -1120,9 +1272,14 @@ export class ReservationsService {
       );
     }
 
+    const targetSessionId = await this.resolveSessionId(dto);
+    if (String(r.sessionId) === targetSessionId) {
+      throw new BadRequestException('La reserva ya está en ese turno.');
+    }
+
     // Toma cupo en el turno nuevo (atómico). Igual que adminCreate, el admin
     // puede anotar también en turnos CLOSED/DRAFT.
-    const target = await this.reserveSeats(dto.sessionId, r.quantity, [
+    const target = await this.reserveSeats(targetSessionId, r.quantity, [
       SessionStatus.OPEN,
       SessionStatus.CLOSED,
       SessionStatus.DRAFT,
@@ -1137,6 +1294,32 @@ export class ReservationsService {
 
     const oldSessionId = r.sessionId;
     const oldStartAt = r.startAt;
+    const oldShiftKey = r.shiftKey;
+
+    // Mesas: si el turno nuevo cae en el mismo bloque del mismo día, las mesas
+    // ya asignadas siguen sirviendo y no se tocan. Si cambia de bloque, se
+    // toman las nuevas ANTES de soltar las viejas.
+    const oldPlacement = {
+      dateKey: businessDateKey(oldStartAt),
+      shiftKey: oldShiftKey,
+    };
+    const newPlacement = this.tables.placementFor(
+      target.startAt,
+      target.durationMinutes,
+    );
+    const sameBlock =
+      oldPlacement.dateKey === newPlacement.dateKey &&
+      oldPlacement.shiftKey === newPlacement.shiftKey;
+
+    if (!sameBlock) {
+      try {
+        await this.attachTables(r, target, true);
+      } catch (err) {
+        await this.releaseSeats(target._id as Types.ObjectId, r.quantity);
+        throw err;
+      }
+    }
+
     try {
       r.sessionId = target._id as Types.ObjectId;
       r.experienceId = target.experienceId;
@@ -1148,8 +1331,22 @@ export class ReservationsService {
       r.updatedAt = now;
       await r.save();
     } catch (err) {
+      if (!sameBlock) {
+        await this.tables.release(
+          r._id as Types.ObjectId,
+          target.startAt,
+          newPlacement.shiftKey,
+        );
+      }
       await this.releaseSeats(target._id as Types.ObjectId, r.quantity);
       throw err;
+    }
+    if (!sameBlock && oldShiftKey) {
+      await this.tables.release(
+        r._id as Types.ObjectId,
+        oldStartAt,
+        oldShiftKey,
+      );
     }
     await this.releaseSeats(oldSessionId, r.quantity);
 
@@ -1189,6 +1386,12 @@ export class ReservationsService {
     return r;
   }
 
+  /**
+   * Respuesta del hold público. El cliente paga la seña SIEMPRE por
+   * transferencia y manda el comprobante por WhatsApp, así que devolvemos los
+   * datos bancarios y el número al que escribir (la landing los muestra tal
+   * cual). `holdMinutes` es lo que dura el lugar apartado.
+   */
   private holdResponse(r: ReservationDocument) {
     return {
       reservationId: String(r._id),
@@ -1200,8 +1403,14 @@ export class ReservationsService {
       balanceDue: r.balanceDue,
       quantity: r.quantity,
       expiresAt: r.expiresAt,
-      initPoint: r.mpInitPoint,
-      preferenceId: r.preferenceId,
+      paymentMethod: r.paymentMethod,
+      holdMinutes: TRANSFER_HOLD_MINUTES,
+      transfer: {
+        alias: envConfig.transfer.alias,
+        ownerName: envConfig.transfer.ownerName,
+        bank: envConfig.transfer.bank,
+      },
+      whatsapp: envConfig.businessWhatsapp,
     };
   }
 

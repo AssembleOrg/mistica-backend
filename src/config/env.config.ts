@@ -1,6 +1,8 @@
 export const envConfig = {
   database: {
-    url: process.env.DATABASE_URL || 'mongodb://mongo:YWVqKIersyo@ni.proxy.rlwy.net:23351/test?authSource=admin',
+    url:
+      process.env.DATABASE_URL ||
+      'mongodb://mongo:YWVqKIersyo@ni.proxy.rlwy.net:23351/test?authSource=admin',
   },
   jwt: {
     secret: process.env.JWT_SECRET || 'tu_jwt_secret_super_seguro_aqui',
@@ -13,12 +15,27 @@ export const envConfig = {
   swagger: {
     enabled: process.env.SWAGGER_ENABLED === 'true',
   },
+  // MercadoPago quedó INACTIVO: el único medio de pago del cliente es la
+  // transferencia con comprobante. El módulo sigue en el repo (webhook y
+  // reembolsos) para no romper reservas históricas, pero no se crean
+  // preferences nuevas.
   mercadopago: {
     accessToken: process.env.MP_ACCESS_TOKEN || '',
     // Secreto de la firma del webhook (Tus integraciones → Webhooks → Firma).
     // Si está vacío, no se valida firma (sólo recomendable en dev).
     webhookSecret: process.env.MP_WEBHOOK_SECRET || '',
   },
+  // Datos bancarios para que el cliente transfiera la seña. Los muestra la
+  // landing al reservar y el bot por WhatsApp: tienen que coincidir con los
+  // del bot (TRANSFER_ALIAS / TRANSFER_OWNER_NAME / TRANSFER_BANK).
+  transfer: {
+    alias: process.env.TRANSFER_ALIAS || '',
+    ownerName: process.env.TRANSFER_OWNER_NAME || '',
+    bank: process.env.TRANSFER_BANK || '',
+  },
+  // WhatsApp del negocio al que el cliente manda el comprobante (formato
+  // internacional sin +, ej. 5491122334455). La landing arma el link wa.me.
+  businessWhatsapp: process.env.BUSINESS_WHATSAPP || '',
   urls: {
     // Front público (back_urls de la preference: success/failure/pending).
     frontend: process.env.FRONTEND_URL || 'http://localhost:3001',
@@ -39,10 +56,21 @@ export const envConfig = {
   pickupInfo: process.env.PICKUP_INFO || 'en nuestro horario de atención',
   // Zona horaria del negocio: las fechas/horas de turnos se interpretan acá.
   timezone: process.env.TZ_BUSINESS || 'America/Argentina/Buenos_Aires',
-  // Capacidad MÁXIMA de personas en el local al mismo tiempo. Tope compartido:
-  // la suma de personas de todos los turnos/actividades que se solapan en el
-  // horario no puede superarlo (independiente del cupo de cada turno).
-  venueMaxCapacity: Number.parseInt(process.env.VENUE_MAX_CAPACITY || '40', 10),
+  // Minutos de limpieza/preparación entre dos usos consecutivos de una mesa.
+  // Como el bloqueo de mesas es POR TURNO, este valor se usa para validar que
+  // la separación entre turnos consecutivos alcance para limpiar.
+  cleaningBufferMinutes: Number.parseInt(
+    process.env.CLEANING_BUFFER_MINUTES || '20',
+    10,
+  ),
+  // Turnos fijos del día, en hora local del negocio. Formato:
+  // "T1|Turno 1|15:00|17:30;T2|Turno 2|17:50|20:00". La separación entre uno y
+  // otro es el tiempo de limpieza y se valida contra cleaningBufferMinutes.
+  shifts: process.env.SHIFTS || 'T1|Turno 1|15:00|17:30;T2|Turno 2|17:50|20:00',
+  // ¿Un grupo chico (≤6) puede quedarse con una mesa grande entera cuando no
+  // hay mesas de 2 ni posibilidad de compartida? Por defecto NO: las grandes se
+  // reservan para grupos numerosos y el grupo chico se rechaza.
+  smallGroupCanTakeLarge: process.env.SMALL_GROUP_CAN_TAKE_LARGE === 'true',
   // DigitalOcean Spaces (S3-compatible): guarda las imágenes de comprobantes
   // de transferencia que llegan por WhatsApp sin reserva pendiente, para
   // verificación humana posterior. Sin bucket/keys, la subida se omite (la

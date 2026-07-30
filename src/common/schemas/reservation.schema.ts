@@ -83,6 +83,26 @@ export class Reservation {
   @Prop({ required: true, enum: ReservationPaymentMethod })
   paymentMethod: ReservationPaymentMethod;
 
+  // ── Mesas ──
+  // Turno del día en el que cae la reserva ('T1', 'T2'). Junto con la fecha de
+  // negocio identifica el bloque de ocupación de las mesas.
+  @Prop({ trim: true })
+  shiftKey?: string;
+
+  // Mesas asignadas ('M1', 'G1'). La fuente de verdad para la concurrencia es
+  // `day_occupancy`; esto es la copia consultable desde la reserva.
+  @Prop({ type: [String], default: [] })
+  tableCodes: string[];
+
+  // true si comparte una mesa grande con otra reserva (último recurso).
+  @Prop({ type: Boolean, default: false })
+  sharedTable: boolean;
+
+  // Cuándo el cliente aceptó expresamente compartir la mesa. Sin esto no se
+  // confirma una reserva compartida.
+  @Prop({ type: Date })
+  sharedConsentAt?: Date;
+
   // Datos del cliente (snapshot embebido). `clientId` opcional si se vincula a
   // un Client existente del sistema.
   @Prop({ type: SchemaTypes.ObjectId, ref: 'Client' })

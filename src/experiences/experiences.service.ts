@@ -23,7 +23,9 @@ import {
   ExperienceSessionDocument,
 } from '../common/schemas/experience-session.schema';
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
-import { SpaceBlocksService } from '../space-blocks/space-blocks.service';
+import { aliasKeys, cleanAliases, normalizeAlias } from './alias';
+import { TablesService } from '../tables/tables.service';
+import { resolveShift, shiftsFitting, startWindow } from '../tables/shifts';
 
 @Injectable()
 export class ExperiencesService {
@@ -33,13 +35,14 @@ export class ExperiencesService {
     @InjectModel(ExperienceSession.name)
     private readonly sessionModel: Model<ExperienceSessionDocument>,
     private readonly closedDates: ClosedDatesService,
-    private readonly spaceBlocks: SpaceBlocksService,
+    private readonly tables: TablesService,
   ) {}
 
   // ───────────────────────── Experiencias (plantillas) ─────────────────────
 
   async createExperience(dto: CreateExperienceDto) {
-    return this.experienceModel.create({ ...dto });
+    const aliases = await this.validAliases(dto.aliases, dto.name, null);
+    return this.experienceModel.create({ ...dto, aliases });
   }
 
   async listExperiences(includeInactive = false) {
@@ -55,10 +58,60 @@ export class ExperiencesService {
 
   async updateExperience(id: string, dto: UpdateExperienceDto) {
     const exp = await this.findExperienceOrThrow(id);
-    Object.assign(exp, dto);
+    if (dto.aliases !== undefined || dto.name !== undefined) {
+      const aliases = await this.validAliases(
+        dto.aliases ?? exp.aliases,
+        dto.name ?? exp.name,
+        String(exp._id),
+      );
+      Object.assign(exp, dto, { aliases });
+    } else {
+      Object.assign(exp, dto);
+    }
     exp.updatedAt = new Date();
     await exp.save();
     return exp;
+  }
+
+  /**
+   * Limpia los apodos y verifica que ninguno choque con el nombre o el apodo de
+   * OTRA experiencia: si dos respondieran al mismo apodo, el bot no tendría
+   * forma de saber a cuál se refiere el cliente.
+   */
+  private async validAliases(
+    raw: string[] | undefined,
+    name: string,
+    ignoreId: string | null,
+  ): Promise<string[]> {
+    const aliases = cleanAliases(raw);
+    if (!aliases.length) return aliases;
+
+    const others = await this.experienceModel
+      .find({ deletedAt: { $exists: false } })
+      .select('name aliases')
+      .lean();
+
+    const taken = new Map<string, string>();
+    for (const o of others) {
+      if (ignoreId && (o._id as Types.ObjectId).toHexString() === ignoreId)
+        continue;
+      for (const key of aliasKeys(o.name, o.aliases ?? [])) {
+        taken.set(key, o.name);
+      }
+    }
+
+    const ownName = normalizeAlias(name);
+    for (const a of aliases) {
+      const key = normalizeAlias(a);
+      if (key === ownName) continue; // repetir el propio nombre es inofensivo
+      const clash = taken.get(key);
+      if (clash) {
+        throw new BadRequestException(
+          `El apodo "${a}" ya lo usa "${clash}". Los apodos tienen que ser únicos para que el bot sepa de cuál le hablan.`,
+        );
+      }
+    }
+    return aliases;
   }
 
   async deleteExperience(id: string) {
@@ -98,6 +151,13 @@ export class ExperiencesService {
         );
       }
       const durationMinutes = exp.durationMinutes;
+      // El turno tiene que entrar ENTERO en un bloque del día: una experiencia
+      // no puede arrancar en un turno y terminar en el siguiente.
+      if (!resolveShift(start.toJSDate(), durationMinutes)) {
+        throw new BadRequestException(
+          this.badStartMessage(slot.date, slot.time, durationMinutes),
+        );
+      }
       const end = start.plus({ minutes: durationMinutes });
       docs.push({
         experienceId: exp._id,
@@ -158,45 +218,33 @@ export class ExperiencesService {
       .lean();
     const colorByExp = new Map(exps.map((e) => [String(e._id), e.color]));
 
-    // Tope de LOCAL: la disponibilidad de cada turno se limita también por la
-    // capacidad compartida del salón. Traemos todos los turnos OPEN/CLOSED
-    // vigentes (con reservas activas) para calcular cuántas personas hay en cada
-    // franja que se solapa. seatsAvailable = min(cupo del turno, lugar en el local).
-    const activeSessions = await this.sessionModel
-      .find({
-        deletedAt: { $exists: false },
-        status: { $in: [SessionStatus.OPEN, SessionStatus.CLOSED] },
-        endAt: { $gt: new Date() },
-      })
-      .select('startAt endAt seatsTaken venueSeats')
-      .lean();
-    const venueMax = envConfig.venueMaxCapacity;
-
+    // Tope de MESAS: lo que limita de verdad es el grupo más grande que entra
+    // en las mesas libres del turno del día. No es la suma de asientos sueltos:
+    // si quedan 3 mesas de 2, una reserva sola no puede pasar de 6 personas.
     return Promise.all(
       sessions.map(async (s) => {
         const view = this.sessionView(
           s as unknown as SessionLike,
           colorByExp.get(String(s.experienceId)),
         );
-        // Cada turno ocupa max(anotados, lugares fijos): un taller con mesa
-        // fija resta sus lugares aunque tenga menos inscriptos.
-        const otherOccupancy = activeSessions.reduce((acc, o) => {
-          if (String(o._id) === String(s._id)) return acc;
-          const overlaps = o.startAt < s.endAt && o.endAt > s.startAt;
-          return overlaps
-            ? acc + Math.max(o.seatsTaken || 0, o.venueSeats || 0)
-            : acc;
-        }, 0);
-        // Talleres/eventos que bloquean lugares del salón en esa franja.
-        const blocked = await this.spaceBlocks.blockedSeatsFor(
-          s.startAt,
-          s.endAt,
+        const placed = resolveShift(s.startAt, s.durationMinutes);
+        if (!placed) {
+          // Turno mal cargado (no entra en ningún bloque del día): no se puede
+          // reservar hasta corregirlo.
+          view.seatsAvailable = 0;
+          view.shiftKey = undefined;
+          view.shiftName = undefined;
+          return view;
+        }
+        view.shiftKey = placed.shift.key;
+        view.shiftName = placed.shift.name;
+        view.seatsAvailable = Math.min(
+          view.seatsAvailable,
+          await this.tables.remainingPartySize(
+            placed.dateKey,
+            placed.shift.key,
+          ),
         );
-        const venueRemaining = Math.max(
-          0,
-          venueMax - otherOccupancy - blocked - s.seatsTaken,
-        );
-        view.seatsAvailable = Math.min(view.seatsAvailable, venueRemaining);
         return view;
       }),
     );
@@ -248,6 +296,32 @@ export class ExperiencesService {
 
   // ───────────────────────── Helpers ─────────────────────────
 
+  /** Explica por qué un turno no entra y qué horarios sí sirven. */
+  private badStartMessage(
+    date: string,
+    time: string,
+    durationMinutes: number,
+  ): string {
+    const fits = shiftsFitting(durationMinutes);
+    if (!fits.length) {
+      return (
+        `Una experiencia de ${durationMinutes} minutos no entra en ningún turno del día. ` +
+        'Ajustá la duración de la experiencia o la definición de los turnos.'
+      );
+    }
+    const opciones = fits
+      .map((s) => {
+        const w = startWindow(s, durationMinutes)!;
+        return `${s.name} (${s.start}–${s.end}): entre ${w.earliest} y ${w.latest}`;
+      })
+      .join(' · ');
+    return (
+      `El ${date} a las ${time} la experiencia se pasa del turno ` +
+      `(dura ${durationMinutes} min y no puede cruzar de un turno al otro). ` +
+      `Horarios de inicio posibles — ${opciones}.`
+    );
+  }
+
   private async findExperienceOrThrow(id: string): Promise<ExperienceDocument> {
     if (!Types.ObjectId.isValid(id))
       throw new BadRequestException('id inválido');
@@ -278,8 +352,13 @@ export class ExperiencesService {
   }
 
   private sessionView(s: SessionLike, experienceColor?: string) {
+    // El turno del día se deriva de la hora de inicio y la duración: una
+    // experiencia entra entera en un bloque o el turno está mal cargado.
+    const placed = resolveShift(s.startAt, s.durationMinutes);
     return {
       id: String(s._id),
+      shiftKey: placed?.shift.key,
+      shiftName: placed?.shift.name,
       experienceId: String(s.experienceId),
       experienceName: s.experienceName,
       experienceColor: experienceColor ?? '#9d684e',

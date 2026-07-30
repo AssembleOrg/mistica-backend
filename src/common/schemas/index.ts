@@ -18,3 +18,6 @@ export * from './lead.schema';
 export * from './closed-date.schema';
 export * from './piece.schema';
 export * from './space-block.schema';
+export * from './table.schema';
+export * from './day-occupancy.schema';
+export * from './shift-template.schema';
