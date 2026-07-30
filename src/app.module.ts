@@ -29,6 +29,8 @@ import { ClosedDatesModule } from './closed-dates/closed-dates.module';
 import { PiecesModule } from './pieces/pieces.module';
 import { SpaceBlocksModule } from './space-blocks/space-blocks.module';
 import { SettingsModule } from './settings/settings.module';
+import { TablesModule } from './tables/tables.module';
+import { ConversationsModule } from './conversations/conversations.module';
 
 @Module({
   imports: [
@@ -57,6 +59,8 @@ import { SettingsModule } from './settings/settings.module';
     ClosedDatesModule,
     PiecesModule,
     SpaceBlocksModule,
+    TablesModule,
+    ConversationsModule,
     NotificationsModule,
     BotControlModule,
     SettingsModule,
@@ -67,4 +71,4 @@ import { SettingsModule } from './settings/settings.module';
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],
 })
-export class AppModule { }
+export class AppModule {}

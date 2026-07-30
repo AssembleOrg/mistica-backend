@@ -13,17 +13,23 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public, Throttle } from '../common/decorators';
 import { SimpleThrottleGuard } from '../common/guards/simple-throttle.guard';
 import {
+  AvailabilityQueryDto,
   CreateHoldDto,
+  PreviewTablesDto,
   TransferProofDto,
 } from '../common/dto/reservation.dto';
 import { envConfig } from '../config/env.config';
 import { ReservationsService } from './reservations.service';
+import { AvailabilityService } from './availability.service';
 
 @ApiTags('Reservas')
 @Controller('reservations')
 @UseGuards(SimpleThrottleGuard)
 export class ReservationsController {
-  constructor(private readonly reservationsService: ReservationsService) {}
+  constructor(
+    private readonly reservationsService: ReservationsService,
+    private readonly availabilityService: AvailabilityService,
+  ) {}
 
   @Post('hold')
   @Public()
@@ -33,6 +39,34 @@ export class ReservationsController {
   })
   async createHold(@Body() dto: CreateHoldDto) {
     return this.reservationsService.createHold(dto);
+  }
+
+  @Get('availability')
+  @Public()
+  @Throttle(60, 60)
+  @ApiOperation({
+    summary:
+      'Días y turnos donde se puede reservar una experiencia. No hace falta cargar turnos: salen de las plantillas del día.',
+  })
+  async availability(@Query() q: AvailabilityQueryDto) {
+    return this.availabilityService.forExperience({
+      experienceId: q.experienceId,
+      from: q.from,
+      to: q.to,
+      days: q.days,
+      includeFull: q.includeFull,
+    });
+  }
+
+  @Post('preview-tables')
+  @Public()
+  @Throttle(30, 60)
+  @ApiOperation({
+    summary:
+      '¿Entra el grupo en las mesas del turno? No reserva. Distingue si sólo entra compartiendo mesa grande.',
+  })
+  async previewTables(@Body() dto: PreviewTablesDto) {
+    return this.reservationsService.previewTables(dto);
   }
 
   @Get(':id/status')

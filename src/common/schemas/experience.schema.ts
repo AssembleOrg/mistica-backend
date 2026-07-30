@@ -45,6 +45,15 @@ export class Experience {
   @Prop({ type: [String], default: [] })
   images: string[];
 
+  /**
+   * Apodos y abreviaturas con los que clientes y equipo nombran la experiencia
+   * ("AYD", "arte y degu"). Los usa el bot para entender de qué le hablan sin
+   * adivinar. Se guardan tal como los escribe el equipo; la comparación es
+   * insensible a mayúsculas, acentos y puntuación (ver experiences/alias.ts).
+   */
+  @Prop({ type: [String], default: [] })
+  aliases: string[];
+
   // ¿Se reserva online por acá (genera turnos + seña)? Si es false, es un
   // servicio que se COORDINA: el bot/web solo informa y capta la consulta
   // (mensuales, eventos, escuelita, facilitadores, tienda). Default true.
