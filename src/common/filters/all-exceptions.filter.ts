@@ -15,6 +15,17 @@ import { NotificationsService } from '../../notifications/notifications.service'
  * a Sentry sin vendor: reutiliza el bot para alertar. Para algo más robusto, se
  * puede apuntar a GlitchTip (compatible con Sentry, self-host) o Sentry free.
  */
+/**
+ * Status 4xx que trae un error de `http-errors` (body-parser, raw-body). Sólo
+ * se acepta el rango de cliente: cualquier otra cosa sigue siendo un 500 real.
+ */
+function clientErrorStatus(exception: unknown): number | null {
+  if (!(exception instanceof Error)) return null;
+  const raw = (exception as { status?: unknown; statusCode?: unknown }).status
+    ?? (exception as { statusCode?: unknown }).statusCode;
+  return typeof raw === 'number' && raw >= 400 && raw < 500 ? raw : null;
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger('Exceptions');
@@ -28,15 +39,26 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const res = ctx.getResponse<Response>();
     const req = ctx.getRequest<Request>();
 
+    // Los errores de `http-errors` (los que tira body-parser: payload demasiado
+    // grande, charset no soportado) no son HttpException pero traen su propio
+    // status 4xx. Sin esto salían como 500 y encima disparaban una alerta al
+    // WhatsApp del equipo, cuando en realidad es culpa del request.
+    const clientStatus = clientErrorStatus(exception);
+
     const status =
       exception instanceof HttpException
         ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+        : (clientStatus ?? HttpStatus.INTERNAL_SERVER_ERROR);
 
     const payload =
       exception instanceof HttpException
         ? exception.getResponse()
-        : { statusCode: status, message: 'Error interno del servidor' };
+        : {
+            statusCode: status,
+            message: clientStatus
+              ? (exception as Error).message
+              : 'Error interno del servidor',
+          };
 
     if (status >= 500) {
       const msg = exception instanceof Error ? exception.message : String(exception);

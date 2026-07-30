@@ -2,18 +2,28 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as cookieParser from 'cookie-parser';
-import { json } from 'express';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { envConfig } from './config/env.config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // `bodyParser: false` + registro manual, a propósito. Nest registra su parser
+  // global sólo si NO encuentra ya un layer llamado `jsonParser` en el stack
+  // (express-adapter: `registerParserMiddleware` filtra por `isMiddlewareApplied`).
+  // Como abajo montamos un `json()` para el comprobante huérfano —y `json()` se
+  // llama `jsonParser` aunque esté scopeado a una ruta— Nest daba por hecho que
+  // ya había parser y NO registraba el global: `req.body` llegaba `undefined` en
+  // todas las demás rutas. Registrándolos acá el orden es explícito.
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
   app.setGlobalPrefix('api');
   app.use(cookieParser());
   // El comprobante huérfano llega como imagen base64 (~hasta 8 MB de imagen ⇒
   // ~11 MB de JSON): subimos el límite de body SOLO para esa ruta; el resto
-  // conserva el default de Express (100 kb).
+  // conserva el default de Express (100 kb). Va PRIMERO: el parser global de
+  // abajo ve el body ya parseado y no lo vuelve a leer.
   app.use('/api/leads/orphan-receipt', json({ limit: '12mb' }));
+  app.use(json());
+  app.use(urlencoded({ extended: true }));
 
   // Global error handling
   process.on('uncaughtException', (error) => {
