@@ -67,6 +67,8 @@ interface ReservationBrief {
   quantity: number;
   experienceName: string;
   status: string;
+  dietaryTags: string[];
+  dietaryNotes?: string;
 }
 
 /** Una reserva en la agenda de un turno, con todas sus mesas juntas. */
@@ -82,6 +84,9 @@ export interface AgendaReservation {
   endAt?: Date;
   shared: boolean;
   tables: string[];
+  /** Restricciones alimentarias del grupo, para verlas en la agenda del día. */
+  dietaryTags: string[];
+  dietaryNotes?: string;
 }
 
 /** Un turno del día con sus mesas, sus reservas y sus bloqueos. */
@@ -303,7 +308,9 @@ export class TablesService {
     if (!ids.length) return new Map();
     const rows = await this.reservationModel
       .find({ _id: { $in: ids.map((id) => new Types.ObjectId(id)) } })
-      .select('code customerName customerPhone quantity experienceName status')
+      .select(
+        'code customerName customerPhone quantity experienceName status dietaryTags dietaryNotes',
+      )
       .lean();
     return new Map(
       rows.map((r) => {
@@ -318,6 +325,8 @@ export class TablesService {
             quantity: r.quantity,
             experienceName: r.experienceName,
             status: r.status,
+            dietaryTags: r.dietaryTags ?? [],
+            dietaryNotes: r.dietaryNotes,
           },
         ];
       }),
@@ -358,6 +367,8 @@ export class TablesService {
         endAt: s.endAt,
         shared: s.shared,
         tables: [s.table],
+        dietaryTags: brief?.dietaryTags ?? [],
+        dietaryNotes: brief?.dietaryNotes,
       });
     }
     return [...grouped.values()].sort((a, b) => {

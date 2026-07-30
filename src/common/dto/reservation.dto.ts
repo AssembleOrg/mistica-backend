@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsEmail,
   IsEnum,
@@ -172,6 +173,27 @@ export class CreateHoldDto {
   @IsOptional()
   @IsBoolean()
   acceptSharedTable?: boolean;
+  @ApiPropertyOptional({
+    description:
+      'Restricciones alimentarias del grupo (sin TACC, vegano, vegetariano, ' +
+      'alergias…). Etiquetas rápidas para que el equipo las vea de un vistazo.',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  dietaryTags?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Detalle de las restricciones en palabras del cliente ("alergia al maní").',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  dietaryNotes?: string;
+
 }
 
 /**
@@ -277,6 +299,27 @@ export class AdminCreateReservationDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+  @ApiPropertyOptional({
+    description:
+      'Restricciones alimentarias del grupo (sin TACC, vegano, vegetariano, ' +
+      'alergias…). Etiquetas rápidas para que el equipo las vea de un vistazo.',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  dietaryTags?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Detalle de las restricciones en palabras del cliente ("alergia al maní").',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  dietaryNotes?: string;
+
 }
 
 /**

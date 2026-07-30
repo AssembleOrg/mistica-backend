@@ -29,6 +29,7 @@ import { ClosedDatesModule } from './closed-dates/closed-dates.module';
 import { PiecesModule } from './pieces/pieces.module';
 import { SpaceBlocksModule } from './space-blocks/space-blocks.module';
 import { TablesModule } from './tables/tables.module';
+import { ConversationsModule } from './conversations/conversations.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { TablesModule } from './tables/tables.module';
     PiecesModule,
     SpaceBlocksModule,
     TablesModule,
+    ConversationsModule,
     NotificationsModule,
     BotControlModule,
   ],

@@ -83,6 +83,19 @@ export class Reservation {
   @Prop({ required: true, enum: ReservationPaymentMethod })
   paymentMethod: ReservationPaymentMethod;
 
+  /**
+   * Restricciones alimentarias del grupo (sin TACC, vegano, alergias…). Se
+   * preguntan al reservar y acompañan a la reserva en todas las vistas: el
+   * equipo tiene que enterarse antes del día, no cuando la persona llega.
+   * `tags` son las etiquetas rápidas y `notes` el detalle en palabras del
+   * cliente ("alergia al maní, viene con epipen").
+   */
+  @Prop({ type: [String], default: [] })
+  dietaryTags: string[];
+
+  @Prop({ trim: true })
+  dietaryNotes?: string;
+
   // ── Mesas ──
   // Turno del día en el que cae la reserva ('T1', 'T2'). Junto con la fecha de
   // negocio identifica el bloque de ocupación de las mesas.

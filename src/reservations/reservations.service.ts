@@ -178,6 +178,8 @@ export class ReservationsService {
         customerEmail: dto.customerEmail,
         customerPhone: dto.customerPhone,
         idempotencyKey: dto.idempotencyKey,
+        dietaryTags: dto.dietaryTags ?? [],
+        dietaryNotes: dto.dietaryNotes,
         expiresAt,
       });
     } catch (err) {
@@ -700,6 +702,8 @@ export class ReservationsService {
         customerEmail: dto.customerEmail,
         customerPhone: dto.customerPhone,
         clientId: dto.clientId,
+        dietaryTags: dto.dietaryTags ?? [],
+        dietaryNotes: dto.dietaryNotes,
         notes: dto.notes,
         createdById: userId,
         confirmedAt: new Date(),
@@ -1435,6 +1439,13 @@ export class ReservationsService {
       expiresAt: r.expiresAt,
       confirmedAt: r.confirmedAt,
       cancelledAt: r.cancelledAt,
+      // Las restricciones viajan en TODAS las vistas de la reserva: el equipo
+      // no se tiene que enterar el día que la persona llega.
+      dietaryTags: r.dietaryTags ?? [],
+      dietaryNotes: r.dietaryNotes,
+      shiftKey: r.shiftKey,
+      tableCodes: r.tableCodes ?? [],
+      sharedTable: r.sharedTable ?? false,
       notes: r.notes,
       createdAt: r.createdAt,
     };
