@@ -47,7 +47,8 @@ export class SalesService {
       customerEmail: saleObj.customerEmail,
       customerPhone: saleObj.customerPhone,
       items: saleObj.items.map(item => ({
-        productId: item.productId.toString(),
+        // Ítems libres (promos/productos fuera de catálogo) no tienen productId.
+        productId: item.productId ? item.productId.toString() : undefined,
         productName: item.productName,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
@@ -157,6 +158,32 @@ export class SalesService {
     const processedItems: SaleItem[] = [];
 
     for (const item of items) {
+      const bonifiedQty = Math.max(0, item.bonifiedQty ?? 0);
+
+      // Ítem libre: sin productId. Es una promo o un producto fuera de catálogo;
+      // el nombre y el precio vienen del payload y la línea NO toca stock.
+      if (!item.productId) {
+        const freeName = (item.productName ?? '').trim();
+        if (!freeName) {
+          throw new BadRequestException(
+            'Un ítem sin producto necesita un nombre.',
+          );
+        }
+        if (bonifiedQty > item.quantity) {
+          throw new BadRequestException(
+            `La cantidad bonificada (${bonifiedQty}) no puede ser mayor a la cantidad (${item.quantity}) en "${freeName}".`,
+          );
+        }
+        processedItems.push({
+          productName: freeName,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          subtotal: (item.quantity - bonifiedQty) * item.unitPrice,
+          bonifiedQty,
+        });
+        continue;
+      }
+
       // Verificar que el producto existe
       const product = await this.productModel.findOne({
         _id: item.productId,
@@ -176,7 +203,6 @@ export class SalesService {
 
       // Cantidad bonificada: sale del depo igual (stock se descuenta por la
       // qty completa), pero no se cobra. Subtotal = (qty − bonif) × precio.
-      const bonifiedQty = Math.max(0, item.bonifiedQty ?? 0);
       if (bonifiedQty > item.quantity) {
         throw new BadRequestException(
           `La cantidad bonificada (${bonifiedQty}) no puede ser mayor a la cantidad (${item.quantity}) en "${product.name}".`,
@@ -223,10 +249,14 @@ export class SalesService {
   }
 
   private async updateProductStock(items: SaleItem[], operation: 'add' | 'subtract'): Promise<void> {
-    const stocklessIds = await this.getStocklessProductIds(items.map((i) => i.productId.toString()));
-    for (const item of items) {
+    // Los ítems libres (sin productId) no tocan stock: se excluyen de entrada.
+    const stockItems = items.filter((i) => i.productId);
+    const stocklessIds = await this.getStocklessProductIds(
+      stockItems.map((i) => i.productId!.toString()),
+    );
+    for (const item of stockItems) {
       // Las líneas PREPAID y SERVICE no tocan stock.
-      if (stocklessIds.has(item.productId.toString())) continue;
+      if (stocklessIds.has(item.productId!.toString())) continue;
 
       const product = await this.productModel.findById(item.productId).exec();
       if (!product) continue;
@@ -784,11 +814,13 @@ export class SalesService {
       // Si la venta incluye líneas de producto PREPAID, generamos una seña
       // (Prepaid PENDING) por línea, asociada al cliente de la venta. Cada
       // línea genera un Prepaid de monto = item.subtotal.
+      // Los ítems libres (sin productId) nunca son PREPAID: se excluyen.
+      const itemsWithProduct = processedItems.filter((i) => i.productId);
       const prepaidProductIds = await this.getPrepaidProductIds(
-        processedItems.map((i) => i.productId.toString()),
+        itemsWithProduct.map((i) => i.productId!.toString()),
       );
-      const prepaidLines = processedItems.filter((i) =>
-        prepaidProductIds.has(i.productId.toString()),
+      const prepaidLines = itemsWithProduct.filter((i) =>
+        prepaidProductIds.has(i.productId!.toString()),
       );
       if (prepaidLines.length > 0) {
         if (!createSaleDto.clientId) {

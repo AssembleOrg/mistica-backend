@@ -70,6 +70,7 @@ export class AuditController {
         userEmail: l.userEmail ?? null,
         ipAddress: l.ipAddress ?? null,
         timestamp: l.timestamp,
+        oldValues: l.oldValues ?? null,
         newValues: l.newValues ?? null,
       })),
       meta: {

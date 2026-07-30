@@ -10,6 +10,8 @@ export * from './category.dto';
 export * from './prepaid-pagination.dto';
 export * from './create-egress.dto';
 export * from './update-egress.dto';
+export * from './delete-egress.dto';
+export * from './settings.dto';
 export * from './egress-paginated-filter.dto';
 export * from './cash-session.dto';
 export * from './finance-summary.dto';

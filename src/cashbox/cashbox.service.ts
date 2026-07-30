@@ -29,6 +29,7 @@ import { DateTime } from 'luxon';
 export interface CashSessionEditEntry {
   editedAt: Date;
   editedByUserId?: string;
+  reason?: string;
   addedEgresses: Array<{
     egressId: string;
     egressNumber: string;
@@ -39,6 +40,13 @@ export interface CashSessionEditEntry {
   addedIncomes: Array<{
     incomeId: string;
     incomeNumber: string;
+    concept: string;
+    amount: number;
+    paymentMethod: string;
+  }>;
+  removedEgresses: Array<{
+    egressId: string;
+    egressNumber: string;
     concept: string;
     amount: number;
     paymentMethod: string;
@@ -92,6 +100,7 @@ export class CashboxService {
       editHistory: (obj.editHistory ?? []).map((e: any) => ({
         editedAt: e.editedAt,
         editedByUserId: e.editedByUserId?.toString(),
+        reason: e.reason,
         addedEgresses: (e.addedEgresses ?? []).map((a: any) => ({
           egressId: a.egressId?.toString(),
           egressNumber: a.egressNumber,
@@ -102,6 +111,13 @@ export class CashboxService {
         addedIncomes: (e.addedIncomes ?? []).map((a: any) => ({
           incomeId: a.incomeId?.toString(),
           incomeNumber: a.incomeNumber,
+          concept: a.concept,
+          amount: a.amount,
+          paymentMethod: a.paymentMethod,
+        })),
+        removedEgresses: (e.removedEgresses ?? []).map((a: any) => ({
+          egressId: a.egressId?.toString(),
+          egressNumber: a.egressNumber,
           concept: a.concept,
           amount: a.amount,
           paymentMethod: a.paymentMethod,
@@ -634,9 +650,78 @@ export class CashboxService {
       editedByUserId: userId ? (userId as any) : undefined,
       addedEgresses: createdEgresses,
       addedIncomes: createdIncomes,
+      removedEgresses: [],
     });
     await session.save();
     return this.mapToResponse(session);
+  }
+
+  /**
+   * Ajusta la caja CERRADA afectada cuando se borra un egreso retroactivamente.
+   *
+   * IMPORTANTE: el egreso ya debe estar soft-deleteado (`deletedAt` seteado)
+   * ANTES de llamar acá, porque `computeExpectedClosingCash` excluye los
+   * egresos con `deletedAt` — así el recálculo lo deja afuera automáticamente.
+   *
+   * Busca la sesión cerrada cuyo período `[openedAt, closedAt]` contiene el
+   * `createdAt` del egreso, recalcula esperado/discrepancia y deja un snapshot
+   * en `editHistory` (`removedEgresses` + `reason`). Si el egreso no cae en
+   * ninguna sesión cerrada (p. ej. pertenecía a la caja abierta, que recalcula
+   * en vivo), no hace nada.
+   *
+   * A diferencia de `editSession`, NO aplica el límite de 72 hs: esta es una
+   * corrección autorizada por PIN/contraseña, no una carga de cajero.
+   */
+  async handleEgressDeleted(
+    egress: {
+      _id: any;
+      egressNumber: string;
+      concept: string;
+      amount: number;
+      paymentMethod: string;
+      createdAt: Date;
+    },
+    userId?: string,
+    reason?: string,
+  ): Promise<void> {
+    const session = await this.cashSessionModel
+      .findOne({
+        status: 'CLOSED',
+        openedAt: { $lte: egress.createdAt },
+        closedAt: { $gte: egress.createdAt },
+      })
+      .exec();
+
+    if (!session || !session.closedAt) return;
+
+    const newExpected = await this.computeExpectedClosingCash(
+      session.openingCash,
+      session.openedAt,
+      session.closedAt,
+    );
+    const newCounted = session.countedClosingCash ?? 0;
+    const newDiscrepancy = Number((newCounted - newExpected).toFixed(2));
+
+    session.expectedClosingCash = newExpected;
+    session.countedClosingCash = newCounted;
+    session.discrepancy = newDiscrepancy;
+    session.editHistory.push({
+      editedAt: new Date(),
+      editedByUserId: userId ? (userId as any) : undefined,
+      reason,
+      addedEgresses: [],
+      addedIncomes: [],
+      removedEgresses: [
+        {
+          egressId: egress._id,
+          egressNumber: egress.egressNumber,
+          concept: egress.concept,
+          amount: egress.amount,
+          paymentMethod: egress.paymentMethod,
+        },
+      ],
+    });
+    await session.save();
   }
 
   /**
@@ -650,6 +735,39 @@ export class CashboxService {
     s.set('label', trimmed || undefined);
     await s.save();
     return this.mapToResponse(s);
+  }
+
+  /**
+   * Marca/desmarca un movimiento (checkbox tipo Excel del detalle de sesión).
+   * Es sólo estado visual persistido: no toca ningún cálculo, saldo ni arqueo.
+   * El movimiento no es un documento propio: vive en la colección de su
+   * `source`, así que elegimos el modelo según ese source.
+   */
+  async setTransactionChecked(
+    source: string,
+    id: string,
+    checked: boolean,
+  ): Promise<{ id: string; source: string; checked: boolean }> {
+    const modelBySource: Record<string, Model<any>> = {
+      sale: this.saleModel,
+      prepaid: this.prepaidModel,
+      egress: this.egressModel,
+      income: this.cashIncomeModel,
+    };
+
+    const model = modelBySource[source];
+    if (!model) {
+      throw new BadRequestException(`Fuente de movimiento inválida: ${source}`);
+    }
+
+    const updated = await model
+      .findByIdAndUpdate(id, { checked }, { new: true })
+      .exec();
+    if (!updated) {
+      throw new BadRequestException(`Movimiento no encontrado: ${id}`);
+    }
+
+    return { id, source, checked };
   }
 
   /**
@@ -675,6 +793,7 @@ export class CashboxService {
       reference?: string;
       afipCae?: string;
       isSena?: boolean;
+      checked: boolean;
     }>;
   }> {
     const session = await this.cashSessionModel.findById(sessionId).exec();
@@ -761,6 +880,8 @@ export class CashboxService {
       // venta con saldo pendiente (status PARTIAL). El front lo usa para el
       // chip "Seña" unificado en el detalle de sesión.
       isSena?: boolean;
+      // Marca manual del checkbox tipo Excel. Sólo estado; no afecta cálculos.
+      checked: boolean;
     }> = [];
 
     for (const s of sales as any[]) {
@@ -802,6 +923,7 @@ export class CashboxService {
         createdAt: lastPayment.createdAt ?? s.createdAt,
         reference: s.saleNumber,
         afipCae: s.afipCae,
+        checked: s.checked ?? false,
       });
     }
 
@@ -817,6 +939,7 @@ export class CashboxService {
         createdAt: p.createdAt,
         reference: p._id.toString(),
         isSena: true,
+        checked: p.checked ?? false,
       });
     }
 
@@ -831,6 +954,7 @@ export class CashboxService {
         paymentMethod: e.paymentMethod,
         createdAt: e.createdAt,
         reference: e.egressNumber,
+        checked: e.checked ?? false,
       });
     }
 
@@ -845,6 +969,7 @@ export class CashboxService {
         paymentMethod: i.paymentMethod,
         createdAt: i.createdAt,
         reference: i.incomeNumber,
+        checked: i.checked ?? false,
       });
     }
 

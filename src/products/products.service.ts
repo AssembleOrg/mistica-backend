@@ -345,9 +345,14 @@ export class ProductsService {
     }).exec();
   }
 
-  async updateStock(id: string, quantity: number, operation: 'add' | 'subtract'): Promise<Product> {
+  async updateStock(
+    id: string,
+    quantity: number,
+    operation: 'add' | 'subtract',
+    reason?: string,
+  ): Promise<Product> {
     const product = await this.findOne(id);
-    
+
     let newStock = product.stock;
     if (operation === 'add') {
       newStock += quantity;
@@ -368,7 +373,14 @@ export class ProductsService {
       throw new ProductoNoEncontradoException(id);
     }
 
-    return this.mapToProductResponse(updatedProduct);
+    const response = this.mapToProductResponse(updatedProduct);
+    // El motivo no se persiste en el producto: viaja en la respuesta para que
+    // el AuditInterceptor lo registre (ej. consumo de taller).
+    const trimmedReason = reason?.trim();
+    if (trimmedReason) {
+      response.stockChangeReason = trimmedReason;
+    }
+    return response;
   }
 
   async searchProducts(query: string): Promise<Product[]> {

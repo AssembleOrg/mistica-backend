@@ -40,9 +40,10 @@ export interface FinanceSummary {
     anonymous: { count: number; total: number };
   };
 
-  // Top productos vendidos (cantidad y revenue) — top 10
+  // Top productos vendidos (cantidad y revenue) — top 10.
+  // `productId` ausente en ítems libres (agrupados por nombre).
   topProducts: Array<{
-    productId: string;
+    productId?: string;
     productName: string;
     quantity: number;
     revenue: number;
@@ -171,7 +172,9 @@ export class FinanceService {
       }
 
       for (const item of sale.items || []) {
-        const id = item.productId.toString();
+        // Ítems libres (sin productId) se agrupan por nombre, para no colapsar
+        // todos en una sola key ni romper el .toString() sobre null.
+        const id = item.productId ? item.productId.toString() : `free:${item.productName}`;
         const prev = productAgg.get(id) ?? {
           productName: item.productName,
           quantity: 0,
@@ -184,7 +187,11 @@ export class FinanceService {
     }
 
     const topProducts = [...productAgg.entries()]
-      .map(([productId, v]) => ({ productId, ...v }))
+      .map(([productId, v]) => ({
+        // Los ítems libres no tienen productId real: se reporta undefined.
+        productId: productId.startsWith('free:') ? undefined : productId,
+        ...v,
+      }))
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10);
 

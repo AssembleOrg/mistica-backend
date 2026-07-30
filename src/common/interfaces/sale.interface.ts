@@ -1,7 +1,8 @@
 import { PaymentMethod, SaleStatus } from '../enums';
 
 export interface SaleItem {
-  productId: string;
+  /** Ausente en ítems libres (promos/productos fuera de catálogo, sin stock). */
+  productId?: string;
   productName: string;
   quantity: number;
   unitPrice: number;
@@ -70,7 +71,9 @@ export interface Sale {
 }
 
 export interface CreateSaleItemDto {
-  productId: string;
+  /** Ausente en ítems libres; en ese caso `productName` es obligatorio. */
+  productId?: string;
+  productName?: string;
   quantity: number;
   unitPrice: number;
 }

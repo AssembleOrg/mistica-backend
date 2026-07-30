@@ -144,9 +144,9 @@ export class ProductsController {
   @ApiResponse({ status: 404, description: 'Producto no encontrado' })
   async addStock(
     @Param('id') id: string,
-    @Body() body: { quantity: number },
+    @Body() body: { quantity: number; reason?: string },
   ): Promise<Product> {
-    return this.productsService.updateStock(id, body.quantity, 'add');
+    return this.productsService.updateStock(id, body.quantity, 'add', body.reason);
   }
 
   @Patch(':id/stock/subtract')
@@ -159,9 +159,9 @@ export class ProductsController {
   @ApiResponse({ status: 404, description: 'Producto no encontrado' })
   async subtractStock(
     @Param('id') id: string,
-    @Body() body: { quantity: number },
+    @Body() body: { quantity: number; reason?: string },
   ): Promise<Product> {
-    return this.productsService.updateStock(id, body.quantity, 'subtract');
+    return this.productsService.updateStock(id, body.quantity, 'subtract', body.reason);
   }
 
   @Delete(':id')

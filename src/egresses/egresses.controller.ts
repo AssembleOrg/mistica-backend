@@ -7,6 +7,7 @@ import {
   Param,
   Delete,
   Query,
+  Req,
   UseGuards,
   HttpStatus,
   HttpCode,
@@ -19,12 +20,22 @@ import {
   ApiQuery,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { EgressesService } from './egresses.service';
-import { CreateEgressDto, UpdateEgressDto, EgressPaginatedFilterDto } from '../common/dto';
+import {
+  CreateEgressDto,
+  UpdateEgressDto,
+  EgressPaginatedFilterDto,
+  DeleteEgressDto,
+} from '../common/dto';
 import { IEgress, PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Auditory } from '../common/decorators';
 import { EgressStatus, EgressType, Currency } from '../common/enums';
+
+interface AuthRequest extends Request {
+  user?: { id: string; email?: string };
+}
 
 @ApiTags('Egresos')
 @ApiBearerAuth()
@@ -125,22 +136,40 @@ export class EgressesController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Eliminar un egreso (soft delete)' })
+  @ApiOperation({
+    summary:
+      'Eliminar un egreso (soft delete). Requiere PIN del dueño o contraseña del admin + motivo. Queda auditado y recalcula la caja cerrada afectada.',
+  })
   @ApiParam({ name: 'id', description: 'ID del egreso' })
   @ApiResponse({
     status: HttpStatus.NO_CONTENT,
     description: 'Egreso eliminado exitosamente',
   })
   @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'PIN o contraseña incorrectos',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Demasiados intentos fallidos de PIN',
+  })
+  @ApiResponse({
     status: HttpStatus.NOT_FOUND,
     description: 'Egreso no encontrado',
   })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'El egreso no puede ser eliminado',
-  })
-  async remove(@Param('id') id: string): Promise<void> {
-    return this.egressesService.remove(id);
+  async remove(
+    @Param('id') id: string,
+    @Body() dto: DeleteEgressDto,
+    @Req() req: AuthRequest,
+  ): Promise<void> {
+    return this.egressesService.remove(id, {
+      userId: req.user?.id,
+      userEmail: req.user?.email,
+      ipAddress: req.ip,
+      reason: dto.reason,
+      pin: dto.pin,
+      adminPassword: dto.adminPassword,
+    });
   }
 
   @Patch(':id/complete')
@@ -164,6 +193,7 @@ export class EgressesController {
   }
 
   @Patch(':id/cancel')
+  @Auditory({ entity: 'Egress', action: 'CANCEL' })
   @ApiOperation({ summary: 'Cancelar un egreso' })
   @ApiParam({ name: 'id', description: 'ID del egreso' })
   @ApiResponse({

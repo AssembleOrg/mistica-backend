@@ -39,6 +39,11 @@ export class Egress {
   @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   userId?: Types.ObjectId; // Usuario que registra el egreso
 
+  // Marca manual tipo "checkbox de Excel" en el detalle de sesión de caja.
+  // Sólo estado visual/persistido: no afecta ningún cálculo ni flujo.
+  @Prop({ type: Boolean, default: false })
+  checked: boolean;
+
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
 

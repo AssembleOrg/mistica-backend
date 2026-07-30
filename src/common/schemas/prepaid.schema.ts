@@ -29,6 +29,11 @@ export class Prepaid {
   @Prop({ type: Date })
   consumedAt?: Date;
 
+  // Marca manual tipo "checkbox de Excel" en el detalle de sesión de caja.
+  // Sólo estado visual/persistido: no afecta ningún cálculo ni flujo.
+  @Prop({ type: Boolean, default: false })
+  checked: boolean;
+
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
 

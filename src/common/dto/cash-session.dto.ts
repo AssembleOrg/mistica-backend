@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsNumber,
   IsOptional,
@@ -184,6 +185,18 @@ export class UpdateCashSessionLabelDto {
   @IsString()
   @MaxLength(100)
   label?: string;
+}
+
+/**
+ * Marca/desmarca un movimiento en el detalle de sesión (checkbox tipo Excel).
+ * Sólo estado visual persistido: no afecta cálculos, saldos ni arqueo.
+ */
+export class UpdateTransactionCheckedDto {
+  @ApiProperty({
+    description: 'Nuevo estado de la marca del movimiento (true/false).',
+  })
+  @IsBoolean({ message: 'checked debe ser booleano' })
+  checked: boolean;
 }
 
 export class CloseCashSessionDto {
