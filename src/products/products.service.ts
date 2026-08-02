@@ -47,9 +47,12 @@ export class ProductsService {
   }
 
   async create(createProductDto: CreateProductDto): Promise<Product> {
+    // A propósito NO se filtra por `deletedAt`: el índice único de `barcode`
+    // tampoco distingue borrados. Si excluyéramos los soft-deleted, esta
+    // validación daría vía libre y después Mongo rechazaría el insert con un
+    // E11000 crudo (500 + alerta al equipo) en vez de este 409 en español.
     const existingProduct = await this.productModel.findOne({
       barcode: createProductDto.barcode,
-      deletedAt: { $exists: false }
     }).exec();
 
     if (existingProduct) {
@@ -193,10 +196,11 @@ export class ProductsService {
     const existingProduct = await this.findOne(id);
 
     if (updateProductDto.barcode && updateProductDto.barcode !== existingProduct.barcode) {
+      // Sin filtro de `deletedAt`, por el mismo motivo que en `create()`: el
+      // índice único de `barcode` abarca también a los borrados.
       const barcodeExists = await this.productModel.findOne({
         barcode: updateProductDto.barcode,
         _id: { $ne: id },
-        deletedAt: { $exists: false }
       }).exec();
 
       if (barcodeExists) {

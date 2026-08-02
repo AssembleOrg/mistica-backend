@@ -57,6 +57,12 @@ export class Product {
 
   @Prop({ type: Date, default: Date.now })
   updatedAt: Date;
+
+  // Soft delete: `remove()` setea esta fecha y todas las queries del servicio
+  // filtran por `deletedAt: { $exists: false }`. Sin declararlo acá, Mongoose
+  // (strict: true) descartaba el campo en el update y el borrado no persistía.
+  @Prop({ type: Date })
+  deletedAt?: Date;
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);
@@ -64,7 +70,7 @@ export const ProductSchema = SchemaFactory.createForClass(Product);
 // Add indexes for better performance
 // Nota: barcode ya tiene índice único por el decorador @Prop({ unique: true })
 ProductSchema.index({ category: 1 });
-ProductSchema.index({ status: 1 });
+ProductSchema.index({ deletedAt: 1 });
 ProductSchema.index({ stock: 1 });
 ProductSchema.index({ price: 1 });
 ProductSchema.index({ name: 'text', description: 'text' });
