@@ -2,14 +2,22 @@ import { DateTime } from 'luxon';
 import { envConfig } from '../config/env.config';
 
 /**
- * Turnos fijos del día. El salón trabaja en bloques cerrados: una experiencia
- * entra ENTERA en un turno o no entra (no puede cruzar el borde). Entre un
- * turno y el siguiente queda el hueco de limpieza (ver cleaningBufferMinutes).
+ * Turnos SUGERIDOS del día + ventana horaria del negocio.
  *
- * Las mesas se bloquean por turno: una mesa ocupada en T1 vuelve al pool en T2.
+ * Los turnos dejaron de ser bloques rígidos: una reserva puede arrancar a
+ * CUALQUIER hora, con dos únicas restricciones duras:
+ *   · no empieza antes de la apertura (BUSINESS_OPEN, default 15:00)
+ *   · no termina después del cierre (BUSINESS_CLOSE, default 20:00)
+ *
+ * Los turnos quedan como sugerencia de horario (la landing y el bot los
+ * ofrecen primero, y el bot recomienda —una sola vez— el inicio del turno
+ * cercano), pero nunca bloquean un horario válido.
+ *
+ * La limpieza ya no es un hueco entre turnos: cada reserva deja su mesa
+ * ocupada hasta endAt + CLEANING_BUFFER_MINUTES (ver tables.service).
  */
 export interface ShiftDef {
-  /** Clave corta y estable ('T1'). Se persiste en la reserva. */
+  /** Clave corta y estable ('T1'). */
   key: string;
   /** Nombre para mostrar ('Turno 1'). */
   name: string;
@@ -23,31 +31,32 @@ export interface ShiftDef {
    */
   weekday?: number;
   /**
-   * Experiencias que se pueden reservar en este turno. Vacío = todas las
-   * reservables online. En un mismo turno conviven reservas de experiencias
-   * distintas: lo que se comparte es el salón (las mesas), no la actividad.
+   * Experiencias sugeridas para este turno. Vacío = todas las reservables
+   * online. Es informativo: no restringe qué se puede reservar.
    */
   experienceIds?: string[];
 }
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-function toMinutes(hhmm: string): number {
+/** 'HH:mm' → minutos desde medianoche. Lanza si el formato es inválido. */
+export function toMinutes(hhmm: string): number {
   const m = HHMM.exec(hhmm);
-  if (!m)
-    throw new Error(`Hora inválida en SHIFTS: "${hhmm}" (se espera HH:mm)`);
+  if (!m) throw new Error(`Hora inválida: "${hhmm}" (se espera HH:mm)`);
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
+/** Minutos desde medianoche → 'HH:mm'. */
+export function fmtMinutes(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+}
+
 /**
- * Parsea la definición de turnos de env y valida el conjunto: horas válidas,
- * turno con duración positiva, orden cronológico, sin solaparse y con al menos
- * `cleaningBufferMinutes` de separación entre uno y el siguiente.
+ * Parsea la definición de turnos sugeridos de env y valida el conjunto:
+ * horas válidas, duración positiva, claves únicas y sin solaparse entre sí.
+ * (Ya no se exige hueco de limpieza entre turnos: la limpieza es por reserva.)
  */
-export function parseShifts(
-  raw: string,
-  cleaningBufferMinutes: number,
-): ShiftDef[] {
+export function parseShifts(raw: string): ShiftDef[] {
   const shifts = raw
     .split(';')
     .map((s) => s.trim())
@@ -80,15 +89,9 @@ export function parseShifts(
   for (let i = 1; i < shifts.length; i++) {
     const prev = shifts[i - 1];
     const cur = shifts[i];
-    const gap = toMinutes(cur.start) - toMinutes(prev.end);
-    if (gap < 0) {
+    if (toMinutes(cur.start) < toMinutes(prev.end)) {
       throw new Error(
         `Los turnos ${prev.key} y ${cur.key} se solapan (${prev.end} > ${cur.start})`,
-      );
-    }
-    if (gap < cleaningBufferMinutes) {
-      throw new Error(
-        `Entre ${prev.key} y ${cur.key} hay ${gap} min y se necesitan ${cleaningBufferMinutes} para limpiar`,
       );
     }
   }
@@ -98,11 +101,9 @@ export function parseShifts(
 let cached: ShiftDef[] | null = null;
 
 /**
- * De dónde salen los turnos de una fecha. Por defecto, de la env `SHIFTS`.
- * `ShiftsService` lo reemplaza al arrancar por las plantillas de la base, para
- * que se puedan editar desde el panel sin redeployar. Se mantiene como hook
- * sincrónico para no tener que volver async medio backend (los turnos son 2 o 3
- * documentos: viven en memoria y se recargan cuando el admin los edita).
+ * De dónde salen los turnos sugeridos de una fecha. Por defecto, de la env
+ * `SHIFTS`. `ShiftsService` lo reemplaza al arrancar por las plantillas de la
+ * base, para que se puedan editar desde el panel sin redeployar.
  */
 type ShiftProvider = (dateKey: string) => ShiftDef[];
 
@@ -116,14 +117,14 @@ export function setShiftProvider(fn: ShiftProvider | null): void {
 
 function fromEnv(): ShiftDef[] {
   if (!cached) {
-    cached = parseShifts(envConfig.shifts, envConfig.cleaningBufferMinutes);
+    cached = parseShifts(envConfig.shifts);
   }
   return cached;
 }
 
 /**
- * Turnos que aplican a una fecha. Sin `dateKey` devuelve los turnos "base" (los
- * que valen todos los días), que es lo que se usa para mensajes genéricos.
+ * Turnos sugeridos que aplican a una fecha. Sin `dateKey` devuelve los turnos
+ * "base" (los que valen todos los días), para mensajes genéricos.
  */
 export function listShifts(dateKey?: string): ShiftDef[] {
   if (!provider) return fromEnv();
@@ -156,23 +157,82 @@ export function businessDateKey(at: Date, tz = envConfig.timezone): string {
   return DateTime.fromJSDate(at).setZone(tz).toISODate() as string;
 }
 
-/** Límites absolutos de un turno para una fecha de negocio dada. */
-export function shiftBounds(
+// ───────────────────── Ventana horaria del negocio ─────────────────────
+
+/** Apertura y cierre de reservas, en minutos desde medianoche (hora local). */
+export function businessWindow(): { openMin: number; closeMin: number } {
+  return {
+    openMin: toMinutes(envConfig.businessOpen),
+    closeMin: toMinutes(envConfig.businessClose),
+  };
+}
+
+/** Límites absolutos de la ventana de reservas de una fecha de negocio. */
+export function businessBounds(
   dateKey: string,
-  shift: ShiftDef,
   tz = envConfig.timezone,
-): { start: Date; end: Date } {
-  const start = DateTime.fromISO(`${dateKey}T${shift.start}`, { zone: tz });
-  const end = DateTime.fromISO(`${dateKey}T${shift.end}`, { zone: tz });
-  return { start: start.toJSDate(), end: end.toJSDate() };
+): { open: Date; close: Date } {
+  const open = DateTime.fromISO(`${dateKey}T${envConfig.businessOpen}`, {
+    zone: tz,
+  });
+  const close = DateTime.fromISO(`${dateKey}T${envConfig.businessClose}`, {
+    zone: tz,
+  });
+  return { open: open.toJSDate(), close: close.toJSDate() };
+}
+
+export type WindowFailure =
+  /** Empieza antes de la apertura. */
+  | 'BEFORE_OPEN'
+  /** Termina después del cierre. */
+  | 'AFTER_CLOSE'
+  /** La actividad dura más que toda la ventana del día. */
+  | 'TOO_LONG';
+
+/**
+ * ¿Una actividad que arranca en `startAt` y dura `durationMinutes` entra en la
+ * ventana del negocio? Única restricción dura de horarios del salón.
+ */
+export function checkBookingWindow(
+  startAt: Date,
+  durationMinutes: number,
+  tz = envConfig.timezone,
+): { ok: true; dateKey: string } | { ok: false; reason: WindowFailure } {
+  const { openMin, closeMin } = businessWindow();
+  const startLocal = DateTime.fromJSDate(startAt).setZone(tz);
+  const startMin = startLocal.hour * 60 + startLocal.minute;
+  const endMin = startMin + durationMinutes;
+
+  if (durationMinutes > closeMin - openMin) {
+    return { ok: false, reason: 'TOO_LONG' };
+  }
+  if (startMin < openMin) return { ok: false, reason: 'BEFORE_OPEN' };
+  if (endMin > closeMin) return { ok: false, reason: 'AFTER_CLOSE' };
+  return { ok: true, dateKey: startLocal.toISODate() as string };
 }
 
 /**
- * ¿En qué turno cae una actividad que arranca en `startAt` y dura
- * `durationMinutes`? Devuelve null si no entra entera en ningún turno (empieza
- * antes del primero, termina después del último, o cruza el borde entre dos).
+ * Rango de horas de inicio válidas para una actividad de `durationMinutes` en
+ * la ventana del negocio: desde la apertura hasta la última hora que permite
+ * terminar antes del cierre. Devuelve null si no entra ni empezando al abrir.
  */
-export function resolveShift(
+export function bookingStartWindow(
+  durationMinutes: number,
+): { earliest: string; latest: string } | null {
+  const { openMin, closeMin } = businessWindow();
+  const latestMin = closeMin - durationMinutes;
+  if (latestMin < openMin) return null;
+  return { earliest: fmtMinutes(openMin), latest: fmtMinutes(latestMin) };
+}
+
+// ───────────────────── Turnos como sugerencia ─────────────────────
+
+/**
+ * Turno sugerido en el que cae (entera) una actividad, si cae en alguno.
+ * Es sólo una ETIQUETA para la agenda y los mensajes: que no caiga en ninguno
+ * no invalida el horario.
+ */
+export function suggestedShiftFor(
   startAt: Date,
   durationMinutes: number,
   tz = envConfig.timezone,
@@ -191,9 +251,8 @@ export function resolveShift(
 }
 
 /**
- * Rango de horas de inicio válidas para una experiencia de `durationMinutes` en
- * un turno: desde el inicio del turno hasta la última hora que permite terminar
- * dentro. Devuelve null si la experiencia no entra en el turno.
+ * Rango de horas de inicio con las que una actividad entra ENTERA en un turno
+ * sugerido. Para armar la oferta de horarios (no restringe nada).
  */
 export function startWindow(
   shift: ShiftDef,
@@ -202,12 +261,10 @@ export function startWindow(
   const startMin = toMinutes(shift.start);
   const latestMin = toMinutes(shift.end) - durationMinutes;
   if (latestMin < startMin) return null;
-  const fmt = (m: number) =>
-    `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-  return { earliest: fmt(startMin), latest: fmt(latestMin) };
+  return { earliest: fmtMinutes(startMin), latest: fmtMinutes(latestMin) };
 }
 
-/** Turnos donde entra entera una experiencia de esa duración. */
+/** Turnos sugeridos donde entra entera una actividad de esa duración. */
 export function shiftsFitting(
   durationMinutes: number,
   dateKey?: string,
@@ -217,11 +274,22 @@ export function shiftsFitting(
   );
 }
 
-/** ¿Este turno acepta esa experiencia? Sin lista, acepta todas. */
+/** ¿Este turno sugiere esa experiencia? Sin lista, sugiere todas. */
 export function shiftAllowsExperience(
   shift: ShiftDef,
   experienceId: string,
 ): boolean {
   const ids = shift.experienceIds ?? [];
   return ids.length === 0 || ids.includes(String(experienceId));
+}
+
+/** Límites absolutos de un turno sugerido para una fecha de negocio dada. */
+export function shiftBounds(
+  dateKey: string,
+  shift: ShiftDef,
+  tz = envConfig.timezone,
+): { start: Date; end: Date } {
+  const start = DateTime.fromISO(`${dateKey}T${shift.start}`, { zone: tz });
+  const end = DateTime.fromISO(`${dateKey}T${shift.end}`, { zone: tz });
+  return { start: start.toJSDate(), end: end.toJSDate() };
 }

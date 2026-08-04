@@ -53,10 +53,7 @@ export class ShiftsService implements OnModuleInit {
       .lean();
 
     if (!rows.length) {
-      this.snapshot = parseShifts(
-        envConfig.shifts,
-        envConfig.cleaningBufferMinutes,
-      );
+      this.snapshot = parseShifts(envConfig.shifts);
       this.logger.log(
         `Sin plantillas de turno en base: uso la env SHIFTS (${this.snapshot.length} turnos).`,
       );
@@ -142,8 +139,9 @@ export class ShiftsService implements OnModuleInit {
 
   /**
    * Un turno nuevo/editado tiene que convivir con los del mismo día: sin
-   * solaparse y dejando el hueco de limpieza. Se valida con las MISMAS reglas
-   * que la env (parseShifts), así no hay dos criterios distintos.
+   * solaparse entre sí. Se valida con las MISMAS reglas que la env
+   * (parseShifts), así no hay dos criterios distintos. (El hueco de limpieza
+   * ya no se exige: la limpieza es por reserva, no entre turnos.)
    */
   private async assertConsistent(
     dto: ShiftTemplateInput,
@@ -171,7 +169,7 @@ export class ShiftsService implements OnModuleInit {
       .join(';');
 
     try {
-      parseShifts(raw, envConfig.cleaningBufferMinutes);
+      parseShifts(raw);
     } catch (err) {
       throw new BadRequestException(
         `No se puede guardar el turno: ${(err as Error).message}`,

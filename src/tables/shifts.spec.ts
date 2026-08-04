@@ -1,11 +1,13 @@
 import { DateTime } from 'luxon';
 import {
+  bookingStartWindow,
+  checkBookingWindow,
   parseShifts,
-  resolveShift,
   shiftAllowsExperience,
   shiftsFitting,
   shiftsForDate,
   startWindow,
+  suggestedShiftFor,
   weekdayOf,
 } from './shifts';
 
@@ -19,53 +21,127 @@ function at(dateKey: string, hhmm: string): Date {
 
 describe('parseShifts', () => {
   it('parsea la definición por defecto', () => {
-    expect(parseShifts(DEFAULT, 20)).toEqual([
+    expect(parseShifts(DEFAULT)).toEqual([
       { key: 'T1', name: 'Turno 1', start: '15:00', end: '17:30' },
       { key: 'T2', name: 'Turno 2', start: '17:50', end: '20:00' },
     ]);
   });
 
-  it('exige el hueco de limpieza entre turnos', () => {
-    // 17:30 → 17:30 no deja tiempo para limpiar.
-    expect(() =>
-      parseShifts('T1|Turno 1|15:00|17:30;T2|Turno 2|17:30|20:00', 20),
-    ).toThrow(/se necesitan 20/);
-  });
-
-  it('acepta el hueco justo', () => {
+  it('acepta turnos pegados (la limpieza ya no vive entre turnos)', () => {
     expect(
-      parseShifts('T1|Turno 1|15:00|17:30;T2|Turno 2|17:50|20:00', 20),
+      parseShifts('T1|Turno 1|15:00|17:30;T2|Turno 2|17:30|20:00'),
     ).toHaveLength(2);
   });
 
   it('rechaza turnos solapados', () => {
     expect(() =>
-      parseShifts('T1|Turno 1|15:00|18:00;T2|Turno 2|17:30|20:00', 20),
+      parseShifts('T1|Turno 1|15:00|18:00;T2|Turno 2|17:30|20:00'),
     ).toThrow(/se solapan/);
   });
 
   it('rechaza un turno que termina antes de empezar', () => {
-    expect(() => parseShifts('T1|Turno 1|18:00|15:00', 20)).toThrow(
+    expect(() => parseShifts('T1|Turno 1|18:00|15:00')).toThrow(
       /termina antes/,
     );
   });
 
   it('rechaza claves repetidas', () => {
-    expect(() =>
-      parseShifts('T1|Uno|15:00|16:00;T1|Dos|17:00|18:00', 20),
-    ).toThrow(/repetida/);
+    expect(() => parseShifts('T1|Uno|15:00|16:00;T1|Dos|17:00|18:00')).toThrow(
+      /repetida/,
+    );
   });
 
   it('rechaza horas mal escritas', () => {
-    expect(() => parseShifts('T1|Turno 1|25:00|26:00', 20)).toThrow(/inválida/);
+    expect(() => parseShifts('T1|Turno 1|25:00|26:00')).toThrow(/inválida/);
   });
 
   it('rechaza una definición vacía', () => {
-    expect(() => parseShifts('', 20)).toThrow(/ningún turno/);
+    expect(() => parseShifts('')).toThrow(/ningún turno/);
   });
 });
 
-describe('startWindow', () => {
+describe('checkBookingWindow · horario libre con ventana 15:00–20:00', () => {
+  it('acepta el inicio de la ventana', () => {
+    const r = checkBookingWindow(at('2026-08-01', '15:00'), 120, TZ);
+    expect(r).toEqual({ ok: true, dateKey: '2026-08-01' });
+  });
+
+  it('acepta un horario que rompe los turnos (16:30 + 2 h = 18:30)', () => {
+    expect(checkBookingWindow(at('2026-08-01', '16:30'), 120, TZ).ok).toBe(
+      true,
+    );
+  });
+
+  it('acepta terminar justo al cierre (18:00 + 2 h = 20:00)', () => {
+    expect(checkBookingWindow(at('2026-08-01', '18:00'), 120, TZ).ok).toBe(
+      true,
+    );
+  });
+
+  it('rechaza terminar después del cierre', () => {
+    const r = checkBookingWindow(at('2026-08-01', '18:30'), 120, TZ);
+    expect(r).toEqual({ ok: false, reason: 'AFTER_CLOSE' });
+  });
+
+  it('rechaza empezar antes de la apertura', () => {
+    const r = checkBookingWindow(at('2026-08-01', '14:00'), 120, TZ);
+    expect(r).toEqual({ ok: false, reason: 'BEFORE_OPEN' });
+  });
+
+  it('rechaza una actividad más larga que la ventana', () => {
+    const r = checkBookingWindow(at('2026-08-01', '15:00'), 360, TZ);
+    expect(r).toEqual({ ok: false, reason: 'TOO_LONG' });
+  });
+
+  it('usa la fecha del negocio, no la UTC', () => {
+    // 18:00 AR es 21:00 UTC del mismo día; la fecha de negocio no cambia.
+    const r = checkBookingWindow(at('2026-08-01', '18:00'), 120, TZ);
+    expect(r).toEqual({ ok: true, dateKey: '2026-08-01' });
+  });
+});
+
+describe('bookingStartWindow', () => {
+  it('una experiencia de 2 h arranca entre 15:00 y 18:00', () => {
+    expect(bookingStartWindow(120)).toEqual({
+      earliest: '15:00',
+      latest: '18:00',
+    });
+  });
+
+  it('una de 5 h entra justo (ventana completa)', () => {
+    expect(bookingStartWindow(300)).toEqual({
+      earliest: '15:00',
+      latest: '15:00',
+    });
+  });
+
+  it('una de 6 h no entra', () => {
+    expect(bookingStartWindow(360)).toBeNull();
+  });
+});
+
+describe('suggestedShiftFor · etiqueta de turno sugerido', () => {
+  it('etiqueta una experiencia de 2 h que arranca a las 15:00 como T1', () => {
+    const r = suggestedShiftFor(at('2026-08-01', '15:00'), 120, TZ);
+    expect(r?.shift.key).toBe('T1');
+    expect(r?.dateKey).toBe('2026-08-01');
+  });
+
+  it('etiqueta el turno 2', () => {
+    expect(
+      suggestedShiftFor(at('2026-08-01', '17:50'), 120, TZ)?.shift.key,
+    ).toBe('T2');
+  });
+
+  it('un horario que cruza turnos no tiene etiqueta (pero es válido)', () => {
+    expect(suggestedShiftFor(at('2026-08-01', '16:30'), 120, TZ)).toBeNull();
+    expect(checkBookingWindow(at('2026-08-01', '16:30'), 120, TZ).ok).toBe(
+      true,
+    );
+  });
+});
+
+describe('startWindow (sugerencias)', () => {
   const t1 = { key: 'T1', name: 'Turno 1', start: '15:00', end: '17:30' };
   const t2 = { key: 'T2', name: 'Turno 2', start: '17:50', end: '20:00' };
 
@@ -83,55 +159,9 @@ describe('startWindow', () => {
     });
   });
 
-  it('una experiencia de 3 h no entra en ningún turno', () => {
+  it('una experiencia de 3 h no entra en ningún turno sugerido', () => {
     expect(startWindow(t1, 180)).toBeNull();
     expect(startWindow(t2, 180)).toBeNull();
-  });
-});
-
-describe('resolveShift', () => {
-  it('ubica una experiencia de 2 h que arranca a las 15:00 en el turno 1', () => {
-    const r = resolveShift(at('2026-08-01', '15:00'), 120, TZ);
-    expect(r?.shift.key).toBe('T1');
-    expect(r?.dateKey).toBe('2026-08-01');
-  });
-
-  it('ubica el último inicio válido del turno 1', () => {
-    expect(resolveShift(at('2026-08-01', '15:30'), 120, TZ)?.shift.key).toBe(
-      'T1',
-    );
-  });
-
-  it('rechaza una experiencia que cruza el borde entre turnos', () => {
-    // 16:00 + 2 h = 18:00, se pasa del fin del turno 1 (17:30).
-    expect(resolveShift(at('2026-08-01', '16:00'), 120, TZ)).toBeNull();
-  });
-
-  it('rechaza el hueco de limpieza como hora de inicio', () => {
-    expect(resolveShift(at('2026-08-01', '17:40'), 120, TZ)).toBeNull();
-  });
-
-  it('ubica el turno 2', () => {
-    expect(resolveShift(at('2026-08-01', '17:50'), 120, TZ)?.shift.key).toBe(
-      'T2',
-    );
-    expect(resolveShift(at('2026-08-01', '18:00'), 120, TZ)?.shift.key).toBe(
-      'T2',
-    );
-  });
-
-  it('rechaza terminar después del cierre', () => {
-    expect(resolveShift(at('2026-08-01', '18:30'), 120, TZ)).toBeNull();
-  });
-
-  it('rechaza empezar antes de la apertura', () => {
-    expect(resolveShift(at('2026-08-01', '14:00'), 120, TZ)).toBeNull();
-  });
-
-  it('usa la fecha del negocio, no la UTC', () => {
-    // 20:00 AR del 1/8 es 23:00 UTC del mismo día; la fecha de negocio no cambia.
-    const r = resolveShift(at('2026-08-01', '18:00'), 120, TZ);
-    expect(r?.dateKey).toBe('2026-08-01');
   });
 });
 

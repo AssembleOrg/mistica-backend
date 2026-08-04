@@ -20,6 +20,7 @@ import {
 } from '../enums/reservation.enum';
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
+const HHMM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 /** Días y turnos donde se puede reservar una experiencia. */
 export class AvailabilityQueryDto {
@@ -65,7 +66,7 @@ export class AvailabilityQueryDto {
 export class PreviewTablesDto {
   @ApiPropertyOptional({
     description:
-      'ID del turno ya existente. Alternativa a experienceId + date + shiftKey.',
+      'ID del turno ya existente. Alternativa a experienceId + date + startTime.',
   })
   @IsOptional()
   @IsMongoId()
@@ -81,7 +82,17 @@ export class PreviewTablesDto {
   @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })
   date?: string;
 
-  @ApiPropertyOptional({ description: "Turno del día ('T1', 'T2')" })
+  @ApiPropertyOptional({
+    description: "Hora local de inicio, 'HH:mm' (horario libre)",
+  })
+  @IsOptional()
+  @Matches(HHMM_RE, { message: 'startTime debe ser HH:mm' })
+  startTime?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Turno sugerido ('T1', 'T2'). Compatibilidad: se traduce a su hora de inicio. Usá startTime.",
+  })
   @IsOptional()
   @IsString()
   @MaxLength(8)
@@ -109,8 +120,9 @@ export class PreviewTablesDto {
  */
 export class CreateHoldDto {
   // Dos formas de indicar QUÉ se reserva:
-  //  · el trío (experienceId + date + shiftKey) — el turno se crea solo si hace
-  //    falta. Es el camino normal: el equipo ya no carga turnos a mano.
+  //  · el trío (experienceId + date + startTime) — el turno se crea solo si
+  //    hace falta. Es el camino normal: el equipo ya no carga turnos a mano.
+  //    (`shiftKey` sigue aceptándose y se traduce al inicio del turno.)
   //  · `sessionId`, para un turno puntual que el admin creó a mano.
   @ApiPropertyOptional({ description: 'ID de un turno ya existente' })
   @IsOptional()
@@ -127,7 +139,17 @@ export class CreateHoldDto {
   @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })
   date?: string;
 
-  @ApiPropertyOptional({ description: "Turno del día ('T1', 'T2')" })
+  @ApiPropertyOptional({
+    description: "Hora local de inicio, 'HH:mm' (horario libre)",
+  })
+  @IsOptional()
+  @Matches(HHMM_RE, { message: 'startTime debe ser HH:mm' })
+  startTime?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Turno sugerido ('T1', 'T2'). Compatibilidad: se traduce a su hora de inicio. Usá startTime.",
+  })
   @IsOptional()
   @IsString()
   @MaxLength(8)
@@ -245,7 +267,17 @@ export class AdminCreateReservationDto {
   @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })
   date?: string;
 
-  @ApiPropertyOptional({ description: "Turno del día ('T1', 'T2')" })
+  @ApiPropertyOptional({
+    description: "Hora local de inicio, 'HH:mm' (horario libre)",
+  })
+  @IsOptional()
+  @Matches(HHMM_RE, { message: 'startTime debe ser HH:mm' })
+  startTime?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Turno sugerido ('T1', 'T2'). Compatibilidad: se traduce a su hora de inicio. Usá startTime.",
+  })
   @IsOptional()
   @IsString()
   @MaxLength(8)
@@ -343,7 +375,17 @@ export class AdminRescheduleReservationDto {
   @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })
   date?: string;
 
-  @ApiPropertyOptional({ description: "Turno del día ('T1', 'T2')" })
+  @ApiPropertyOptional({
+    description: "Hora local de inicio, 'HH:mm' (horario libre)",
+  })
+  @IsOptional()
+  @Matches(HHMM_RE, { message: 'startTime debe ser HH:mm' })
+  startTime?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Turno sugerido ('T1', 'T2'). Compatibilidad: se traduce a su hora de inicio. Usá startTime.",
+  })
   @IsOptional()
   @IsString()
   @MaxLength(8)

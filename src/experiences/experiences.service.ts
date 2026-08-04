@@ -25,7 +25,11 @@ import {
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { aliasKeys, cleanAliases, normalizeAlias } from './alias';
 import { TablesService } from '../tables/tables.service';
-import { resolveShift, shiftsFitting, startWindow } from '../tables/shifts';
+import {
+  bookingStartWindow,
+  checkBookingWindow,
+  suggestedShiftFor,
+} from '../tables/shifts';
 
 @Injectable()
 export class ExperiencesService {
@@ -151,9 +155,9 @@ export class ExperiencesService {
         );
       }
       const durationMinutes = exp.durationMinutes;
-      // El turno tiene que entrar ENTERO en un bloque del día: una experiencia
-      // no puede arrancar en un turno y terminar en el siguiente.
-      if (!resolveShift(start.toJSDate(), durationMinutes)) {
+      // Única restricción dura: entrar en la ventana del negocio (empezar
+      // después de abrir, terminar antes de cerrar). Los turnos son sugerencia.
+      if (!checkBookingWindow(start.toJSDate(), durationMinutes).ok) {
         throw new BadRequestException(
           this.badStartMessage(slot.date, slot.time, durationMinutes),
         );
@@ -227,23 +231,17 @@ export class ExperiencesService {
           s as unknown as SessionLike,
           colorByExp.get(String(s.experienceId)),
         );
-        const placed = resolveShift(s.startAt, s.durationMinutes);
-        if (!placed) {
-          // Turno mal cargado (no entra en ningún bloque del día): no se puede
+        if (!checkBookingWindow(s.startAt, s.durationMinutes).ok) {
+          // Turno mal cargado (fuera de la ventana del negocio): no se puede
           // reservar hasta corregirlo.
           view.seatsAvailable = 0;
           view.shiftKey = undefined;
           view.shiftName = undefined;
           return view;
         }
-        view.shiftKey = placed.shift.key;
-        view.shiftName = placed.shift.name;
         view.seatsAvailable = Math.min(
           view.seatsAvailable,
-          await this.tables.remainingPartySize(
-            placed.dateKey,
-            placed.shift.key,
-          ),
+          await this.tables.remainingPartySize(s.startAt, s.durationMinutes),
         );
         return view;
       }),
@@ -296,29 +294,23 @@ export class ExperiencesService {
 
   // ───────────────────────── Helpers ─────────────────────────
 
-  /** Explica por qué un turno no entra y qué horarios sí sirven. */
+  /** Explica por qué un horario no entra y qué horarios sí sirven. */
   private badStartMessage(
     date: string,
     time: string,
     durationMinutes: number,
   ): string {
-    const fits = shiftsFitting(durationMinutes);
-    if (!fits.length) {
+    const w = bookingStartWindow(durationMinutes);
+    if (!w) {
       return (
-        `Una experiencia de ${durationMinutes} minutos no entra en ningún turno del día. ` +
-        'Ajustá la duración de la experiencia o la definición de los turnos.'
+        `Una experiencia de ${durationMinutes} minutos no entra en el horario del salón ` +
+        `(${envConfig.businessOpen}–${envConfig.businessClose}). Ajustá la duración.`
       );
     }
-    const opciones = fits
-      .map((s) => {
-        const w = startWindow(s, durationMinutes)!;
-        return `${s.name} (${s.start}–${s.end}): entre ${w.earliest} y ${w.latest}`;
-      })
-      .join(' · ');
     return (
-      `El ${date} a las ${time} la experiencia se pasa del turno ` +
-      `(dura ${durationMinutes} min y no puede cruzar de un turno al otro). ` +
-      `Horarios de inicio posibles — ${opciones}.`
+      `El ${date} a las ${time} la experiencia termina después del cierre o ` +
+      `empieza antes de abrir (dura ${durationMinutes} min). ` +
+      `Horarios de inicio posibles: entre ${w.earliest} y ${w.latest}.`
     );
   }
 
@@ -352,9 +344,9 @@ export class ExperiencesService {
   }
 
   private sessionView(s: SessionLike, experienceColor?: string) {
-    // El turno del día se deriva de la hora de inicio y la duración: una
-    // experiencia entra entera en un bloque o el turno está mal cargado.
-    const placed = resolveShift(s.startAt, s.durationMinutes);
+    // El turno sugerido se deriva de la hora de inicio y la duración. Es una
+    // etiqueta: un horario fuera de todo turno es válido igual.
+    const placed = suggestedShiftFor(s.startAt, s.durationMinutes);
     return {
       id: String(s._id),
       shiftKey: placed?.shift.key,

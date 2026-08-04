@@ -56,16 +56,20 @@ export const envConfig = {
   pickupInfo: process.env.PICKUP_INFO || 'en nuestro horario de atención',
   // Zona horaria del negocio: las fechas/horas de turnos se interpretan acá.
   timezone: process.env.TZ_BUSINESS || 'America/Argentina/Buenos_Aires',
-  // Minutos de limpieza/preparación entre dos usos consecutivos de una mesa.
-  // Como el bloqueo de mesas es POR TURNO, este valor se usa para validar que
-  // la separación entre turnos consecutivos alcance para limpiar.
+  // Minutos de limpieza/preparación después de CADA reserva: la mesa queda
+  // ocupada hasta endAt + este buffer antes de poder recibir al próximo grupo.
   cleaningBufferMinutes: Number.parseInt(
-    process.env.CLEANING_BUFFER_MINUTES || '20',
+    process.env.CLEANING_BUFFER_MINUTES || '10',
     10,
   ),
-  // Turnos fijos del día, en hora local del negocio. Formato:
-  // "T1|Turno 1|15:00|17:30;T2|Turno 2|17:50|20:00". La separación entre uno y
-  // otro es el tiempo de limpieza y se valida contra cleaningBufferMinutes.
+  // Ventana de reservas del día, en hora local del negocio. Ninguna reserva
+  // puede empezar antes de `open` ni terminar después de `close`.
+  businessOpen: process.env.BUSINESS_OPEN || '15:00',
+  businessClose: process.env.BUSINESS_CLOSE || '20:00',
+  // Turnos SUGERIDOS del día, en hora local del negocio. Formato:
+  // "T1|Turno 1|15:00|17:30;T2|Turno 2|17:50|20:00". Ya no son bloques
+  // rígidos: la reserva puede arrancar a cualquier hora dentro de la ventana
+  // del negocio; los turnos sólo ordenan la oferta (landing/bot los sugieren).
   shifts: process.env.SHIFTS || 'T1|Turno 1|15:00|17:30;T2|Turno 2|17:50|20:00',
   // ¿Un grupo chico (≤6) puede quedarse con una mesa grande entera cuando no
   // hay mesas de 2 ni posibilidad de compartida? Por defecto NO: las grandes se

@@ -21,20 +21,27 @@ import {
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { TablesService } from '../tables/tables.service';
 import { ShiftsService } from '../tables/shifts.service';
-import { ShiftDef, shiftAllowsExperience, startWindow } from '../tables/shifts';
+import {
+  bookingStartWindow,
+  checkBookingWindow,
+  shiftAllowsExperience,
+  startWindow,
+} from '../tables/shifts';
 
 /** Error de clave duplicada de MongoDB. */
 const DUP_KEY = 11000;
 
-/** Un bloque reservable de un día concreto. */
+const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** Un horario sugerido reservable de un día concreto. */
 export interface AvailableShift {
   dateKey: string;
-  shiftKey: string;
-  shiftName: string;
-  /** Horario del bloque en hora local, 'HH:mm'. */
-  start: string;
-  end: string;
-  /** Inicio y fin reales de la experiencia dentro del bloque. */
+  /** Hora local de inicio de la actividad, 'HH:mm'. Es la clave del horario. */
+  startTime: string;
+  /** Turno sugerido en el que cae (etiqueta, puede no haber). */
+  shiftKey?: string;
+  shiftName?: string;
+  /** Inicio y fin reales de la experiencia. */
   startAt: Date;
   endAt: Date;
   /** Grupo más grande que todavía entra (0 = sin lugar). */
@@ -44,12 +51,13 @@ export interface AvailableShift {
 }
 
 /**
- * Disponibilidad por DÍA y TURNO, sin turnos precargados.
+ * Disponibilidad por DÍA y HORARIO, sin turnos precargados.
  *
- * El equipo define los bloques del día una sola vez (ShiftTemplate) y cualquier
- * experiencia se puede reservar en cualquiera de ellos: los turnos no son de
- * una experiencia, son del salón. El `ExperienceSession` concreto se crea solo
- * la primera vez que alguien reserva ese (experiencia, día, bloque).
+ * Los turnos sugeridos (ShiftTemplate) ordenan la oferta: la landing y el bot
+ * ofrecen primero el inicio de cada turno. Pero el horario es LIBRE: cualquier
+ * hora que empiece después de la apertura y termine antes del cierre vale. El
+ * `ExperienceSession` concreto se crea solo la primera vez que alguien reserva
+ * ese (experiencia, día, hora de inicio).
  */
 @Injectable()
 export class AvailabilityService {
@@ -66,10 +74,11 @@ export class AvailabilityService {
   ) {}
 
   /**
-   * Días y turnos donde se puede reservar una experiencia, entre dos fechas.
-   * Salta los días cerrados y los bloques donde la experiencia no entra o no
-   * está habilitada. `includeFull` deja pasar los que ya no tienen lugar (para
-   * mostrarlos agotados en vez de esconderlos).
+   * Días y horarios sugeridos donde se puede reservar una experiencia, entre
+   * dos fechas. Ofrece el inicio de cada turno sugerido del día (el cliente
+   * puede pedir otra hora: se valida con el preview). Salta los días cerrados.
+   * `includeFull` deja pasar los que ya no tienen lugar (para mostrarlos
+   * agotados en vez de esconderlos).
    */
   async forExperience(params: {
     experienceId: string;
@@ -103,38 +112,52 @@ export class AvailabilityService {
       if (closed.closed) continue;
 
       for (const shift of this.shifts.forDate(dateKey)) {
-        const slot = this.slotFor(exp, dateKey, shift, tz);
-        if (!slot) continue; // la experiencia no entra en ese bloque
-        // No ofrecemos bloques que ya empezaron.
+        if (!shiftAllowsExperience(shift, String(exp._id))) continue;
+        // El horario sugerido es el inicio del turno; si la experiencia no
+        // entra en el turno pero sí en la ventana del día, se sugiere igual
+        // (el turno es una guía, no un límite).
+        if (!startWindow(shift, exp.durationMinutes)) continue;
+
+        const slot = this.slotAt(exp, dateKey, shift.start, tz);
+        if (!slot) continue; // fuera de la ventana del negocio
+        // No ofrecemos horarios que ya empezaron.
         if (DateTime.fromJSDate(slot.startAt) <= now) continue;
 
-        // Tope real del bloque: lo que permiten las mesas libres, acotado por
+        // Tope real del horario: lo que permiten las mesas libres, acotado por
         // el cupo nominal de la experiencia. Tiene que dar lo MISMO que el
         // preview del hold, o la web ofrece un grupo que después se rechaza.
-        const free = await this.tables.remainingPartySize(dateKey, shift.key);
-        const taken = await this.seatsTakenIn(exp, dateKey, shift.key);
+        const free = await this.tables.remainingPartySize(
+          slot.startAt,
+          exp.durationMinutes,
+        );
+        const taken = await this.seatsTakenIn(exp, dateKey, slot.startTime);
         const maxPartySize = Math.min(
           free,
           Math.max(0, exp.defaultCapacity - taken),
         );
         if (!maxPartySize && !params.includeFull) continue;
-        out.push({ ...slot, maxPartySize });
+        out.push({
+          ...slot,
+          shiftKey: shift.key,
+          shiftName: shift.name,
+          maxPartySize,
+        });
       }
     }
     return out;
   }
 
-  /** Anotados que ya tiene esa experiencia en ese bloque (0 si no hay turno). */
+  /** Anotados que ya tiene esa experiencia en ese horario (0 si no hay turno). */
   private async seatsTakenIn(
     exp: ExperienceDocument,
     dateKey: string,
-    shiftKey: string,
+    startKey: string,
   ): Promise<number> {
     const existing = await this.sessionModel
       .findOne({
         experienceId: exp._id as Types.ObjectId,
         dateKey,
-        shiftKey,
+        startKey,
         deletedAt: { $exists: false },
       })
       .select('seatsTaken')
@@ -143,65 +166,77 @@ export class AvailabilityService {
   }
 
   /**
-   * Dónde caería una experiencia en (día, bloque), SIN crear nada. Lo usa la
+   * Hora local de inicio a partir de lo que mande el cliente: una hora
+   * 'HH:mm' directa, o la clave de un turno sugerido ('T1') que se traduce a
+   * su hora de inicio (compatibilidad con el bot y la landing viejos).
+   */
+  resolveStartTime(dateKey: string, timeOrShift: string): string {
+    const raw = timeOrShift.trim();
+    if (HHMM.test(raw)) return raw;
+    const shift = this.shifts
+      .forDate(dateKey)
+      .find((s) => s.key === raw.toUpperCase());
+    if (shift) return shift.start;
+    throw new BadRequestException(
+      `"${timeOrShift}" no es una hora válida (HH:mm) ni un turno del día.`,
+    );
+  }
+
+  /**
+   * Dónde caería una experiencia en (día, hora), SIN crear nada. Lo usa la
    * consulta de disponibilidad: preguntar no debe escribir en la base.
    */
   async slotOrThrow(
     experienceId: string,
     dateKey: string,
-    shiftKey: string,
-  ): Promise<{ startAt: Date; durationMinutes: number; capacity: number }> {
+    timeOrShift: string,
+  ): Promise<{
+    startAt: Date;
+    startKey: string;
+    durationMinutes: number;
+    capacity: number;
+  }> {
     const exp = await this.experienceOrThrow(experienceId);
-    const shift = this.shifts
-      .forDate(dateKey)
-      .find((s) => s.key === shiftKey.toUpperCase());
-    if (!shift) {
-      throw new BadRequestException(
-        `Ese día no tiene un turno "${shiftKey}". Elegí uno de los turnos disponibles.`,
-      );
-    }
-    const slot = this.slotFor(exp, dateKey, shift, envConfig.timezone);
+    const startTime = this.resolveStartTime(dateKey, timeOrShift);
+    const slot = this.slotAt(exp, dateKey, startTime, envConfig.timezone);
     if (!slot) {
+      const w = bookingStartWindow(exp.durationMinutes);
       throw new BadRequestException(
-        `${exp.name} no entra en ${shift.name} (${shift.start}–${shift.end}).`,
+        w
+          ? `${exp.name} dura ${exp.durationMinutes} min: ese día se puede reservar entre las ${w.earliest} y las ${w.latest}.`
+          : `${exp.name} dura ${exp.durationMinutes} min y no entra en el horario del salón.`,
       );
     }
     return {
       startAt: slot.startAt,
+      startKey: slot.startTime,
       durationMinutes: exp.durationMinutes,
       capacity: exp.defaultCapacity,
     };
   }
 
   /**
-   * Turno concreto para (experiencia, día, bloque), creándolo si no existe.
-   * Idempotente: el índice único (experienceId, dateKey, shiftKey) hace que dos
-   * reservas simultáneas terminen sobre el MISMO turno en vez de duplicarlo.
+   * Turno concreto para (experiencia, día, hora), creándolo si no existe.
+   * Idempotente: el índice único (experienceId, dateKey, startKey) hace que
+   * dos reservas simultáneas terminen sobre el MISMO turno en vez de
+   * duplicarlo.
    */
   async ensureSession(
     experienceId: string,
     dateKey: string,
-    shiftKey: string,
+    timeOrShift: string,
   ): Promise<ExperienceSessionDocument> {
     const exp = await this.experienceOrThrow(experienceId);
     const tz = envConfig.timezone;
+    const startTime = this.resolveStartTime(dateKey, timeOrShift);
 
-    const shift = this.shifts
-      .forDate(dateKey)
-      .find((s) => s.key === shiftKey.toUpperCase());
-    if (!shift) {
-      throw new BadRequestException(
-        `Ese día no tiene un turno "${shiftKey}". Elegí uno de los turnos disponibles.`,
-      );
-    }
-
-    const slot = this.slotFor(exp, dateKey, shift, tz);
+    const slot = this.slotAt(exp, dateKey, startTime, tz);
     if (!slot) {
-      const w = startWindow(shift, exp.durationMinutes);
+      const w = bookingStartWindow(exp.durationMinutes);
       throw new BadRequestException(
         w
-          ? `${exp.name} no está habilitada en ${shift.name}.`
-          : `${exp.name} dura ${exp.durationMinutes} min y no entra en ${shift.name} (${shift.start}–${shift.end}).`,
+          ? `${exp.name} dura ${exp.durationMinutes} min: ese día se puede reservar entre las ${w.earliest} y las ${w.latest}.`
+          : `${exp.name} dura ${exp.durationMinutes} min y no entra en el horario del salón.`,
       );
     }
 
@@ -215,14 +250,14 @@ export class AvailabilityService {
     const filter = {
       experienceId: exp._id as Types.ObjectId,
       dateKey,
-      shiftKey: shift.key,
+      startKey: slot.startTime,
     };
 
     const existing = await this.sessionModel.findOne(filter).exec();
     if (existing) {
       if (existing.deletedAt || existing.status === SessionStatus.CANCELLED) {
         throw new ConflictException(
-          'Ese turno fue dado de baja por el equipo. Elegí otro.',
+          'Ese horario fue dado de baja por el equipo. Elegí otro.',
         );
       }
       return existing;
@@ -257,28 +292,29 @@ export class AvailabilityService {
   // ───────────────────────── helpers ─────────────────────────
 
   /**
-   * Ubica la experiencia dentro del bloque: arranca al inicio del turno (el
-   * escalonado de llegadas lo ajusta el equipo desde la agenda, no cambia la
-   * ocupación de la mesa). Devuelve null si no entra o no está habilitada.
+   * Ubica la experiencia arrancando a `startTime` ('HH:mm') dentro de la
+   * ventana del negocio. Devuelve null si empieza antes de abrir o termina
+   * después de cerrar. Los turnos sugeridos NO restringen acá.
    */
-  private slotFor(
+  private slotAt(
     exp: ExperienceDocument,
     dateKey: string,
-    shift: ShiftDef,
+    startTime: string,
     tz: string,
-  ): Omit<AvailableShift, 'maxPartySize'> | null {
-    if (!shiftAllowsExperience(shift, String(exp._id))) return null;
-    if (!startWindow(shift, exp.durationMinutes)) return null;
-
-    const startAt = DateTime.fromISO(`${dateKey}T${shift.start}`, { zone: tz });
+  ): Omit<AvailableShift, 'maxPartySize' | 'shiftKey' | 'shiftName'> | null {
+    const startAt = DateTime.fromISO(`${dateKey}T${startTime}`, { zone: tz });
     if (!startAt.isValid) return null;
+
+    const checked = checkBookingWindow(
+      startAt.toJSDate(),
+      exp.durationMinutes,
+      tz,
+    );
+    if (!checked.ok) return null;
 
     return {
       dateKey,
-      shiftKey: shift.key,
-      shiftName: shift.name,
-      start: shift.start,
-      end: shift.end,
+      startTime,
       startAt: startAt.toJSDate(),
       endAt: startAt.plus({ minutes: exp.durationMinutes }).toJSDate(),
       price: exp.basePrice,

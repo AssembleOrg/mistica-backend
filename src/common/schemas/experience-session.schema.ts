@@ -39,13 +39,18 @@ export class ExperienceSession {
   @Prop({ required: true, min: 0, max: 100, default: 50 })
   depositPct: number;
 
-  // Fecha de negocio 'YYYY-MM-DD' (hora AR) y clave del turno del día ('T1').
-  // Juntas identifican el bloque: son la clave con la que el turno se crea solo
-  // la primera vez que alguien reserva esa experiencia ese día en ese bloque.
-  // Ausentes en los turnos viejos, cargados a mano antes del modelo de turnos.
+  // Fecha de negocio 'YYYY-MM-DD' (hora AR) y hora local de inicio 'HH:mm'.
+  // Juntas identifican el horario: son la clave con la que el turno se crea
+  // solo la primera vez que alguien reserva esa experiencia ese día a esa
+  // hora. Ausentes en los turnos viejos, cargados a mano antes del modelo.
   @Prop({ trim: true })
   dateKey?: string;
 
+  @Prop({ trim: true })
+  startKey?: string;
+
+  // Clave del turno del modelo viejo ('T1'). Sólo lectura de datos legacy; el
+  // modelo por horarios libres no la escribe más.
   @Prop({ trim: true })
   shiftKey?: string;
 
@@ -96,10 +101,14 @@ ExperienceSessionSchema.index({ startAt: 1 });
 ExperienceSessionSchema.index({ status: 1 });
 ExperienceSessionSchema.index({ deletedAt: 1 });
 ExperienceSessionSchema.index({ status: 1, startAt: 1 });
-// Un único turno por (experiencia, día, bloque): es la guarda que hace que la
-// creación automática sea idempotente aunque dos personas reserven a la vez.
-// Parcial, porque los turnos viejos no tienen dateKey y colisionarían entre sí.
+// Un único turno por (experiencia, día, hora de inicio): es la guarda que
+// hace que la creación automática sea idempotente aunque dos personas
+// reserven a la vez. Parcial, porque los turnos viejos no tienen startKey y
+// colisionarían entre sí.
+// OJO: el índice viejo (experienceId, dateKey, shiftKey) hay que DROPPEARLO
+// en la base (lo hace scripts/migrate-free-times.js): con horarios libres dos
+// sesiones distintas pueden caer en el mismo turno sugerido.
 ExperienceSessionSchema.index(
-  { experienceId: 1, dateKey: 1, shiftKey: 1 },
-  { unique: true, partialFilterExpression: { dateKey: { $type: 'string' } } },
+  { experienceId: 1, dateKey: 1, startKey: 1 },
+  { unique: true, partialFilterExpression: { startKey: { $type: 'string' } } },
 );

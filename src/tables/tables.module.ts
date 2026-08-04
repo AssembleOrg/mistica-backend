@@ -3,6 +3,10 @@ import { MongooseModule } from '@nestjs/mongoose';
 import {
   DayOccupancy,
   DayOccupancySchema,
+  ExperienceSession,
+  ExperienceSessionSchema,
+  RecurringBlock,
+  RecurringBlockSchema,
   Reservation,
   ReservationSchema,
   ShiftTemplate,
@@ -13,6 +17,7 @@ import {
 import { TablesController } from './tables.controller';
 import { TablesService } from './tables.service';
 import { ShiftsService } from './shifts.service';
+import { RecurringBlocksService } from './recurring-blocks.service';
 
 @Module({
   imports: [
@@ -21,10 +26,12 @@ import { ShiftsService } from './shifts.service';
       { name: DayOccupancy.name, schema: DayOccupancySchema },
       { name: Reservation.name, schema: ReservationSchema },
       { name: ShiftTemplate.name, schema: ShiftTemplateSchema },
+      { name: ExperienceSession.name, schema: ExperienceSessionSchema },
+      { name: RecurringBlock.name, schema: RecurringBlockSchema },
     ]),
   ],
   controllers: [TablesController],
-  providers: [TablesService, ShiftsService],
-  exports: [TablesService, ShiftsService],
+  providers: [TablesService, ShiftsService, RecurringBlocksService],
+  exports: [TablesService, ShiftsService, RecurringBlocksService],
 })
 export class TablesModule {}

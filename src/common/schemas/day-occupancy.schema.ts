@@ -9,22 +9,20 @@ export type DayOccupancyDocument = DayOccupancy & Document;
  *
  * CONTROL DE CONCURRENCIA (sin transacciones, mongod standalone):
  * todas las mesas de un día viven en este único documento, así que asignar N
- * mesas a una reserva es UN `findOneAndUpdate` con guarda
- * `slots: { $not: { $elemMatch: { shift, table: { $in: codes } } } }` y un
- * `$push` de los N slots. MongoDB serializa las escrituras al mismo documento,
- * por lo que la asignación es atómica y todo-o-nada: es imposible que dos
- * reservas se queden con la misma mesa, ni que una reserva se quede con la
- * mitad de las mesas que pidió.
+ * mesas a una reserva es UN update con guarda
+ * `slots: { $not: { $elemMatch: { table: { $in: codes },
+ *   startAt: { $lt: busyUntil }, busyUntil: { $gt: startAt } } } }`
+ * y un `$push` de los N slots. MongoDB serializa las escrituras al mismo
+ * documento, por lo que la asignación es atómica y todo-o-nada: es imposible
+ * que dos reservas se queden con la misma mesa, ni que una reserva se quede
+ * con la mitad de las mesas que pidió.
  *
- * El bloqueo es POR TURNO: una mesa ocupada en T1 vuelve al pool en T2. El
- * tiempo de limpieza está en el hueco entre turnos (ver shifts.ts).
+ * El bloqueo es POR INTERVALO: la mesa queda ocupada de `startAt` a
+ * `busyUntil` (= endAt + minutos de limpieza). Dos reservas pueden usar la
+ * misma mesa el mismo día siempre que sus intervalos no se pisen.
  */
 @Schema({ _id: false })
 export class OccupancySlot {
-  // Clave del turno ('T1', 'T2').
-  @Prop({ required: true, trim: true })
-  shift: string;
-
   // Código de la mesa ocupada ('M1', 'G1').
   @Prop({ required: true, trim: true, uppercase: true })
   table: string;
@@ -39,12 +37,18 @@ export class OccupancySlot {
   @Prop({ required: true, min: 0, default: 0 })
   qty: number;
 
-  // Horario real de la actividad dentro del turno (para mostrar en la agenda).
-  @Prop({ type: Date })
-  startAt?: Date;
+  // Inicio de la actividad en la mesa.
+  @Prop({ type: Date, required: true })
+  startAt: Date;
 
-  @Prop({ type: Date })
-  endAt?: Date;
+  // Fin de la actividad (lo que ve el cliente / la agenda).
+  @Prop({ type: Date, required: true })
+  endAt: Date;
+
+  // Hasta cuándo la mesa queda tomada: endAt + limpieza. Es el borde que usa
+  // la guarda de concurrencia; la próxima reserva puede arrancar recién acá.
+  @Prop({ type: Date, required: true })
+  busyUntil: Date;
 
   // true si la mesa grande se comparte con otra reserva.
   @Prop({ type: Boolean, default: false })
@@ -53,6 +57,11 @@ export class OccupancySlot {
   // Etiqueta del bloqueo manual ('Taller mensual', 'Mesa rota').
   @Prop({ trim: true })
   label?: string;
+
+  // Clave del turno del modelo viejo ('T1'). Sólo en slots anteriores al
+  // modelo por intervalos; no se escribe más.
+  @Prop({ trim: true })
+  shift?: string;
 }
 
 export const OccupancySlotSchema = SchemaFactory.createForClass(OccupancySlot);

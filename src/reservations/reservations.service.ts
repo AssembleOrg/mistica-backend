@@ -49,7 +49,6 @@ import { SalesService } from '../sales/sales.service';
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { TablesService } from '../tables/tables.service';
 import { AvailabilityService } from './availability.service';
-import { businessDateKey } from '../tables/shifts';
 
 // Minutos que vive un hold esperando el comprobante de transferencia antes de
 // liberar el cupo y las mesas (el cliente transfiere y manda la captura por
@@ -222,6 +221,7 @@ export class ReservationsService {
     sessionId?: string;
     experienceId?: string;
     date?: string;
+    startTime?: string;
     shiftKey?: string;
   }): Promise<{
     startAt: Date;
@@ -240,22 +240,25 @@ export class ReservationsService {
       return found;
     }
 
-    if (!dto.experienceId || !dto.date || !dto.shiftKey) {
+    // `startTime` ('HH:mm') es el camino nuevo; `shiftKey` ('T1') se sigue
+    // aceptando y se traduce al inicio del turno sugerido.
+    const time = dto.startTime ?? dto.shiftKey;
+    if (!dto.experienceId || !dto.date || !time) {
       throw new BadRequestException(
-        'Indicá el turno: experienceId + date + shiftKey (o un sessionId).',
+        'Indicá el horario: experienceId + date + startTime (o un sessionId).',
       );
     }
 
     const slot = await this.availability.slotOrThrow(
       dto.experienceId,
       dto.date,
-      dto.shiftKey,
+      time,
     );
     const existing = await this.sessionModel
       .findOne({
         experienceId: new Types.ObjectId(dto.experienceId),
         dateKey: dto.date,
-        shiftKey: dto.shiftKey.toUpperCase(),
+        startKey: slot.startKey,
         deletedAt: { $exists: false },
       })
       .lean();
@@ -277,18 +280,20 @@ export class ReservationsService {
     sessionId?: string;
     experienceId?: string;
     date?: string;
+    startTime?: string;
     shiftKey?: string;
   }): Promise<string> {
     if (dto.sessionId) return dto.sessionId;
-    if (!dto.experienceId || !dto.date || !dto.shiftKey) {
+    const time = dto.startTime ?? dto.shiftKey;
+    if (!dto.experienceId || !dto.date || !time) {
       throw new BadRequestException(
-        'Indicá el turno: experienceId + date + shiftKey (o un sessionId).',
+        'Indicá el horario: experienceId + date + startTime (o un sessionId).',
       );
     }
     const session = await this.availability.ensureSession(
       dto.experienceId,
       dto.date,
-      dto.shiftKey,
+      time,
     );
     return String(session._id);
   }
@@ -303,6 +308,7 @@ export class ReservationsService {
     sessionId?: string;
     experienceId?: string;
     date?: string;
+    startTime?: string;
     shiftKey?: string;
     quantity: number;
     acceptSharedTable?: boolean;
@@ -310,14 +316,10 @@ export class ReservationsService {
     const qty = dto.quantity;
     const acceptShared = dto.acceptSharedTable ?? false;
 
-    // Igual que el hold: por turno existente o por (experiencia, día, bloque).
+    // Igual que el hold: por turno existente o por (experiencia, día, hora).
     // Acá NO se crea nada: sólo se calcula dónde caería.
     const session = await this.sessionForPreview(dto);
 
-    const placement = this.tables.placementFor(
-      session.startAt,
-      session.durationMinutes,
-    );
     const [preview, remaining, venueMax] = await Promise.all([
       this.tables.previewAssignment({
         qty,
@@ -325,7 +327,10 @@ export class ReservationsService {
         durationMinutes: session.durationMinutes,
         sharedAccepted: acceptShared,
       }),
-      this.tables.remainingPartySize(placement.dateKey, placement.shiftKey),
+      this.tables.remainingPartySize(
+        session.startAt,
+        session.durationMinutes,
+      ),
       this.tables.venueMaxParty(),
     ]);
 
@@ -337,7 +342,9 @@ export class ReservationsService {
     if (preview.fits) {
       return {
         fits: true,
-        shiftKey: preview.shiftKey,
+        // Etiqueta del turno sugerido en el que cae el horario (informativa;
+        // el bot viejo la sigue leyendo como shiftKey).
+        shiftKey: preview.suggestedShiftKey,
         tables: preview.plan.tables.map((t) => t.code),
         sharedTable: preview.plan.shared,
         maxPartySize: Math.min(remaining, seatsLeftInSession),
@@ -866,7 +873,6 @@ export class ReservationsService {
       durationMinutes: session.durationMinutes,
       sharedAccepted,
     });
-    reservation.shiftKey = assignment.shiftKey;
     reservation.tableCodes = assignment.tables.map((t) => t.code);
     reservation.sharedTable = assignment.shared;
     if (assignment.shared) reservation.sharedConsentAt = new Date();
@@ -1298,24 +1304,14 @@ export class ReservationsService {
 
     const oldSessionId = r.sessionId;
     const oldStartAt = r.startAt;
-    const oldShiftKey = r.shiftKey;
 
-    // Mesas: si el turno nuevo cae en el mismo bloque del mismo día, las mesas
-    // ya asignadas siguen sirviendo y no se tocan. Si cambia de bloque, se
-    // toman las nuevas ANTES de soltar las viejas.
-    const oldPlacement = {
-      dateKey: businessDateKey(oldStartAt),
-      shiftKey: oldShiftKey,
-    };
-    const newPlacement = this.tables.placementFor(
-      target.startAt,
-      target.durationMinutes,
-    );
-    const sameBlock =
-      oldPlacement.dateKey === newPlacement.dateKey &&
-      oldPlacement.shiftKey === newPlacement.shiftKey;
+    // Mesas: si el horario nuevo es exactamente el mismo (misma fecha y hora
+    // de inicio), las mesas ya asignadas siguen sirviendo y no se tocan. Si
+    // cambia, se toman las nuevas ANTES de soltar las viejas. Los slots llevan
+    // startAt, así que la liberación selectiva es por horario exacto.
+    const sameSlot = oldStartAt.getTime() === target.startAt.getTime();
 
-    if (!sameBlock) {
+    if (!sameSlot) {
       try {
         await this.attachTables(r, target, true);
       } catch (err) {
@@ -1335,21 +1331,21 @@ export class ReservationsService {
       r.updatedAt = now;
       await r.save();
     } catch (err) {
-      if (!sameBlock) {
+      if (!sameSlot) {
         await this.tables.release(
           r._id as Types.ObjectId,
           target.startAt,
-          newPlacement.shiftKey,
+          target.startAt,
         );
       }
       await this.releaseSeats(target._id as Types.ObjectId, r.quantity);
       throw err;
     }
-    if (!sameBlock && oldShiftKey) {
+    if (!sameSlot) {
       await this.tables.release(
         r._id as Types.ObjectId,
         oldStartAt,
-        oldShiftKey,
+        oldStartAt,
       );
     }
     await this.releaseSeats(oldSessionId, r.quantity);

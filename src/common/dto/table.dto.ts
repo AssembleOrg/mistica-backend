@@ -15,6 +15,7 @@ import {
 } from 'class-validator';
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export class DayAgendaQueryDto {
   @ApiProperty({ description: 'Fecha del día, YYYY-MM-DD (hora de Argentina)' })
@@ -44,10 +45,28 @@ export class BlockTableDto {
   @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })
   date: string;
 
-  @ApiProperty({ description: "Clave del turno ('T1', 'T2')" })
+  @ApiPropertyOptional({
+    description:
+      "Clave de turno sugerido ('T1'): compatibilidad, bloquea el rango de ese turno. Preferí start/end.",
+  })
+  @IsOptional()
   @IsString()
   @MaxLength(8)
-  shift: string;
+  shift?: string;
+
+  @ApiPropertyOptional({
+    description: "Inicio del bloqueo, 'HH:mm'. Default: apertura del salón.",
+  })
+  @IsOptional()
+  @Matches(HHMM, { message: 'start debe ser HH:mm' })
+  start?: string;
+
+  @ApiPropertyOptional({
+    description: "Fin del bloqueo, 'HH:mm'. Default: cierre del salón.",
+  })
+  @IsOptional()
+  @Matches(HHMM, { message: 'end debe ser HH:mm' })
+  end?: string;
 
   @ApiProperty({ description: "Código de la mesa ('M1', 'G1')" })
   @IsString()
@@ -62,12 +81,10 @@ export class BlockTableDto {
   label: string;
 }
 
-const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
-
 /**
- * Plantilla de turno del día, editable desde el panel. Los turnos NO son por
- * experiencia: existen solos y en un mismo turno conviven reservas de
- * experiencias distintas.
+ * Plantilla de turno SUGERIDO del día, editable desde el panel. Los turnos no
+ * son por experiencia ni restringen horarios: ordenan la oferta de la landing
+ * y el bot.
  */
 export class CreateShiftTemplateDto {
   @ApiProperty({ description: "Clave corta y estable ('T1')" })
@@ -125,4 +142,58 @@ export class CreateShiftTemplateDto {
 
 export class UpdateShiftTemplateDto extends PartialType(
   CreateShiftTemplateDto,
+) {}
+
+/**
+ * Bloqueo FIJO semanal de mesas: un motivo o experiencia (taller, colonia)
+ * que ocupa ciertas mesas todas las semanas en un día y rango horario. Baja
+ * la disponibilidad de esos días sin materializar nada en la agenda.
+ */
+export class CreateRecurringBlockDto {
+  @ApiProperty({
+    description: "Motivo o experiencia ('Taller de cerámica', 'Escuelita')",
+  })
+  @IsString()
+  @MaxLength(80)
+  label: string;
+
+  @ApiProperty({ description: 'Día ISO 1=lunes … 7=domingo' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(7)
+  weekday: number;
+
+  @ApiProperty({ description: "Inicio del bloqueo, 'HH:mm' (hora local)" })
+  @Matches(HHMM, { message: 'start debe ser HH:mm' })
+  start: string;
+
+  @ApiProperty({ description: "Fin del bloqueo, 'HH:mm' (hora local)" })
+  @Matches(HHMM, { message: 'end debe ser HH:mm' })
+  end: string;
+
+  @ApiProperty({
+    description: "Mesas que ocupa ('G1', 'M3')",
+    type: [String],
+  })
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  @MaxLength(8, { each: true })
+  tableCodes: string[];
+
+  @ApiPropertyOptional({ description: 'Notas internas' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  notes?: string;
+
+  @ApiPropertyOptional({ description: '¿Está activo?', default: true })
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
+
+export class UpdateRecurringBlockDto extends PartialType(
+  CreateRecurringBlockDto,
 ) {}
