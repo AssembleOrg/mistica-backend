@@ -53,7 +53,13 @@ export class AuthService {
         throw new UnauthorizedException('Credenciales inválidas');
       }
 
-      const payload = { email: user.email, sub: user._id.toString(), role: user.role };
+      const payload = {
+        email: user.email,
+        sub: user._id.toString(),
+        role: user.role,
+        // Whitelist de vistas del panel (vacía = acceso estándar por rol).
+        allowedViews: user.allowedViews ?? [],
+      };
       return {
         access_token: this.jwtService.sign(payload),
         user: {
@@ -61,6 +67,7 @@ export class AuthService {
           email: user.email,
           name: user.name,
           role: user.role,
+          allowedViews: user.allowedViews ?? [],
         },
       };
     } catch (error) {

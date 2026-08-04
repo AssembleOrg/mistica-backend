@@ -1,4 +1,4 @@
-import { IsString, IsEmail, IsEnum, IsOptional, IsUrl, MinLength, MaxLength, IsNotEmpty } from 'class-validator';
+import { IsArray, IsString, IsEmail, IsEnum, IsOptional, IsUrl, MinLength, MaxLength, IsNotEmpty } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from '../enums';
 
@@ -26,6 +26,17 @@ export class CreateUserDto {
   @ApiProperty({ enum: UserRole, description: 'Rol del usuario' })
   @IsEnum(UserRole, { message: 'El rol debe ser válido' })
   role: UserRole;
+
+  @ApiPropertyOptional({
+    description:
+      "Vistas del panel habilitadas ('sales', 'reservas'…). Vacío = acceso estándar según el rol.",
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  allowedViews?: string[];
 
   @ApiPropertyOptional({ description: 'Avatar del usuario' })
   @IsOptional()
@@ -59,6 +70,17 @@ export class UpdateUserDto {
   @IsOptional()
   @IsEnum(UserRole, { message: 'El rol debe ser válido' })
   role?: UserRole;
+
+  @ApiPropertyOptional({
+    description:
+      "Vistas del panel habilitadas ('sales', 'reservas'…). Vacío = acceso estándar según el rol.",
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  allowedViews?: string[];
 
   @ApiPropertyOptional({ description: 'Avatar del usuario' })
   @IsOptional()

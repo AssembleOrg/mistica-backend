@@ -24,6 +24,13 @@ export class User {
   @Prop({ trim: true })
   avatar?: string;
 
+  // Vistas del panel habilitadas para esta cuenta (claves de ruta: 'sales',
+  // 'reservas', 'clients'…). Vacío/ausente = acceso estándar según el rol.
+  // Con lista, es una whitelist: la cuenta sólo ve esas vistas. Los admin la
+  // ignoran (ven todo).
+  @Prop({ type: [String], default: undefined })
+  allowedViews?: string[];
+
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
 

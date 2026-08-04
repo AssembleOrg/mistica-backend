@@ -19,7 +19,9 @@ export interface UserResponse {
   name: string;
   role: UserRole;
   avatar: string | null;
+  /** Vistas del panel habilitadas; vacío = acceso estándar según el rol. */
+  allowedViews: string[];
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
-} 
+}

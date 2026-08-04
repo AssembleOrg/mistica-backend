@@ -22,6 +22,7 @@ export class UsersService {
       name: userObj.name,
       role: userObj.role,
       avatar: userObj.avatar,
+      allowedViews: userObj.allowedViews ?? [],
       createdAt: userObj.createdAt,
       updatedAt: userObj.updatedAt,
       deletedAt: userObj.deletedAt,
