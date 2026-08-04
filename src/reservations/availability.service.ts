@@ -100,17 +100,30 @@ export class AvailabilityService {
     if (!end.isValid) throw new BadRequestException('to inválido');
 
     const now = DateTime.now().setZone(tz);
-    const out: AvailableShift[] = [];
 
+    // Días del rango, con el chequeo de cerrado EN PARALELO: el rango típico
+    // son 14–30 días y hacerlo secuencial suma latencia al pedo.
+    const days: DateTime[] = [];
     for (
       let d = start.startOf('day');
       d <= end.startOf('day');
       d = d.plus({ days: 1 })
     ) {
-      const dateKey = d.toISODate();
-      const closed = await this.closedDates.isClosed(d.toJSDate());
-      if (closed.closed) continue;
+      days.push(d);
+    }
+    const closedFlags = await Promise.all(
+      days.map((d) => this.closedDates.isClosed(d.toJSDate())),
+    );
 
+    // Candidatos (día abierto × turno sugerido) armados en orden cronológico.
+    const candidates: Array<{
+      slot: Omit<AvailableShift, 'maxPartySize' | 'shiftKey' | 'shiftName'>;
+      shiftKey: string;
+      shiftName: string;
+    }> = [];
+    days.forEach((d, i) => {
+      if (closedFlags[i].closed) return;
+      const dateKey = d.toISODate() as string;
       for (const shift of this.shifts.forDate(dateKey)) {
         if (!shiftAllowsExperience(shift, String(exp._id))) continue;
         // El horario sugerido es el inicio del turno; si la experiencia no
@@ -122,29 +135,29 @@ export class AvailabilityService {
         if (!slot) continue; // fuera de la ventana del negocio
         // No ofrecemos horarios que ya empezaron.
         if (DateTime.fromJSDate(slot.startAt) <= now) continue;
+        candidates.push({ slot, shiftKey: shift.key, shiftName: shift.name });
+      }
+    });
 
-        // Tope real del horario: lo que permiten las mesas libres, acotado por
-        // el cupo nominal de la experiencia. Tiene que dar lo MISMO que el
-        // preview del hold, o la web ofrece un grupo que después se rechaza.
-        const free = await this.tables.remainingPartySize(
-          slot.startAt,
-          exp.durationMinutes,
-        );
-        const taken = await this.seatsTakenIn(exp, dateKey, slot.startTime);
+    // Tope real de cada horario: lo que permiten las mesas libres, acotado por
+    // el cupo nominal de la experiencia. Tiene que dar lo MISMO que el preview
+    // del hold, o la web ofrece un grupo que después se rechaza. Todo en
+    // paralelo: son lecturas independientes por (día, hora).
+    const enriched = await Promise.all(
+      candidates.map(async ({ slot, shiftKey, shiftName }) => {
+        const [free, taken] = await Promise.all([
+          this.tables.remainingPartySize(slot.startAt, exp.durationMinutes),
+          this.seatsTakenIn(exp, slot.dateKey, slot.startTime),
+        ]);
         const maxPartySize = Math.min(
           free,
           Math.max(0, exp.defaultCapacity - taken),
         );
-        if (!maxPartySize && !params.includeFull) continue;
-        out.push({
-          ...slot,
-          shiftKey: shift.key,
-          shiftName: shift.name,
-          maxPartySize,
-        });
-      }
-    }
-    return out;
+        return { ...slot, shiftKey, shiftName, maxPartySize };
+      }),
+    );
+
+    return enriched.filter((s) => s.maxPartySize > 0 || params.includeFull);
   }
 
   /** Anotados que ya tiene esa experiencia en ese horario (0 si no hay turno). */
