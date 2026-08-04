@@ -131,13 +131,13 @@ export class TablesController {
   @Post('block')
   @ApiOperation({
     summary:
-      'Bloquear una mesa en un rango horario (taller, evento, mesa rota)',
+      'Bloquear una o varias mesas en un rango horario (taller, evento, mesa rota). Todo-o-nada.',
   })
   async block(@Body() dto: BlockTableDto) {
     const range = this.blockRange(dto);
     await this.service.blockTable({
       dateKey: dto.date,
-      code: dto.code,
+      codes: dto.codes?.length ? dto.codes : dto.code ? [dto.code] : [],
       label: dto.label,
       start: range.start,
       end: range.end,
@@ -149,11 +149,14 @@ export class TablesController {
   @ApiOperation({ summary: 'Quitar un bloqueo manual de mesa' })
   async unblock(@Body() dto: BlockTableDto) {
     const range = this.blockRange(dto);
-    await this.service.unblockTable({
-      dateKey: dto.date,
-      code: dto.code,
-      start: range.start,
-    });
+    const codes = dto.codes?.length ? dto.codes : dto.code ? [dto.code] : [];
+    for (const code of codes) {
+      await this.service.unblockTable({
+        dateKey: dto.date,
+        code,
+        start: range.start,
+      });
+    }
     return { success: true };
   }
 

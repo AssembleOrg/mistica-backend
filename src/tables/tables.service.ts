@@ -926,20 +926,28 @@ export class TablesService {
   // ───────────────── Bloqueos manuales (taller, evento, mesa rota) ─────────
 
   /**
-   * Bloquea una mesa sin reserva asociada, en un rango horario del día. Sin
+   * Bloquea una o VARIAS mesas sin reserva asociada, en un rango horario del
+   * día (un cumpleaños puede ocupar la grande + dos de dos). Es todo-o-nada:
+   * si alguna mesa está tomada en ese rango, no se bloquea ninguna. Sin
    * `start`/`end` bloquea la ventana completa del negocio. Los bloqueos no
    * suman limpieza: terminan cuando terminan.
    */
   async blockTable(params: {
     dateKey: string;
-    code: string;
+    codes: string[];
     label: string;
     /** Hora local 'HH:mm'. Default: apertura. */
     start?: string;
     /** Hora local 'HH:mm'. Default: cierre. */
     end?: string;
   }): Promise<void> {
-    const { dateKey, code, label } = params;
+    const { dateKey, label } = params;
+    const codes = [
+      ...new Set(params.codes.map((c) => c.trim().toUpperCase())),
+    ].filter(Boolean);
+    if (!codes.length) {
+      throw new BadRequestException('Elegí al menos una mesa.');
+    }
     const bounds = businessBounds(dateKey);
     const startAt = params.start
       ? this.atTime(dateKey, params.start)
@@ -957,25 +965,25 @@ export class TablesService {
       endAt,
       busyUntil: endAt,
     };
-    this.assertNoRecurringClash(interval, [code]);
+    this.assertNoRecurringClash(interval, codes);
     const ok = await this.pushSlots({
       interval,
-      codes: [code],
-      slots: [
-        {
-          table: code,
-          qty: 0,
-          startAt,
-          endAt,
-          busyUntil: endAt,
-          shared: false,
-          label,
-        },
-      ],
+      codes,
+      slots: codes.map((table) => ({
+        table,
+        qty: 0,
+        startAt,
+        endAt,
+        busyUntil: endAt,
+        shared: false,
+        label,
+      })),
     });
     if (!ok) {
       throw new ConflictException(
-        `La mesa ${code} ya está ocupada en ese horario.`,
+        codes.length === 1
+          ? `La mesa ${codes[0]} ya está ocupada en ese horario.`
+          : `Alguna de esas mesas (${codes.join(', ')}) ya está ocupada en ese horario. No se bloqueó ninguna.`,
       );
     }
   }

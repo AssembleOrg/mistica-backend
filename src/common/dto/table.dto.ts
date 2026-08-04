@@ -68,10 +68,22 @@ export class BlockTableDto {
   @Matches(HHMM, { message: 'end debe ser HH:mm' })
   end?: string;
 
-  @ApiProperty({ description: "Código de la mesa ('M1', 'G1')" })
+  @ApiPropertyOptional({ description: "Código de una mesa ('M1', 'G1')" })
+  @IsOptional()
   @IsString()
   @MaxLength(8)
-  code: string;
+  code?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Varias mesas a la vez ('G1', 'M1', 'M2'): el bloqueo es todo-o-nada.",
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(8, { each: true })
+  codes?: string[];
 
   @ApiProperty({
     description: 'Motivo del bloqueo (taller, evento, mesa rota)',

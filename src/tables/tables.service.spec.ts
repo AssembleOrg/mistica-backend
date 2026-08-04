@@ -836,7 +836,7 @@ describe('TablesService · bloqueos fijos semanales', () => {
     await expect(
       service.blockTable({
         dateKey: '2026-08-01',
-        code: 'G1',
+        codes: ['G1'],
         label: 'Evento',
         start: '16:00',
         end: '18:00',
@@ -896,7 +896,7 @@ describe('TablesService · bloqueos manuales', () => {
 
     await service.blockTable({
       dateKey: '2026-08-01',
-      code: 'G1',
+      codes: ['G1'],
       label: 'Taller mensual',
     });
 
@@ -917,7 +917,7 @@ describe('TablesService · bloqueos manuales', () => {
 
     await service.blockTable({
       dateKey: '2026-08-01',
-      code: 'M1',
+      codes: ['M1'],
       label: 'Mesa rota',
       start: '16:00',
       end: '18:00',
@@ -935,7 +935,7 @@ describe('TablesService · bloqueos manuales', () => {
     await expect(
       service.blockTable({
         dateKey: '2026-08-01',
-        code: 'M1',
+        codes: ['M1'],
         label: 'Mesa rota',
         start: '18:00',
         end: '16:00',
@@ -949,7 +949,7 @@ describe('TablesService · bloqueos manuales', () => {
     await expect(
       service.blockTable({
         dateKey: '2026-08-01',
-        code: 'M1',
+        codes: ['M1'],
         label: 'Mesa rota',
       }),
     ).rejects.toThrow(/ya está ocupada/);
