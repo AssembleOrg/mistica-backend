@@ -34,6 +34,11 @@ import {
 } from '../common/schemas/experience-session.schema';
 import { Product, ProductDocument } from '../common/schemas/product.schema';
 import {
+  Experience,
+  ExperienceDocument,
+} from '../common/schemas/experience.schema';
+import { effectiveUnitPrice } from '../common/pricing';
+import {
   Reservation,
   ReservationDocument,
 } from '../common/schemas/reservation.schema';
@@ -85,6 +90,8 @@ export class ReservationsService {
     private readonly paymentModel: Model<ReservationPaymentDocument>,
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
+    @InjectModel(Experience.name)
+    private readonly experienceModel: Model<ExperienceDocument>,
     private readonly mercadopago: MercadopagoService,
     private readonly cashbox: CashboxService,
     private readonly salesService: SalesService,
@@ -143,7 +150,13 @@ export class ReservationsService {
       throw this.tableError(preview.reason);
     }
 
-    const unitPrice = session.price;
+    // Precio efectivo: el del turno, salvo que un tier por cantidad de la
+    // experiencia aplique al grupo (cumpleaños 5+/10+, etc.).
+    const unitPrice = await this.effectivePriceFor(
+      session.experienceId,
+      session.price,
+      qty,
+    );
     // Seña: en Mística se cobra el 50% al reservar; el resto queda pendiente.
     const pct = session.depositPct ?? 50;
     const { total, deposit, balanceDue } = computeReservationAmounts(
@@ -228,6 +241,9 @@ export class ReservationsService {
     durationMinutes: number;
     capacity: number;
     seatsTaken: number;
+    price?: number;
+    depositPct?: number;
+    experienceId?: Types.ObjectId | string;
   }> {
     if (dto.sessionId) {
       if (!Types.ObjectId.isValid(dto.sessionId)) {
@@ -263,11 +279,19 @@ export class ReservationsService {
       })
       .lean();
 
+    const exp = await this.experienceModel
+      .findById(dto.experienceId)
+      .select('basePrice depositPct')
+      .lean();
+
     return {
       startAt: slot.startAt,
       durationMinutes: slot.durationMinutes,
       capacity: existing?.capacity ?? slot.capacity,
       seatsTaken: existing?.seatsTaken ?? 0,
+      price: existing?.price ?? exp?.basePrice,
+      depositPct: existing?.depositPct ?? exp?.depositPct ?? 50,
+      experienceId: dto.experienceId,
     };
   }
 
@@ -340,6 +364,44 @@ export class ReservationsService {
     );
 
     if (preview.fits) {
+      // Montos calculados ACÁ (con tiers por cantidad incluidos) para que el
+      // bot y la landing muestren el mismo número que después se cobra.
+      let pricing:
+        | {
+            unitPrice: number;
+            totalAmount: number;
+            depositAmount: number;
+            balanceDue: number;
+            variantName?: string;
+            variantDescription?: string;
+          }
+        | undefined;
+      if (session.price != null) {
+        const exp = session.experienceId
+          ? await this.experienceModel
+              .findById(session.experienceId)
+              .select('priceVariants')
+              .lean()
+          : null;
+        const eff = effectiveUnitPrice(
+          exp?.priceVariants,
+          session.price,
+          qty,
+        );
+        const amounts = computeReservationAmounts(
+          eff.unitPrice,
+          qty,
+          session.depositPct ?? 50,
+        );
+        pricing = {
+          unitPrice: eff.unitPrice,
+          totalAmount: amounts.total,
+          depositAmount: amounts.deposit,
+          balanceDue: amounts.balanceDue,
+          variantName: eff.variant?.name,
+          variantDescription: eff.variant?.description,
+        };
+      }
       return {
         fits: true,
         // Etiqueta del turno sugerido en el que cae el horario (informativa;
@@ -348,6 +410,7 @@ export class ReservationsService {
         tables: preview.plan.tables.map((t) => t.code),
         sharedTable: preview.plan.shared,
         maxPartySize: Math.min(remaining, seatsLeftInSession),
+        pricing,
       };
     }
 
@@ -682,7 +745,11 @@ export class ReservationsService {
       SessionStatus.DRAFT,
     ]);
 
-    const unitPrice = session.price;
+    const unitPrice = await this.effectivePriceFor(
+      session.experienceId,
+      session.price,
+      qty,
+    );
     const total = unitPrice * qty;
     // El admin puede cobrar el total o una seña (dto.amount). El saldo es el resto.
     const amount = dto.amount ?? total;
@@ -1376,6 +1443,25 @@ export class ReservationsService {
     r.balanceDue = 0;
     await r.save();
     return this.publicView(r);
+  }
+
+  /**
+   * Precio por persona a cobrar: el del turno, salvo que un TIER por cantidad
+   * de la experiencia aplique al grupo (ver common/pricing). Best-effort: si
+   * la experiencia no aparece, vale el precio del turno.
+   */
+  private async effectivePriceFor(
+    experienceId: Types.ObjectId | string | undefined,
+    sessionPrice: number,
+    qty: number,
+  ): Promise<number> {
+    if (!experienceId) return sessionPrice;
+    const exp = await this.experienceModel
+      .findById(experienceId)
+      .select('priceVariants')
+      .lean();
+    if (!exp?.priceVariants?.length) return sessionPrice;
+    return effectiveUnitPrice(exp.priceVariants, sessionPrice, qty).unitPrice;
   }
 
   private async findByIdOrThrow(id: string): Promise<ReservationDocument> {

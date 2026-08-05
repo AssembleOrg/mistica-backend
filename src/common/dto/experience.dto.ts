@@ -1,7 +1,9 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsEnum,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -11,7 +13,58 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+
+/**
+ * Variante de precio: modalidad alternativa (escuelita mensual) o tier por
+ * cantidad (cumpleaños 5+/10+ con extras). Ver PriceVariant en el schema.
+ */
+export class PriceVariantDto {
+  @ApiProperty({ description: "Nombre visible ('Mensual', 'Grupo de 5 o más')" })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  name: string;
+
+  @ApiProperty({ description: 'Precio en ARS' })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  price: number;
+
+  @ApiProperty({
+    enum: ['PER_PERSON', 'FLAT'],
+    description: 'PER_PERSON: por persona (puede auto-aplicarse por rango). FLAT: total fijo informativo.',
+  })
+  @IsEnum(['PER_PERSON', 'FLAT'])
+  unit: 'PER_PERSON' | 'FLAT';
+
+  @ApiPropertyOptional({ description: 'Se activa desde N personas' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  minQty?: number;
+
+  @ApiPropertyOptional({ description: 'Hasta N personas' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  maxQty?: number;
+
+  @ApiPropertyOptional({ description: "Qué incluye ('torta + pieza de regalo')" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  description?: string;
+
+  @ApiPropertyOptional({ default: true })
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
 
 export class CreateExperienceDto {
   @ApiProperty({ description: 'Nombre de la experiencia' })
@@ -38,6 +91,16 @@ export class CreateExperienceDto {
   @IsString({ each: true })
   @MaxLength(40, { each: true })
   aliases?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Variantes de precio (modalidades y tiers por cantidad)',
+    type: [PriceVariantDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PriceVariantDto)
+  priceVariants?: PriceVariantDto[];
 
   @ApiProperty({ description: 'Duración en minutos', minimum: 1 })
   @IsInt()
