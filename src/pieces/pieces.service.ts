@@ -1,7 +1,13 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { PieceDocument } from '../common/schemas';
+import { PieceDocument, ReservationDocument } from '../common/schemas';
+import { ProfessorsService } from '../professors/professors.service';
 import {
   PieceStatus,
   PIECE_STATUS_LABEL,
@@ -32,22 +38,61 @@ export class PiecesService {
 
   constructor(
     @InjectModel('Piece') private readonly pieceModel: Model<PieceDocument>,
+    @InjectModel('Reservation')
+    private readonly reservationModel: Model<ReservationDocument>,
     private readonly notifications: NotificationsService,
+    private readonly professors: ProfessorsService,
   ) {}
 
+  /**
+   * Crea una pieza. Camino normal: asignada a una RESERVA, de la que salen el
+   * contacto y la experiencia (no se retipea nada). El camino manual (teléfono
+   * a mano) queda para piezas sin reserva (huérfanas, históricas).
+   */
   async create(dto: CreatePieceDto): Promise<PieceDocument> {
     const now = new Date();
     const status = dto.status ?? PieceStatus.SECADO;
+
+    let customerPhone = dto.customerPhone?.trim() ?? '';
+    let customerName = dto.customerName?.trim();
+    let experienceName = dto.experienceName?.trim();
+    let reservationCode: string | undefined;
+
+    if (dto.reservationId) {
+      const r = await this.reservationModel
+        .findOne({ _id: dto.reservationId, deletedAt: { $exists: false } })
+        .select('code customerName customerPhone experienceName')
+        .lean();
+      if (!r) throw new BadRequestException('Reserva no encontrada');
+      customerPhone = r.customerPhone ?? customerPhone;
+      customerName = customerName ?? r.customerName;
+      experienceName = experienceName ?? r.experienceName;
+      reservationCode = r.code;
+    } else if (!customerPhone) {
+      throw new BadRequestException(
+        'Asigná la pieza a una reserva o indicá el teléfono del cliente.',
+      );
+    }
+
+    const professorName = dto.professorId
+      ? await this.professors.nameOf(dto.professorId)
+      : undefined;
+
     return this.pieceModel.create({
-      customerPhone: dto.customerPhone.trim(),
-      customerName: dto.customerName?.trim(),
-      experienceName: dto.experienceName?.trim(),
+      customerPhone,
+      customerName,
+      experienceName,
       quantity: dto.quantity ?? 1,
       status,
       notes: dto.notes?.trim(),
       reservationId: dto.reservationId
         ? new Types.ObjectId(dto.reservationId)
         : undefined,
+      reservationCode,
+      professorId: dto.professorId
+        ? new Types.ObjectId(dto.professorId)
+        : undefined,
+      professorName,
       readyAt: status === PieceStatus.LISTA ? now : undefined,
       pickedUpAt: status === PieceStatus.RETIRADA ? now : undefined,
     });
@@ -58,6 +103,8 @@ export class PiecesService {
     const limit = query.limit ?? 20;
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (query.status) filter.status = query.status;
+    if (query.professorId)
+      filter.professorId = new Types.ObjectId(query.professorId);
     const term = query.search?.trim();
     if (term) {
       const rx = new RegExp(escapeRegex(term), 'i');
@@ -99,6 +146,15 @@ export class PiecesService {
     if (dto.experienceName != null)
       piece.experienceName = dto.experienceName.trim();
     if (dto.notes != null) piece.notes = dto.notes.trim();
+    if (dto.professorId !== undefined) {
+      if (dto.professorId) {
+        piece.professorName = await this.professors.nameOf(dto.professorId);
+        piece.professorId = new Types.ObjectId(dto.professorId);
+      } else {
+        piece.professorId = undefined;
+        piece.professorName = undefined;
+      }
+    }
 
     if (dto.status && dto.status !== piece.status) {
       piece.status = dto.status;

@@ -12,8 +12,9 @@ export type PieceDocument = Piece & Document;
  */
 @Schema({ timestamps: true, collection: 'pieces' })
 export class Piece {
-  // Teléfono del cliente (para el match del bot y el aviso).
-  @Prop({ required: true, trim: true })
+  // Teléfono del cliente (para el match del bot y el aviso). Sale de la
+  // reserva al asignarla; puede faltar si la reserva no tenía teléfono.
+  @Prop({ trim: true, default: '' })
   customerPhone: string;
 
   @Prop({ trim: true })
@@ -33,9 +34,22 @@ export class Piece {
   @Prop({ trim: true })
   notes?: string;
 
-  // Link opcional a la reserva de origen (si vino de una).
+  // Reserva de origen: la pieza y su proceso se asignan a una reserva (que ya
+  // tiene los datos de contacto). Opcional para piezas viejas o huérfanas.
   @Prop({ type: SchemaTypes.ObjectId, ref: 'Reservation' })
   reservationId?: Types.ObjectId;
+
+  // Código de la reserva (snapshot para mostrar sin join).
+  @Prop({ trim: true })
+  reservationCode?: string;
+
+  // Profesor asignado que sigue la pieza por el proceso del horno.
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Professor' })
+  professorId?: Types.ObjectId;
+
+  // Nombre del profesor (snapshot para mostrar sin join).
+  @Prop({ trim: true })
+  professorName?: string;
 
   // Momento en que pasó a LISTA / RETIRADA.
   @Prop({ type: Date })

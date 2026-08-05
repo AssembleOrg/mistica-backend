@@ -27,6 +27,7 @@ import { ReservationsModule } from './reservations/reservations.module';
 import { LeadsModule } from './leads/leads.module';
 import { ClosedDatesModule } from './closed-dates/closed-dates.module';
 import { PiecesModule } from './pieces/pieces.module';
+import { ProfessorsModule } from './professors/professors.module';
 import { SpaceBlocksModule } from './space-blocks/space-blocks.module';
 import { SettingsModule } from './settings/settings.module';
 import { TablesModule } from './tables/tables.module';
@@ -58,6 +59,7 @@ import { ConversationsModule } from './conversations/conversations.module';
     LeadsModule,
     ClosedDatesModule,
     PiecesModule,
+    ProfessorsModule,
     SpaceBlocksModule,
     TablesModule,
     ConversationsModule,

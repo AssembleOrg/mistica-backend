@@ -23,5 +23,6 @@ export * from './table.schema';
 export * from './day-occupancy.schema';
 export * from './shift-template.schema';
 export * from './recurring-block.schema';
+export * from './professor.schema';
 export * from './conversation.schema';
 export * from './conversation-message.schema';
