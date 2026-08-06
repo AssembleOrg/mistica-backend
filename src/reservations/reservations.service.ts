@@ -151,14 +151,17 @@ export class ReservationsService {
       throw this.tableError(preview.reason);
     }
 
-    // Precio efectivo: el del turno, salvo que una promo de la experiencia
-    // aplique (tier por cantidad, promo por día de semana o por fecha). La
-    // promo puede bonificar lugares: se cobran billableQty personas.
+    // Precio efectivo: el del turno, salvo que una promo aplique (tier por
+    // cantidad, promo por día de semana o por fecha). Si es CUMPLEAÑOS, las
+    // promos son los beneficios del doc Cumpleaños sobre el precio de la
+    // experiencia elegida. La promo puede bonificar lugares: se cobran
+    // billableQty personas.
     const { unitPrice, billableQty } = await this.effectivePriceFor(
       session.experienceId,
       session.price,
       qty,
       session.startAt,
+      dto.isBirthday,
     );
     // Seña: en Mística se cobra el 50% al reservar; el resto queda pendiente.
     const pct = session.depositPct ?? 50;
@@ -195,6 +198,7 @@ export class ReservationsService {
         idempotencyKey: dto.idempotencyKey,
         dietaryTags: dto.dietaryTags ?? [],
         dietaryNotes: dto.dietaryNotes,
+        isBirthday: dto.isBirthday ?? false,
         expiresAt,
       });
     } catch (err) {
@@ -339,6 +343,7 @@ export class ReservationsService {
     shiftKey?: string;
     quantity: number;
     acceptSharedTable?: boolean;
+    isBirthday?: boolean;
   }) {
     const qty = dto.quantity;
     const acceptShared = dto.acceptSharedTable ?? false;
@@ -382,14 +387,12 @@ export class ReservationsService {
           }
         | undefined;
       if (session.price != null) {
-        const exp = session.experienceId
-          ? await this.experienceModel
-              .findById(session.experienceId)
-              .select('priceVariants')
-              .lean()
-          : null;
+        const variants = await this.variantsFor(
+          session.experienceId,
+          dto.isBirthday,
+        );
         const eff = effectiveUnitPrice(
-          exp?.priceVariants,
+          variants,
           session.price,
           qty,
           businessDateKey(session.startAt),
@@ -758,6 +761,7 @@ export class ReservationsService {
       session.price,
       qty,
       session.startAt,
+      dto.isBirthday,
     );
     const total = unitPrice * billableQty;
     // El admin puede cobrar el total o una seña (dto.amount). El saldo es el resto.
@@ -787,6 +791,7 @@ export class ReservationsService {
         clientId: dto.clientId,
         dietaryTags: dto.dietaryTags ?? [],
         dietaryNotes: dto.dietaryNotes,
+        isBirthday: dto.isBirthday ?? false,
         notes: dto.notes,
         createdById: userId,
         confirmedAt: new Date(),
@@ -1455,28 +1460,51 @@ export class ReservationsService {
   }
 
   /**
-   * Precio a cobrar: el del turno, salvo que una PROMO de la experiencia
-   * aplique a esta reserva — tier por cantidad, promo por día de semana o
-   * por fecha (ver common/pricing). Devuelve también billableQty: la promo
-   * puede bonificar lugares ("1 lugar bonificado") y entonces se cobran
-   * menos personas de las que entran. Best-effort: si la experiencia no
-   * aparece, vale el precio del turno sin promo.
+   * Variantes de precio que rigen para una reserva. Normalmente las de la
+   * experiencia reservada; si la reserva es un CUMPLEAÑOS, las del doc
+   * Cumpleaños (isBirthday=true): sus beneficios — en general sin precio
+   * propio — se aplican sobre el precio de la experiencia elegida, y las
+   * variantes propias de la experiencia NO participan (una sola fuente de
+   * promos por reserva, predecible para el equipo).
+   */
+  private async variantsFor(
+    experienceId: Types.ObjectId | string | undefined,
+    isBirthday?: boolean,
+  ) {
+    if (isBirthday) {
+      const bday = await this.experienceModel
+        .findOne({ isBirthday: true, deletedAt: { $exists: false } })
+        .select('priceVariants')
+        .lean();
+      return bday?.priceVariants ?? [];
+    }
+    if (!experienceId) return [];
+    const exp = await this.experienceModel
+      .findById(experienceId)
+      .select('priceVariants')
+      .lean();
+    return exp?.priceVariants ?? [];
+  }
+
+  /**
+   * Precio a cobrar: el del turno, salvo que una PROMO aplique a esta
+   * reserva — tier por cantidad, promo por día de semana o por fecha (ver
+   * common/pricing y variantsFor para el caso cumpleaños). Devuelve también
+   * billableQty: la promo puede bonificar lugares ("1 lugar bonificado") y
+   * entonces se cobran menos personas de las que entran. Best-effort: si la
+   * experiencia no aparece, vale el precio del turno sin promo.
    */
   private async effectivePriceFor(
     experienceId: Types.ObjectId | string | undefined,
     sessionPrice: number,
     qty: number,
     startAt: Date,
+    isBirthday?: boolean,
   ): Promise<{ unitPrice: number; billableQty: number }> {
-    const fallback = { unitPrice: sessionPrice, billableQty: qty };
-    if (!experienceId) return fallback;
-    const exp = await this.experienceModel
-      .findById(experienceId)
-      .select('priceVariants')
-      .lean();
-    if (!exp?.priceVariants?.length) return fallback;
+    const variants = await this.variantsFor(experienceId, isBirthday);
+    if (!variants.length) return { unitPrice: sessionPrice, billableQty: qty };
     const eff = effectiveUnitPrice(
-      exp.priceVariants,
+      variants,
       sessionPrice,
       qty,
       businessDateKey(startAt),
@@ -1545,6 +1573,7 @@ export class ReservationsService {
       // no se tiene que enterar el día que la persona llega.
       dietaryTags: r.dietaryTags ?? [],
       dietaryNotes: r.dietaryNotes,
+      isBirthday: r.isBirthday ?? false,
       shiftKey: r.shiftKey,
       tableCodes: r.tableCodes ?? [],
       sharedTable: r.sharedTable ?? false,

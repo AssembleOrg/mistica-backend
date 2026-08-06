@@ -20,8 +20,10 @@ export class PriceVariant {
   name: string;
 
   // Precio en ARS. Con unit=PER_PERSON es por persona; con FLAT es un total.
-  @Prop({ required: true, min: 0 })
-  price: number;
+  // AUSENTE = beneficio puro: mantiene el precio base sobre el que aplica
+  // (los beneficios del cumpleaños rigen sobre la experiencia elegida).
+  @Prop({ min: 0 })
+  price?: number;
 
   // PER_PERSON: multiplica por la cantidad (y puede auto-aplicarse por condiciones).
   // FLAT: monto fijo de la modalidad (informativo, no se auto-aplica).
@@ -122,6 +124,17 @@ export class Experience {
   // (mensuales, eventos, escuelita, facilitadores, tienda). Default true.
   @Prop({ type: Boolean, default: true })
   bookableOnline: boolean;
+
+  /**
+   * Marca el doc "Cumpleaños": una OCASIÓN, no una experiencia reservable.
+   * No tiene precio ni duración propios — el cumpleañero elige una de las
+   * experiencias reservables y hereda su precio y duración; este doc aporta
+   * la descripción, los apodos y los BENEFICIOS (priceVariants, en general
+   * sin `price`: lugares bonificados y regalos sobre el precio heredado).
+   * Debe haber a lo sumo uno con true.
+   */
+  @Prop({ type: Boolean, default: false })
+  isBirthday: boolean;
 
   // Lugares FIJOS del salón que ocupa un turno abierto de esta experiencia,
   // independiente de los anotados (ej. la mesa grande del taller = 10: no se

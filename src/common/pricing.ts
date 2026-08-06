@@ -22,7 +22,12 @@
 
 export interface PriceVariantLike {
   name: string;
-  price: number;
+  /**
+   * Precio por persona (o total si FLAT). AUSENTE = beneficio puro: mantiene
+   * el precio base sobre el que se aplica (caso cumpleaños: los beneficios
+   * rigen sobre el precio de la experiencia elegida, sea cual sea).
+   */
+  price?: number;
   unit: 'PER_PERSON' | 'FLAT';
   minQty?: number;
   maxQty?: number;
@@ -127,10 +132,10 @@ export function effectiveUnitPrice(
     // alto (10+ sobre 5+); si sigue empatado, la más barata para el cliente.
     if ((v.minQty ?? 0) !== (best.minQty ?? 0))
       return (v.minQty ?? 0) > (best.minQty ?? 0) ? v : best;
-    return v.price < best.price ? v : best;
+    return (v.price ?? basePrice) < (best.price ?? basePrice) ? v : best;
   });
   return {
-    unitPrice: winner.price,
+    unitPrice: winner.price ?? basePrice,
     billableQty: Math.max(1, qty - Math.max(0, winner.freeSpots ?? 0)),
     variant: winner,
   };

@@ -27,11 +27,15 @@ export class PriceVariantDto {
   @MaxLength(80)
   name: string;
 
-  @ApiProperty({ description: 'Precio en ARS' })
+  @ApiPropertyOptional({
+    description:
+      'Precio en ARS. Ausente = beneficio puro: mantiene el precio base sobre el que aplica.',
+  })
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  price: number;
+  price?: number;
 
   @ApiProperty({
     enum: ['PER_PERSON', 'FLAT'],
@@ -199,6 +203,15 @@ export class CreateExperienceDto {
   @IsInt()
   @Min(0)
   venueSeats?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Marca el doc Cumpleaños (ocasión): hereda precio/duración de la experiencia elegida y aporta beneficios. A lo sumo uno.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isBirthday?: boolean;
 
   @ApiPropertyOptional({ description: 'Activa', default: true })
   @IsOptional()

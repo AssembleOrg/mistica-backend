@@ -96,6 +96,14 @@ export class Reservation {
   @Prop({ trim: true })
   dietaryNotes?: string;
 
+  /**
+   * true = la reserva es un CUMPLEAÑOS sobre la experiencia elegida: el precio
+   * se calculó con los beneficios del doc Cumpleaños (lugares bonificados,
+   * regalos) en lugar de las variantes propias de la experiencia.
+   */
+  @Prop({ type: Boolean, default: false })
+  isBirthday: boolean;
+
   // ── Mesas ──
   // Turno del día en el que cae la reserva ('T1', 'T2'). Junto con la fecha de
   // negocio identifica el bloque de ocupación de las mesas.

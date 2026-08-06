@@ -111,6 +111,15 @@ export class PreviewTablesDto {
   @IsOptional()
   @IsBoolean()
   acceptSharedTable?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Es un cumpleaños: el precio usa los beneficios del doc Cumpleaños sobre el precio de la experiencia elegida.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isBirthday?: boolean;
 }
 
 /**
@@ -216,6 +225,14 @@ export class CreateHoldDto {
   @MaxLength(500)
   dietaryNotes?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Es un cumpleaños: aplica los beneficios del doc Cumpleaños sobre el precio de la experiencia elegida.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isBirthday?: boolean;
 }
 
 /**
@@ -352,6 +369,14 @@ export class AdminCreateReservationDto {
   @MaxLength(500)
   dietaryNotes?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Es un cumpleaños: aplica los beneficios del doc Cumpleaños sobre el precio de la experiencia elegida.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isBirthday?: boolean;
 }
 
 /**

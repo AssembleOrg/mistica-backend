@@ -212,4 +212,40 @@ describe('effectiveUnitPrice', () => {
       expect(effectiveUnitPrice(v, 10, 2).billableQty).toBe(1);
     });
   });
+
+  describe('beneficios sin precio propio (cumpleaños hereda el precio)', () => {
+    // Beneficios del cumpleaños: sin `price`, así riguen sobre el precio de
+    // la experiencia elegida, sea $42.000 o $55.000.
+    const BENEFICIOS: PriceVariantLike[] = [
+      {
+        name: 'Mini torta de regalo (10 o más)',
+        unit: 'PER_PERSON',
+        minQty: 10,
+        description: 'Mini torta simbólica de regalo',
+      },
+      {
+        name: 'Martes a viernes: 1 lugar bonificado',
+        unit: 'PER_PERSON',
+        minQty: 6,
+        days: [2, 3, 4, 5],
+        freeSpots: 1,
+      },
+    ];
+
+    it('mantiene el precio base de la experiencia elegida', () => {
+      // Martes, 6 personas, experiencia de $42.000.
+      const r = effectiveUnitPrice(BENEFICIOS, 42000, 6, '2026-08-11');
+      expect(r.unitPrice).toBe(42000);
+      expect(r.billableQty).toBe(5);
+      // Misma promo sobre una experiencia más cara: hereda ese otro precio.
+      expect(effectiveUnitPrice(BENEFICIOS, 55000, 6, '2026-08-11').unitPrice).toBe(55000);
+    });
+
+    it('beneficio sin descuento: mismo precio, aparece la variante', () => {
+      const r = effectiveUnitPrice(BENEFICIOS, 42000, 10, '2026-08-16'); // domingo
+      expect(r.unitPrice).toBe(42000);
+      expect(r.billableQty).toBe(10);
+      expect(r.variant?.name).toMatch(/torta/i);
+    });
+  });
 });
