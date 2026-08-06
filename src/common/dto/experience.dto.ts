@@ -76,6 +76,16 @@ export class PriceVariantDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   dateTo?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Lugares bonificados: cuando la promo aplica se cobran (cantidad - freeSpots) personas',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  freeSpots?: number;
+
   @ApiPropertyOptional({ description: "Qué incluye ('torta + pieza de regalo')" })
   @IsOptional()
   @IsString()

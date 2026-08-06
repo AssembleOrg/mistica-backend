@@ -29,8 +29,11 @@ const ESCUELITA: PriceVariantLike[] = [
 ];
 
 describe('effectiveUnitPrice', () => {
-  it('sin variantes usa el precio base', () => {
-    expect(effectiveUnitPrice([], 10, 4)).toEqual({ unitPrice: 10 });
+  it('sin variantes usa el precio base y cobra todas las personas', () => {
+    expect(effectiveUnitPrice([], 10, 4)).toEqual({
+      unitPrice: 10,
+      billableQty: 4,
+    });
     expect(effectiveUnitPrice(undefined, 10, 4).unitPrice).toBe(10);
   });
 
@@ -155,6 +158,58 @@ describe('effectiveUnitPrice', () => {
     it('los tiers por cantidad siguen funcionando con fecha presente', () => {
       const r = effectiveUnitPrice(CUMPLE, 10, 12, '2026-08-15');
       expect(r.variant?.description).toMatch(/torta/);
+    });
+  });
+
+  describe('lugares bonificados (freeSpots)', () => {
+    // El caso real del cliente: cumpleaños martes a viernes desde 6 personas
+    // → 1 lugar bonificado; sábados desde 8 → 1 lugar bonificado.
+    const CUMPLE_REAL: PriceVariantLike[] = [
+      {
+        name: 'Semana: 1 lugar bonificado',
+        price: 10,
+        unit: 'PER_PERSON',
+        minQty: 6,
+        days: [2, 3, 4, 5],
+        freeSpots: 1,
+      },
+      {
+        name: 'Sábados: 1 lugar bonificado',
+        price: 10,
+        unit: 'PER_PERSON',
+        minQty: 8,
+        days: [6],
+        freeSpots: 1,
+      },
+    ];
+
+    it('sin promo se cobran todas las personas', () => {
+      const r = effectiveUnitPrice(CUMPLE_REAL, 10, 6, '2026-08-16'); // domingo
+      expect(r.billableQty).toBe(6);
+      expect(r.variant).toBeUndefined();
+    });
+
+    it('martes con 6: entran 6, se cobran 5', () => {
+      const r = effectiveUnitPrice(CUMPLE_REAL, 10, 6, '2026-08-11'); // martes
+      expect(r.unitPrice).toBe(10);
+      expect(r.billableQty).toBe(5);
+      expect(r.variant?.name).toMatch(/Semana/);
+    });
+
+    it('sábado exige 8: con 6 no aplica, con 8 bonifica 1', () => {
+      expect(
+        effectiveUnitPrice(CUMPLE_REAL, 10, 6, '2026-08-15').billableQty, // sábado
+      ).toBe(6);
+      const r = effectiveUnitPrice(CUMPLE_REAL, 10, 8, '2026-08-15');
+      expect(r.billableQty).toBe(7);
+      expect(r.variant?.name).toMatch(/Sábados/);
+    });
+
+    it('billableQty nunca baja de 1', () => {
+      const v: PriceVariantLike[] = [
+        { name: 'Bonif', price: 10, unit: 'PER_PERSON', minQty: 1, freeSpots: 5 },
+      ];
+      expect(effectiveUnitPrice(v, 10, 2).billableQty).toBe(1);
     });
   });
 });

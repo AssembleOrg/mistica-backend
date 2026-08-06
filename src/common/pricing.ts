@@ -32,6 +32,11 @@ export interface PriceVariantLike {
   dateFrom?: string;
   /** Última fecha en la que rige ('YYYY-MM-DD'). */
   dateTo?: string;
+  /**
+   * Lugares que NO se cobran cuando la promo aplica ("1 lugar bonificado"):
+   * el grupo entra completo pero paga por (cantidad - freeSpots) personas.
+   */
+  freeSpots?: number;
   description?: string;
   active?: boolean;
 }
@@ -39,6 +44,11 @@ export interface PriceVariantLike {
 export interface EffectivePrice {
   /** Precio por persona a cobrar. */
   unitPrice: number;
+  /**
+   * Personas que se COBRAN (cantidad menos lugares bonificados de la promo;
+   * nunca menos de 1). Sin promo, igual a la cantidad pedida.
+   */
+  billableQty: number;
   /** Variante aplicada, si alguna (para mostrarla en el resumen). */
   variant?: PriceVariantLike;
 }
@@ -108,7 +118,7 @@ export function effectiveUnitPrice(
   dateKey?: string,
 ): EffectivePrice {
   const applicable = (variants ?? []).filter((v) => matches(v, qty, dateKey));
-  if (!applicable.length) return { unitPrice: basePrice };
+  if (!applicable.length) return { unitPrice: basePrice, billableQty: qty };
   const winner = applicable.reduce((best, v) => {
     const sv = specificity(v);
     const sb = specificity(best);
@@ -119,5 +129,9 @@ export function effectiveUnitPrice(
       return (v.minQty ?? 0) > (best.minQty ?? 0) ? v : best;
     return v.price < best.price ? v : best;
   });
-  return { unitPrice: winner.price, variant: winner };
+  return {
+    unitPrice: winner.price,
+    billableQty: Math.max(1, qty - Math.max(0, winner.freeSpots ?? 0)),
+    variant: winner,
+  };
 }

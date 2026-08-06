@@ -47,6 +47,11 @@ export class PriceVariant {
   @Prop({ trim: true })
   dateTo?: string;
 
+  // Lugares que NO se cobran cuando la promo aplica ("1 lugar bonificado"):
+  // el grupo entra completo pero paga (cantidad - freeSpots) personas.
+  @Prop({ min: 0 })
+  freeSpots?: number;
+
   // Qué incluye / condiciones ('incluye velas', 'torta + pieza de regalo').
   @Prop({ trim: true })
   description?: string;

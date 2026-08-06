@@ -152,8 +152,9 @@ export class ReservationsService {
     }
 
     // Precio efectivo: el del turno, salvo que una promo de la experiencia
-    // aplique (tier por cantidad, promo por día de semana o por fecha).
-    const unitPrice = await this.effectivePriceFor(
+    // aplique (tier por cantidad, promo por día de semana o por fecha). La
+    // promo puede bonificar lugares: se cobran billableQty personas.
+    const { unitPrice, billableQty } = await this.effectivePriceFor(
       session.experienceId,
       session.price,
       qty,
@@ -163,7 +164,7 @@ export class ReservationsService {
     const pct = session.depositPct ?? 50;
     const { total, deposit, balanceDue } = computeReservationAmounts(
       unitPrice,
-      qty,
+      billableQty,
       pct,
     );
     // El único medio de pago del cliente es la TRANSFERENCIA con comprobante:
@@ -376,6 +377,8 @@ export class ReservationsService {
             balanceDue: number;
             variantName?: string;
             variantDescription?: string;
+            /** Lugares bonificados por la promo (entran pero no se cobran). */
+            freeSpots?: number;
           }
         | undefined;
       if (session.price != null) {
@@ -393,7 +396,7 @@ export class ReservationsService {
         );
         const amounts = computeReservationAmounts(
           eff.unitPrice,
-          qty,
+          eff.billableQty,
           session.depositPct ?? 50,
         );
         pricing = {
@@ -403,6 +406,8 @@ export class ReservationsService {
           balanceDue: amounts.balanceDue,
           variantName: eff.variant?.name,
           variantDescription: eff.variant?.description,
+          freeSpots:
+            eff.billableQty < qty ? qty - eff.billableQty : undefined,
         };
       }
       return {
@@ -748,13 +753,13 @@ export class ReservationsService {
       SessionStatus.DRAFT,
     ]);
 
-    const unitPrice = await this.effectivePriceFor(
+    const { unitPrice, billableQty } = await this.effectivePriceFor(
       session.experienceId,
       session.price,
       qty,
       session.startAt,
     );
-    const total = unitPrice * qty;
+    const total = unitPrice * billableQty;
     // El admin puede cobrar el total o una seña (dto.amount). El saldo es el resto.
     const amount = dto.amount ?? total;
     const balanceDue = Math.max(0, total - amount);
@@ -1450,29 +1455,33 @@ export class ReservationsService {
   }
 
   /**
-   * Precio por persona a cobrar: el del turno, salvo que una PROMO de la
-   * experiencia aplique a esta reserva — tier por cantidad, promo por día de
-   * semana o por fecha (ver common/pricing). Best-effort: si la experiencia
-   * no aparece, vale el precio del turno.
+   * Precio a cobrar: el del turno, salvo que una PROMO de la experiencia
+   * aplique a esta reserva — tier por cantidad, promo por día de semana o
+   * por fecha (ver common/pricing). Devuelve también billableQty: la promo
+   * puede bonificar lugares ("1 lugar bonificado") y entonces se cobran
+   * menos personas de las que entran. Best-effort: si la experiencia no
+   * aparece, vale el precio del turno sin promo.
    */
   private async effectivePriceFor(
     experienceId: Types.ObjectId | string | undefined,
     sessionPrice: number,
     qty: number,
     startAt: Date,
-  ): Promise<number> {
-    if (!experienceId) return sessionPrice;
+  ): Promise<{ unitPrice: number; billableQty: number }> {
+    const fallback = { unitPrice: sessionPrice, billableQty: qty };
+    if (!experienceId) return fallback;
     const exp = await this.experienceModel
       .findById(experienceId)
       .select('priceVariants')
       .lean();
-    if (!exp?.priceVariants?.length) return sessionPrice;
-    return effectiveUnitPrice(
+    if (!exp?.priceVariants?.length) return fallback;
+    const eff = effectiveUnitPrice(
       exp.priceVariants,
       sessionPrice,
       qty,
       businessDateKey(startAt),
-    ).unitPrice;
+    );
+    return { unitPrice: eff.unitPrice, billableQty: eff.billableQty };
   }
 
   private async findByIdOrThrow(id: string): Promise<ReservationDocument> {
