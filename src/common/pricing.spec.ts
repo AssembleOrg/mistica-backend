@@ -65,4 +65,96 @@ describe('effectiveUnitPrice', () => {
     const off = CUMPLE.map((v) => ({ ...v, active: false }));
     expect(effectiveUnitPrice(off, 10, 6).unitPrice).toBe(10);
   });
+
+  describe('promos por día de semana', () => {
+    // 2026-08-11 es martes (ISO 2); 2026-08-15 es sábado (ISO 6).
+    const MARTES: PriceVariantLike[] = [
+      { name: 'Promo martes', price: 7, unit: 'PER_PERSON', days: [2] },
+    ];
+
+    it('aplica el día que corresponde', () => {
+      const r = effectiveUnitPrice(MARTES, 10, 2, '2026-08-11');
+      expect(r.unitPrice).toBe(7);
+      expect(r.variant?.name).toBe('Promo martes');
+    });
+
+    it('no aplica otro día', () => {
+      expect(effectiveUnitPrice(MARTES, 10, 2, '2026-08-15').unitPrice).toBe(10);
+    });
+
+    it('sin fecha de contexto no aplica (mejor precio base que promo errada)', () => {
+      expect(effectiveUnitPrice(MARTES, 10, 2).unitPrice).toBe(10);
+    });
+  });
+
+  describe('promos por fecha', () => {
+    const FECHA: PriceVariantLike[] = [
+      {
+        name: 'Aniversario',
+        price: 5,
+        unit: 'PER_PERSON',
+        dateFrom: '2026-12-20',
+        dateTo: '2026-12-20',
+      },
+      {
+        name: 'Vacaciones de invierno',
+        price: 8,
+        unit: 'PER_PERSON',
+        dateFrom: '2026-07-15',
+        dateTo: '2026-07-31',
+      },
+    ];
+
+    it('fecha puntual aplica sólo ese día', () => {
+      expect(
+        effectiveUnitPrice(FECHA, 10, 2, '2026-12-20').variant?.name,
+      ).toBe('Aniversario');
+      expect(effectiveUnitPrice(FECHA, 10, 2, '2026-12-21').unitPrice).toBe(10);
+    });
+
+    it('rango incluye ambos extremos', () => {
+      expect(effectiveUnitPrice(FECHA, 10, 2, '2026-07-15').unitPrice).toBe(8);
+      expect(effectiveUnitPrice(FECHA, 10, 2, '2026-07-31').unitPrice).toBe(8);
+      expect(effectiveUnitPrice(FECHA, 10, 2, '2026-08-01').unitPrice).toBe(10);
+    });
+  });
+
+  describe('condiciones combinadas y especificidad', () => {
+    it('cantidad + día: exige ambas', () => {
+      const v: PriceVariantLike[] = [
+        {
+          name: 'Martes grupal',
+          price: 6,
+          unit: 'PER_PERSON',
+          minQty: 4,
+          days: [2],
+        },
+      ];
+      expect(effectiveUnitPrice(v, 10, 4, '2026-08-11').unitPrice).toBe(6);
+      expect(effectiveUnitPrice(v, 10, 3, '2026-08-11').unitPrice).toBe(10);
+      expect(effectiveUnitPrice(v, 10, 4, '2026-08-12').unitPrice).toBe(10);
+    });
+
+    it('fecha puntual le gana al día de semana y al tier por cantidad', () => {
+      const v: PriceVariantLike[] = [
+        { name: 'Tier 5+', price: 8, unit: 'PER_PERSON', minQty: 5 },
+        { name: 'Promo martes', price: 7, unit: 'PER_PERSON', days: [2] },
+        {
+          name: 'Día puntual',
+          price: 5,
+          unit: 'PER_PERSON',
+          dateFrom: '2026-08-11',
+          dateTo: '2026-08-11',
+        },
+      ];
+      const r = effectiveUnitPrice(v, 10, 6, '2026-08-11');
+      expect(r.variant?.name).toBe('Día puntual');
+      expect(r.unitPrice).toBe(5);
+    });
+
+    it('los tiers por cantidad siguen funcionando con fecha presente', () => {
+      const r = effectiveUnitPrice(CUMPLE, 10, 12, '2026-08-15');
+      expect(r.variant?.description).toMatch(/torta/);
+    });
+  });
 });

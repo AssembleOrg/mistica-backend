@@ -53,6 +53,7 @@ import { computeReservationAmounts } from './reservation-amounts';
 import { SalesService } from '../sales/sales.service';
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { TablesService } from '../tables/tables.service';
+import { businessDateKey } from '../tables/shifts';
 import { AvailabilityService } from './availability.service';
 
 // Minutos que vive un hold esperando el comprobante de transferencia antes de
@@ -150,12 +151,13 @@ export class ReservationsService {
       throw this.tableError(preview.reason);
     }
 
-    // Precio efectivo: el del turno, salvo que un tier por cantidad de la
-    // experiencia aplique al grupo (cumpleaños 5+/10+, etc.).
+    // Precio efectivo: el del turno, salvo que una promo de la experiencia
+    // aplique (tier por cantidad, promo por día de semana o por fecha).
     const unitPrice = await this.effectivePriceFor(
       session.experienceId,
       session.price,
       qty,
+      session.startAt,
     );
     // Seña: en Mística se cobra el 50% al reservar; el resto queda pendiente.
     const pct = session.depositPct ?? 50;
@@ -387,6 +389,7 @@ export class ReservationsService {
           exp?.priceVariants,
           session.price,
           qty,
+          businessDateKey(session.startAt),
         );
         const amounts = computeReservationAmounts(
           eff.unitPrice,
@@ -749,6 +752,7 @@ export class ReservationsService {
       session.experienceId,
       session.price,
       qty,
+      session.startAt,
     );
     const total = unitPrice * qty;
     // El admin puede cobrar el total o una seña (dto.amount). El saldo es el resto.
@@ -1446,14 +1450,16 @@ export class ReservationsService {
   }
 
   /**
-   * Precio por persona a cobrar: el del turno, salvo que un TIER por cantidad
-   * de la experiencia aplique al grupo (ver common/pricing). Best-effort: si
-   * la experiencia no aparece, vale el precio del turno.
+   * Precio por persona a cobrar: el del turno, salvo que una PROMO de la
+   * experiencia aplique a esta reserva — tier por cantidad, promo por día de
+   * semana o por fecha (ver common/pricing). Best-effort: si la experiencia
+   * no aparece, vale el precio del turno.
    */
   private async effectivePriceFor(
     experienceId: Types.ObjectId | string | undefined,
     sessionPrice: number,
     qty: number,
+    startAt: Date,
   ): Promise<number> {
     if (!experienceId) return sessionPrice;
     const exp = await this.experienceModel
@@ -1461,7 +1467,12 @@ export class ReservationsService {
       .select('priceVariants')
       .lean();
     if (!exp?.priceVariants?.length) return sessionPrice;
-    return effectiveUnitPrice(exp.priceVariants, sessionPrice, qty).unitPrice;
+    return effectiveUnitPrice(
+      exp.priceVariants,
+      sessionPrice,
+      qty,
+      businessDateKey(startAt),
+    ).unitPrice;
   }
 
   private async findByIdOrThrow(id: string): Promise<ReservationDocument> {

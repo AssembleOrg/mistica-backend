@@ -7,13 +7,15 @@ export type ExperienceDocument = Experience & Document;
  * Variante de precio de una experiencia. Dos usos:
  * · Modalidad alternativa (escuelita: "Por clase" $10 / "Mensual" $80):
  *   informativa, el bot la menciona; no se aplica sola.
- * · Tier por cantidad (cumpleaños: 5+ personas → $8 c/u e incluye velas;
- *   10+ → incluye torta y pieza de regalo): con unit=PER_PERSON y rango de
- *   personas, se aplica SOLA al precio de la reserva según el grupo.
+ * · Promo auto-aplicable (unit=PER_PERSON + al menos una condición): se aplica
+ *   SOLA al precio de la reserva cuando se cumplen TODAS sus condiciones:
+ *   rango de personas (cumpleaños 5+/10+ con extras), días de semana
+ *   (promo martes) y/o fecha o rango de fechas (promo del 20/12, vacaciones).
+ *   Ver common/pricing.ts para la resolución.
  */
 @Schema({ _id: false })
 export class PriceVariant {
-  // Nombre visible ('Mensual', 'Grupo de 5 o más').
+  // Nombre visible ('Mensual', 'Grupo de 5 o más', 'Promo martes').
   @Prop({ required: true, trim: true })
   name: string;
 
@@ -21,18 +23,29 @@ export class PriceVariant {
   @Prop({ required: true, min: 0 })
   price: number;
 
-  // PER_PERSON: multiplica por la cantidad (y puede auto-aplicarse por rango).
+  // PER_PERSON: multiplica por la cantidad (y puede auto-aplicarse por condiciones).
   // FLAT: monto fijo de la modalidad (informativo, no se auto-aplica).
   @Prop({ required: true, enum: ['PER_PERSON', 'FLAT'], default: 'PER_PERSON' })
   unit: 'PER_PERSON' | 'FLAT';
 
-  // Rango de personas que activa el tier (sólo PER_PERSON). Sin min/max, la
-  // variante es una modalidad informativa.
+  // Condición por cantidad de personas (sólo PER_PERSON).
   @Prop({ min: 1 })
   minQty?: number;
 
   @Prop({ min: 1 })
   maxQty?: number;
+
+  // Condición por días de semana ISO (1=lunes..7=domingo). Vacío = todos.
+  @Prop({ type: [Number], default: undefined })
+  days?: number[];
+
+  // Condición por fecha ('YYYY-MM-DD'). Sólo dateFrom=dateTo = fecha puntual;
+  // ambos distintos = rango. Sin estos campos, rige siempre.
+  @Prop({ trim: true })
+  dateFrom?: string;
+
+  @Prop({ trim: true })
+  dateTo?: string;
 
   // Qué incluye / condiciones ('incluye velas', 'torta + pieza de regalo').
   @Prop({ trim: true })

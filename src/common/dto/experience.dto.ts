@@ -54,6 +54,28 @@ export class PriceVariantDto {
   @Min(1)
   maxQty?: number;
 
+  @ApiPropertyOptional({
+    type: [Number],
+    description: 'Días de semana ISO en los que rige (1=lunes..7=domingo)',
+  })
+  @IsOptional()
+  @IsArray()
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(7, { each: true })
+  days?: number[];
+
+  @ApiPropertyOptional({ description: "Rige desde ('YYYY-MM-DD')" })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  dateFrom?: string;
+
+  @ApiPropertyOptional({ description: "Rige hasta ('YYYY-MM-DD')" })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  dateTo?: string;
+
   @ApiPropertyOptional({ description: "Qué incluye ('torta + pieza de regalo')" })
   @IsOptional()
   @IsString()
