@@ -94,10 +94,13 @@ export class AvailabilityService {
       ? DateTime.fromISO(params.from, { zone: tz })
       : DateTime.now().setZone(tz);
     if (!start.isValid) throw new BadRequestException('from inválido');
+    // Hasta 6 meses de anticipación: el cliente puede reservar bien a futuro.
     const end = params.to
       ? DateTime.fromISO(params.to, { zone: tz })
-      : start.plus({ days: Math.min(params.days ?? 30, 120) });
+      : start.plus({ days: Math.min(params.days ?? 30, 180) });
     if (!end.isValid) throw new BadRequestException('to inválido');
+    const horizon = DateTime.now().setZone(tz).plus({ days: 180 });
+    const cappedEnd = end > horizon ? horizon : end;
 
     const now = DateTime.now().setZone(tz);
 
@@ -106,7 +109,7 @@ export class AvailabilityService {
     const days: DateTime[] = [];
     for (
       let d = start.startOf('day');
-      d <= end.startOf('day');
+      d <= cappedEnd.startOf('day');
       d = d.plus({ days: 1 })
     ) {
       days.push(d);
