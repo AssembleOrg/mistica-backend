@@ -51,8 +51,12 @@ export class CashSession {
    * Sólo presente al cerrar. Calculado por el backend:
    *   openingCash + ventas en CASH (amount) - egresos en CASH (amount)
    * Las prepaid en CASH también suman acá.
+   * PUEDE SER NEGATIVO: si los egresos en efectivo del período superan lo que
+   * entró (ej. caja abierta con $0 y pago de sueldos en efectivo), el esperado
+   * da bajo cero. Un `min: 0` acá rompía el cierre (manual y automático) con
+   * ValidationError justo en esos días.
    */
-  @Prop({ min: 0 })
+  @Prop()
   expectedClosingCash?: number;
 
   /**
