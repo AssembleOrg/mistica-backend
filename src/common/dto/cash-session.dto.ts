@@ -48,6 +48,15 @@ export class RetroactiveEgressDto {
   @IsEnum(EgressType, { message: 'El tipo de egreso debe ser válido' })
   type: EgressType;
 
+  @ApiPropertyOptional({
+    description:
+      '¿Descuenta de la caja física? Default true. false = gasto externo (no altera el arqueo).',
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  affectsCashbox?: boolean;
+
   @ApiPropertyOptional({ description: 'Notas adicionales del egreso' })
   @IsOptional()
   @IsString()
@@ -130,6 +139,15 @@ export class CreateCashExpenseDto {
   @IsString({ message: 'El concepto debe ser una cadena de texto' })
   @MaxLength(200, { message: 'El concepto no puede exceder 200 caracteres' })
   concept: string;
+
+  @ApiPropertyOptional({
+    description:
+      '¿Descuenta de la caja física? Default true. false = gasto externo (banco/dueño): cuenta en finanzas pero no en el arqueo.',
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  affectsCashbox?: boolean;
 
   @ApiProperty({ description: 'Monto del egreso', minimum: 0 })
   @IsNumber({}, { message: 'El monto debe ser un número' })

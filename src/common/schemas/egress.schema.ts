@@ -30,6 +30,16 @@ export class Egress {
   @Prop({ required: true, enum: EgressStatus, default: EgressStatus.PENDING })
   status: EgressStatus;
 
+  /**
+   * ¿Descuenta de la CAJA FÍSICA? Default true. false = gasto EXTERNO: sale
+   * de otra cuenta (banco, plata del dueño), cuenta para finanzas y reportes
+   * pero NO para el arqueo de la caja (no baja el efectivo esperado ni figura
+   * entre los movimientos de la sesión). Caso real: sueldos pagados con plata
+   * que nunca estuvo en el cajón.
+   */
+  @Prop({ type: Boolean, default: true })
+  affectsCashbox: boolean;
+
   @Prop({ trim: true })
   notes?: string; // Notas adicionales
 

@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsEnum, IsOptional, MinLength, Min, IsMongoId } from 'class-validator';
+import { IsBoolean, IsString, IsNumber, IsEnum, IsOptional, MinLength, Min, IsMongoId } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Currency, EgressType, EgressStatus, PaymentMethod } from '../enums';
 
@@ -44,6 +44,15 @@ export class CreateEgressDto {
   })
   @IsEnum(EgressType)
   type: EgressType;
+
+  @ApiPropertyOptional({
+    description:
+      '¿Descuenta de la caja física? Default true. false = gasto externo (banco/dueño): cuenta en finanzas pero no en el arqueo de caja.',
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  affectsCashbox?: boolean;
 
   @ApiPropertyOptional({
     description: 'Notas adicionales sobre el egreso',

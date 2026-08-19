@@ -252,6 +252,7 @@ export class CashboxService {
       amount: dto.amount,
       paymentMethod,
       type: EgressType.EXPENSE,
+      affectsCashbox: dto.affectsCashbox ?? true,
       notes: dto.notes,
       currency: Currency.ARS,
       status: EgressStatus.PENDING,
@@ -345,7 +346,9 @@ export class CashboxService {
     ]);
     const prepaidsAmount = prepaidsAgg[0]?.amount ?? 0;
 
-    // Egresos en CASH del período
+    // Egresos en CASH del período. Los EXTERNOS (affectsCashbox=false: sueldos
+    // u otros gastos pagados con plata que no estaba en el cajón) cuentan para
+    // finanzas pero NO bajan el efectivo esperado de la caja.
     const egressesAgg = await this.egressModel.aggregate([
       {
         $match: {
@@ -353,6 +356,7 @@ export class CashboxService {
           deletedAt: { $exists: false },
           paymentMethod: PaymentMethod.CASH,
           status: { $ne: 'CANCELLED' },
+          affectsCashbox: { $ne: false },
         },
       },
       { $group: { _id: null, amount: { $sum: '$amount' } } },
@@ -591,6 +595,7 @@ export class CashboxService {
         amount: e.amount,
         paymentMethod: e.paymentMethod,
         type: e.type,
+        affectsCashbox: e.affectsCashbox ?? true,
         notes: e.notes,
         currency: Currency.ARS,
         status: EgressStatus.PENDING,
@@ -821,11 +826,14 @@ export class CashboxService {
         })
         .lean()
         .exec(),
+      // Sólo los egresos que tocan la caja: los externos (affectsCashbox=false)
+      // no son movimientos de esta sesión, viven en finanzas/egresos.
       this.egressModel
         .find({
           createdAt: { $gte: from, $lte: to },
           deletedAt: { $exists: false },
           status: { $ne: 'CANCELLED' },
+          affectsCashbox: { $ne: false },
         })
         .lean()
         .exec(),
