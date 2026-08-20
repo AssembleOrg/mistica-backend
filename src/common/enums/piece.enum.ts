@@ -28,3 +28,26 @@ export const PIECE_STATUS_LABEL: Record<PieceStatus, string> = {
   [PieceStatus.LISTA]: 'Lista para retirar',
   [PieceStatus.RETIRADA]: 'Retirada',
 };
+
+/**
+ * Config de un estado de pieza. Los estados son ADAPTABLES por el taller
+ * (app_settings 'pieceStatuses'): se pueden renombrar, reordenar o agregar
+ * (Fresco, En proceso, Horneado…). Flags:
+ * · isReady: al entrar acá se avisa por WhatsApp que está lista (una vez).
+ * · isFinal: cierra el ciclo (entregada/retirada).
+ */
+export interface PieceStatusConfig {
+  key: string;
+  label: string;
+  isReady?: boolean;
+  isFinal?: boolean;
+}
+
+// Config por defecto: el proceso actual del taller.
+export const DEFAULT_PIECE_STATUS_CONFIG: PieceStatusConfig[] =
+  PIECE_STATUS_ORDER.map((key) => ({
+    key,
+    label: PIECE_STATUS_LABEL[key],
+    isReady: key === PieceStatus.LISTA,
+    isFinal: key === PieceStatus.RETIRADA,
+  }));

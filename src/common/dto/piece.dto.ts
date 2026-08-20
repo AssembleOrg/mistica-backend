@@ -1,7 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
-  IsEnum,
+  IsArray,
+  ValidateNested,
   IsInt,
   IsMongoId,
   IsOptional,
@@ -9,7 +10,6 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { PieceStatus } from '../enums/piece.enum';
 
 export class CreatePieceDto {
   // Camino NORMAL: asignar la pieza a una reserva. El contacto (teléfono,
@@ -19,10 +19,26 @@ export class CreatePieceDto {
   @IsMongoId()
   reservationId?: string;
 
+  // Piezas de alumnos del taller: se asignan al alumno en vez de a una reserva.
+  @ApiPropertyOptional({ description: 'Alumno al que pertenece la pieza' })
+  @IsOptional()
+  @IsMongoId()
+  studentId?: string;
+
   @ApiPropertyOptional({ description: 'Profesor asignado al proceso' })
   @IsOptional()
   @IsMongoId()
   professorId?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'URLs de fotos de la pieza',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(1000, { each: true })
+  photos?: string[];
 
   // Camino manual (pieza sin reserva, ej. huérfana): datos de contacto a mano.
   @ApiPropertyOptional({ description: 'Teléfono del cliente (si no hay reserva)' })
@@ -50,10 +66,13 @@ export class CreatePieceDto {
   @Min(1)
   quantity?: number;
 
-  @ApiPropertyOptional({ enum: PieceStatus })
+  @ApiPropertyOptional({
+    description: 'Clave de estado (configurable; ver GET /pieces/statuses)',
+  })
   @IsOptional()
-  @IsEnum(PieceStatus)
-  status?: PieceStatus;
+  @IsString()
+  @MaxLength(40)
+  status?: string;
 
   @ApiPropertyOptional({ description: 'Notas internas' })
   @IsOptional()
@@ -64,10 +83,13 @@ export class CreatePieceDto {
 }
 
 export class UpdatePieceDto {
-  @ApiPropertyOptional({ enum: PieceStatus })
+  @ApiPropertyOptional({
+    description: 'Clave de estado (configurable; ver GET /pieces/statuses)',
+  })
   @IsOptional()
-  @IsEnum(PieceStatus)
-  status?: PieceStatus;
+  @IsString()
+  @MaxLength(40)
+  status?: string;
 
   @ApiPropertyOptional({ minimum: 1 })
   @IsOptional()
@@ -98,6 +120,51 @@ export class UpdatePieceDto {
   @IsOptional()
   @IsMongoId()
   professorId?: string;
+
+  @ApiPropertyOptional({ description: 'Alumno al que pertenece la pieza' })
+  @IsOptional()
+  @IsMongoId()
+  studentId?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'URLs de fotos de la pieza (reemplaza la lista)',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(1000, { each: true })
+  photos?: string[];
+}
+
+export class PieceStatusConfigDto {
+  @ApiProperty({ description: "Clave ('FRESCO', 'EN_PROCESO'…)" })
+  @IsString()
+  @MaxLength(40)
+  key: string;
+
+  @ApiProperty({ description: "Etiqueta visible ('Fresco', 'En proceso'…)" })
+  @IsString()
+  @MaxLength(60)
+  label: string;
+
+  @ApiPropertyOptional({
+    description: 'Al entrar acá se avisa al cliente que está lista (una vez)',
+  })
+  @IsOptional()
+  isReady?: boolean;
+
+  @ApiPropertyOptional({ description: 'Cierra el ciclo (entregada/retirada)' })
+  @IsOptional()
+  isFinal?: boolean;
+}
+
+export class SetPieceStatusesDto {
+  @ApiProperty({ type: [PieceStatusConfigDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PieceStatusConfigDto)
+  statuses: PieceStatusConfigDto[];
 }
 
 export class ListPiecesQueryDto {
@@ -106,10 +173,18 @@ export class ListPiecesQueryDto {
   @IsMongoId()
   professorId?: string;
 
-  @ApiPropertyOptional({ enum: PieceStatus })
+  @ApiPropertyOptional({ description: 'Filtrar por alumno' })
   @IsOptional()
-  @IsEnum(PieceStatus)
-  status?: PieceStatus;
+  @IsMongoId()
+  studentId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Clave de estado (configurable; ver GET /pieces/statuses)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  status?: string;
 
   @ApiPropertyOptional({ description: 'Busca por teléfono, nombre o experiencia' })
   @IsOptional()

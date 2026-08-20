@@ -28,8 +28,11 @@ export class Piece {
   @Prop({ required: true, min: 1, default: 1 })
   quantity: number;
 
-  @Prop({ required: true, enum: PieceStatus, default: PieceStatus.SECADO })
-  status: PieceStatus;
+  // Clave del estado. Los estados son CONFIGURABLES (app_settings
+  // 'pieceStatuses'): sin enum acá para permitir estados propios del taller
+  // (Fresco, En proceso, Horneado…). La validación vive en PiecesService.
+  @Prop({ required: true, trim: true, default: PieceStatus.SECADO })
+  status: string;
 
   @Prop({ trim: true })
   notes?: string;
@@ -50,6 +53,19 @@ export class Piece {
   // Nombre del profesor (snapshot para mostrar sin join).
   @Prop({ trim: true })
   professorName?: string;
+
+  // Alumno del taller al que pertenece la pieza (piezas de alumnos: talleres,
+  // escuelita). Convive con reservationId: una pieza es de una reserva O de
+  // un alumno (o de ninguno, piezas viejas).
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Student' })
+  studentId?: Types.ObjectId;
+
+  @Prop({ trim: true })
+  studentName?: string;
+
+  // Registro fotográfico: URLs de fotos de la pieza (evolución del trabajo).
+  @Prop({ type: [String], default: [] })
+  photos: string[];
 
   // Momento en que pasó a LISTA / RETIRADA.
   @Prop({ type: Date })

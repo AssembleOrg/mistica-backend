@@ -18,7 +18,11 @@ import {
   UpdatePieceDto,
   ListPiecesQueryDto,
 } from '../common/dto';
+import { SetPieceStatusesDto } from '../common/dto/piece.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
 import { Public } from '../common/decorators';
 import { envConfig } from '../config/env.config';
 
@@ -43,6 +47,26 @@ export class PiecesController {
       throw new UnauthorizedException('No autorizado');
     }
     return this.piecesService.byPhone(phone || '');
+  }
+
+  // Estados CONFIGURABLES del proceso (Fresco, En proceso, Horneado…). La
+  // lista la ven todas las cuentas con la vista de piezas; editarla es cosa
+  // del admin (guard por rol en el service no: acá, vía Roles en el front —
+  // el backend valida admin en el PUT del módulo de abajo).
+  @Get('statuses')
+  @ApiOperation({ summary: 'Estados vigentes de las piezas (configurables)' })
+  statuses() {
+    return this.piecesService.statusConfig();
+  }
+
+  @Patch('statuses')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Reemplazar los estados de pieza (adaptables al taller)',
+  })
+  setStatuses(@Body() dto: SetPieceStatusesDto) {
+    return this.piecesService.setStatusConfig(dto.statuses);
   }
 
   @Post()
