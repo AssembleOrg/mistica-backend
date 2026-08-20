@@ -86,5 +86,9 @@ export const envConfig = {
     bucket: process.env.DO_SPACES_BUCKET || '',
     // Ej: https://nyc3.digitaloceanspaces.com (endpoint del REGION, sin bucket).
     endpoint: process.env.DO_SPACES_ENDPOINT || '',
+    // URL pública para servir imágenes. Con CDN habilitado en el Space:
+    // https://<bucket>.<region>.cdn.digitaloceanspaces.com. Vacía = se deriva
+    // <bucket>.<endpoint> (sin CDN).
+    cdnUrl: process.env.DO_SPACES_CDN_URL || '',
   },
 };

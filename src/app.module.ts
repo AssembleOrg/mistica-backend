@@ -31,6 +31,7 @@ import { ProfessorsModule } from './professors/professors.module';
 import { GroupsModule } from './groups/groups.module';
 import { StudentsModule } from './students/students.module';
 import { StaffModule } from './staff/staff.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { SpaceBlocksModule } from './space-blocks/space-blocks.module';
 import { SettingsModule } from './settings/settings.module';
 import { TablesModule } from './tables/tables.module';
@@ -66,6 +67,7 @@ import { ConversationsModule } from './conversations/conversations.module';
     GroupsModule,
     StudentsModule,
     StaffModule,
+    UploadsModule,
     SpaceBlocksModule,
     TablesModule,
     ConversationsModule,

@@ -34,7 +34,7 @@ export class SpaceBlocksService {
     return this.model
       .find({ deletedAt: { $exists: false } })
       .sort({ kind: 1, weekday: 1, date: 1, start: 1 })
-      .lean();
+      .lean() as unknown as Promise<SpaceBlockDocument[]>;
   }
 
   async update(

@@ -20,7 +20,11 @@ import { Logger } from '@nestjs/common';
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET'),
-        signOptions: { expiresIn: configService.get<string>('JWT_EXPIRES_IN') },
+        // El tipado nuevo de @nestjs/jwt exige ms.StringValue; el env es un
+        // string libre ('7d'): cast deliberado.
+        signOptions: {
+          expiresIn: (configService.get<string>('JWT_EXPIRES_IN') ?? '7d') as never,
+        },
       }),
       inject: [ConfigService],
     }),

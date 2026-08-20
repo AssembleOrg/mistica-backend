@@ -180,7 +180,7 @@ export class EgressesService {
     console.log('Raw egresses:', JSON.stringify(egresses, null, 2));
 
     const mappedEgresses = egresses.map((egress) =>
-      this.mapToEgressResponse(egress as EgressDocument),
+      this.mapToEgressResponse(egress as unknown as EgressDocument),
     );
 
     return {
@@ -206,7 +206,7 @@ export class EgressesService {
       throw new EgressNotFoundException(id);
     }
 
-    return this.mapToEgressResponse(egress as EgressDocument);
+    return this.mapToEgressResponse(egress as unknown as EgressDocument);
   }
 
   async update(id: string, updateEgressDto: UpdateEgressDto): Promise<IEgress> {
