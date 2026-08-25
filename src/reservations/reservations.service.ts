@@ -60,7 +60,7 @@ import { AvailabilityService } from './availability.service';
 // liberar el cupo y las mesas (el cliente transfiere y manda la captura por
 // WhatsApp). 30 min: amigable — son reservas aisladas, no hay presión de cupo
 // por minuto que justifique apurar al cliente.
-const TRANSFER_HOLD_MINUTES = 30;
+const TRANSFER_HOLD_MINUTES = 90;
 
 // Política de modificaciones: se aceptan hasta 48 h antes del turno original.
 const RESCHEDULE_MIN_HOURS = 48;
