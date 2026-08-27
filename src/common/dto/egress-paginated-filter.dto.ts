@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsEnum } from 'class-validator';
+import { IsMongoId, IsOptional, IsString, IsEnum } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { PaginatedDateFilterDto } from './paginated-date-filter.dto';
@@ -14,6 +14,11 @@ export class EgressPaginatedFilterDto extends PaginatedDateFilterDto {
   @IsEnum(EgressStatus)
   @Transform(({ value }) => value)
   status?: EgressStatus;
+
+  @ApiPropertyOptional({ description: 'Filtrar por categoría' })
+  @IsOptional()
+  @IsMongoId()
+  categoryId?: string;
 
   @ApiPropertyOptional({
     description: 'Filtrar por tipo de egreso',

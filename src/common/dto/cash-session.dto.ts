@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsMongoId,
   IsNumber,
   IsOptional,
   IsString,
@@ -47,6 +48,11 @@ export class RetroactiveEgressDto {
   @ApiProperty({ description: 'Tipo de egreso', enum: EgressType })
   @IsEnum(EgressType, { message: 'El tipo de egreso debe ser válido' })
   type: EgressType;
+
+  @ApiPropertyOptional({ description: 'Categoría del gasto' })
+  @IsOptional()
+  @IsMongoId()
+  categoryId?: string;
 
   @ApiPropertyOptional({
     description:
@@ -140,6 +146,11 @@ export class CreateCashExpenseDto {
   @MaxLength(200, { message: 'El concepto no puede exceder 200 caracteres' })
   concept: string;
 
+  @ApiPropertyOptional({ description: 'Categoría del gasto' })
+  @IsOptional()
+  @IsMongoId()
+  categoryId?: string;
+
   @ApiPropertyOptional({
     description:
       '¿Descuenta de la caja física? Default true. false = gasto externo (banco/dueño): cuenta en finanzas pero no en el arqueo.',
@@ -226,6 +237,16 @@ export class CloseCashSessionDto {
   @IsNumber({}, { message: 'El conteo de cierre debe ser un número' })
   @Min(0, { message: 'El conteo de cierre debe ser mayor o igual a 0' })
   countedClosingCash: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Retiro de efectivo al cierre (opcional). Lo que queda en la caja (conteo - retiro) se sugiere como apertura de la próxima sesión.',
+    minimum: 0,
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'El retiro debe ser un número' })
+  @Min(0, { message: 'El retiro debe ser mayor o igual a 0' })
+  withdrawnAmount?: number;
 
   @ApiPropertyOptional({ description: 'Notas de cierre (justificar diferencias)' })
   @IsOptional()

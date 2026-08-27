@@ -45,6 +45,11 @@ export class CreateEgressDto {
   @IsEnum(EgressType)
   type: EgressType;
 
+  @ApiPropertyOptional({ description: 'Categoría del gasto (Sueldos, Servicios…)' })
+  @IsOptional()
+  @IsMongoId()
+  categoryId?: string;
+
   @ApiPropertyOptional({
     description:
       '¿Descuenta de la caja física? Default true. false = gasto externo (banco/dueño): cuenta en finanzas pero no en el arqueo de caja.',

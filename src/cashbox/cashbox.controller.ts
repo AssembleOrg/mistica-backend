@@ -118,6 +118,15 @@ export class CashboxController {
     return this.cashboxService.findPendingAutoClosure();
   }
 
+  @Get('last-closure')
+  @ApiOperation({
+    summary:
+      'Última sesión cerrada (para avisar al abrir con cuánto efectivo quedó la caja: conteo - retiro).',
+  })
+  async getLastClosure() {
+    return this.cashboxService.lastClosure();
+  }
+
   @Patch('transactions/:source/:id/checked')
   @ApiOperation({
     summary:

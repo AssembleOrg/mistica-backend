@@ -23,6 +23,10 @@ import {
 import type { Request } from 'express';
 import { EgressesService } from './egresses.service';
 import {
+  CreateEgressCategoryDto,
+  UpdateEgressCategoryDto,
+} from '../common/dto/egress-category.dto';
+import {
   CreateEgressDto,
   UpdateEgressDto,
   EgressPaginatedFilterDto,
@@ -58,6 +62,38 @@ export class EgressesController {
   })
   async create(@Body() createEgressDto: CreateEgressDto): Promise<IEgress> {
     return this.egressesService.create(createEgressDto);
+  }
+
+  // ── Categorías (antes de ':id' para que la ruta no se lo trague) ──
+
+  @Get('categories')
+  @ApiOperation({ summary: 'Listar categorías de egreso' })
+  async listCategories(@Query('includeInactive') includeInactive?: string) {
+    return this.egressesService.listCategories(includeInactive === 'true');
+  }
+
+  @Post('categories')
+  @Auditory({ entity: 'EgressCategory', action: 'CREATE' })
+  @ApiOperation({ summary: 'Crear categoría de egreso' })
+  async createCategory(@Body() dto: CreateEgressCategoryDto) {
+    return this.egressesService.createCategory(dto);
+  }
+
+  @Patch('categories/:id')
+  @Auditory({ entity: 'EgressCategory', action: 'UPDATE' })
+  @ApiOperation({ summary: 'Editar categoría de egreso' })
+  async updateCategory(
+    @Param('id') id: string,
+    @Body() dto: UpdateEgressCategoryDto,
+  ) {
+    return this.egressesService.updateCategory(id, dto);
+  }
+
+  @Delete('categories/:id')
+  @Auditory({ entity: 'EgressCategory', action: 'DELETE' })
+  @ApiOperation({ summary: 'Eliminar categoría (los egresos conservan el nombre)' })
+  async removeCategory(@Param('id') id: string) {
+    return this.egressesService.removeCategory(id);
   }
 
   @Get('all')

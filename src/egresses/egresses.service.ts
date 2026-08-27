@@ -16,6 +16,15 @@ import {
   InvalidEgressDataException,
 } from '../common/exceptions';
 import { Egress, EgressDocument, AuditLog, AuditLogDocument } from '../common/schemas';
+import {
+  EgressCategory,
+  EgressCategoryDocument,
+} from '../common/schemas/egress-category.schema';
+import {
+  CreateEgressCategoryDto,
+  UpdateEgressCategoryDto,
+} from '../common/dto/egress-category.dto';
+import { Types } from 'mongoose';
 import { EgressStatus } from '../common/enums';
 import { buildDateFilter } from '../common/utils';
 import { SettingsService } from '../settings/settings.service';
@@ -42,6 +51,8 @@ export class EgressesService {
     private readonly egressModel: Model<EgressDocument>,
     @InjectModel(AuditLog.name)
     private readonly auditLogModel: Model<AuditLogDocument>,
+    @InjectModel(EgressCategory.name)
+    private readonly categoryModel: Model<EgressCategoryDocument>,
     private readonly settingsService: SettingsService,
     private readonly cashboxService: CashboxService,
   ) {}
@@ -59,6 +70,9 @@ export class EgressesService {
       status: egressObj.status,
       notes: egressObj.notes,
       paymentMethod: egressObj.paymentMethod,
+      affectsCashbox: egressObj.affectsCashbox,
+      categoryId: egressObj.categoryId?.toString(),
+      categoryName: egressObj.categoryName,
       authorizedBy: egressObj.authorizedBy,
       userId: egressObj.userId,
       createdAt: egressObj.createdAt,
@@ -89,6 +103,82 @@ export class EgressesService {
     return `${prefix}-${sequence.toString().padStart(3, '0')}`;
   }
 
+  // ── Categorías de egreso ──────────────────────────────────────────────────
+
+  /** Categorías básicas que se crean solas la primera vez (editables después). */
+  private static readonly DEFAULT_CATEGORIES: Array<{
+    name: string;
+    color: string;
+  }> = [
+    { name: 'Sueldos', color: '#455a54' },
+    { name: 'Servicios', color: '#5a7d9a' },
+    { name: 'Impuestos', color: '#8a6d9a' },
+    { name: 'Gastos del día', color: '#9d684e' },
+    { name: 'Gastos de cocina', color: '#c2803d' },
+    { name: 'Taller', color: '#6d8f5a' },
+  ];
+
+  async listCategories(includeInactive = false) {
+    // Bootstrap: si nunca se cargó ninguna, sembramos las básicas.
+    const total = await this.categoryModel.countDocuments({});
+    if (total === 0) {
+      await this.categoryModel.insertMany(EgressesService.DEFAULT_CATEGORIES);
+    }
+    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+    if (!includeInactive) filter.isActive = true;
+    return this.categoryModel.find(filter).sort({ name: 1 }).lean();
+  }
+
+  async createCategory(dto: CreateEgressCategoryDto) {
+    return this.categoryModel.create({
+      name: dto.name,
+      color: dto.color,
+      isActive: dto.isActive ?? true,
+    });
+  }
+
+  async updateCategory(id: string, dto: UpdateEgressCategoryDto) {
+    const cat = await this.findCategoryOrThrow(id);
+    if (dto.name !== undefined) cat.name = dto.name;
+    if (dto.color !== undefined) cat.color = dto.color;
+    if (dto.isActive !== undefined) cat.isActive = dto.isActive;
+    cat.updatedAt = new Date();
+    await cat.save();
+    return cat;
+  }
+
+  async removeCategory(id: string) {
+    const cat = await this.findCategoryOrThrow(id);
+    cat.deletedAt = new Date();
+    cat.isActive = false;
+    await cat.save();
+    // Los egresos existentes conservan su snapshot de nombre.
+    return { success: true };
+  }
+
+  private async findCategoryOrThrow(
+    id: string,
+  ): Promise<EgressCategoryDocument> {
+    if (!Types.ObjectId.isValid(id))
+      throw new InvalidEgressDataException('categoryId inválido');
+    const cat = await this.categoryModel.findById(id).exec();
+    if (!cat || cat.deletedAt)
+      throw new InvalidEgressDataException('Categoría no encontrada');
+    return cat;
+  }
+
+  /** Nombre de la categoría para el snapshot, o undefined si no vino. */
+  async categorySnapshot(
+    categoryId?: string,
+  ): Promise<{ categoryId?: Types.ObjectId; categoryName?: string }> {
+    if (!categoryId) return {};
+    const cat = await this.findCategoryOrThrow(categoryId);
+    return {
+      categoryId: cat._id as Types.ObjectId,
+      categoryName: cat.name,
+    };
+  }
+
   async create(createEgressDto: CreateEgressDto): Promise<IEgress> {
     const egressNumber = await this.generateEgressNumber();
 
@@ -97,9 +187,11 @@ export class EgressesService {
       throw new InvalidEgressDataException('El monto debe ser mayor que 0');
     }
 
-    // Create the egress
+    // Create the egress (con snapshot de la categoría, si vino)
+    const catSnap = await this.categorySnapshot(createEgressDto.categoryId);
     const createdEgress = new this.egressModel({
       ...createEgressDto,
+      ...catSnap,
       egressNumber,
       status: EgressStatus.PENDING,
     });
@@ -146,6 +238,10 @@ export class EgressesService {
     // Status filter
     if (status) {
       filter.status = status;
+    }
+
+    if (filterDto.categoryId) {
+      filter.categoryId = new Types.ObjectId(filterDto.categoryId);
     }
 
     // Type filter
@@ -237,6 +333,18 @@ export class EgressesService {
         ([, value]) => value !== undefined,
       ),
     );
+    // La categoría entra con snapshot del nombre (string vacío = quitarla).
+    if (updateEgressDto.categoryId !== undefined) {
+      delete definedFields.categoryId;
+      if (updateEgressDto.categoryId) {
+        const snap = await this.categorySnapshot(updateEgressDto.categoryId);
+        egress.categoryId = snap.categoryId;
+        egress.categoryName = snap.categoryName;
+      } else {
+        egress.categoryId = undefined;
+        egress.categoryName = undefined;
+      }
+    }
     Object.assign(egress, definedFields);
     egress.updatedAt = new Date();
 

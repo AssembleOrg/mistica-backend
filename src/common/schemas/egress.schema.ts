@@ -40,6 +40,14 @@ export class Egress {
   @Prop({ type: Boolean, default: true })
   affectsCashbox: boolean;
 
+  // Categoría del gasto (Sueldos, Servicios, Impuestos…) + snapshot del
+  // nombre para listar sin join y conservar la historia ante renombres.
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'EgressCategory' })
+  categoryId?: Types.ObjectId;
+
+  @Prop({ trim: true })
+  categoryName?: string;
+
   @Prop({ trim: true })
   notes?: string; // Notas adicionales
 

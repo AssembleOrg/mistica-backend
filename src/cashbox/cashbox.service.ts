@@ -9,6 +9,7 @@ import {
   EgressDocument,
   CashIncomeDocument,
 } from '../common/schemas';
+import { EgressCategoryDocument } from '../common/schemas/egress-category.schema';
 import {
   CloseCashSessionDto,
   CreateCashExpenseDto,
@@ -67,6 +68,10 @@ export interface CashSessionResponse {
   closingNotes?: string;
   openedByUserId?: string;
   closedByUserId?: string;
+  /** Retiro de efectivo hecho al cerrar (opcional). */
+  withdrawnAmount?: number;
+  /** Lo que quedó físicamente en la caja tras el cierre (conteo - retiro). */
+  leftInBox?: number;
   editHistory: CashSessionEditEntry[];
 }
 
@@ -79,7 +84,21 @@ export class CashboxService {
     @InjectModel('Prepaid') private readonly prepaidModel: Model<PrepaidDocument>,
     @InjectModel('Egress') private readonly egressModel: Model<EgressDocument>,
     @InjectModel('CashIncome') private readonly cashIncomeModel: Model<CashIncomeDocument>,
+    @InjectModel('EgressCategory')
+    private readonly egressCategoryModel: Model<EgressCategoryDocument>,
   ) { }
+
+  /** Snapshot {categoryId, categoryName} para un egreso (o {} si no vino). */
+  private async categorySnap(categoryId?: string) {
+    if (!categoryId) return {};
+    const cat = await this.egressCategoryModel
+      .findOne({ _id: categoryId, deletedAt: { $exists: false } })
+      .lean();
+    if (!cat) {
+      throw new BadRequestException('Categoría de egreso no encontrada');
+    }
+    return { categoryId: cat._id, categoryName: cat.name };
+  }
 
   private mapToResponse(s: CashSessionDocument): CashSessionResponse {
     const obj = s.toObject ? s.toObject() : (s as any);
@@ -97,6 +116,11 @@ export class CashboxService {
       closingNotes: obj.closingNotes,
       openedByUserId: obj.openedByUserId?.toString(),
       closedByUserId: obj.closedByUserId?.toString(),
+      withdrawnAmount: obj.withdrawnAmount,
+      leftInBox:
+        obj.countedClosingCash != null
+          ? Math.max(0, obj.countedClosingCash - (obj.withdrawnAmount ?? 0))
+          : undefined,
       editHistory: (obj.editHistory ?? []).map((e: any) => ({
         editedAt: e.editedAt,
         editedByUserId: e.editedByUserId?.toString(),
@@ -253,6 +277,7 @@ export class CashboxService {
       paymentMethod,
       type: EgressType.EXPENSE,
       affectsCashbox: dto.affectsCashbox ?? true,
+      ...(await this.categorySnap(dto.categoryId)),
       notes: dto.notes,
       currency: Currency.ARS,
       status: EgressStatus.PENDING,
@@ -452,12 +477,19 @@ export class CashboxService {
       closedAt,
     );
     const discrepancy = Number((dto.countedClosingCash - expected).toFixed(2));
+    const withdrawn = dto.withdrawnAmount ?? 0;
+    if (withdrawn > dto.countedClosingCash) {
+      throw new BadRequestException(
+        'El retiro no puede superar el efectivo contado en la caja.',
+      );
+    }
 
     open.status = 'CLOSED';
     open.closedAt = closedAt;
     open.countedClosingCash = dto.countedClosingCash;
     open.expectedClosingCash = expected;
     open.discrepancy = discrepancy;
+    open.withdrawnAmount = withdrawn > 0 ? withdrawn : undefined;
     open.closingNotes = dto.notes;
     open.closedByUserId = userId ? (userId as any) : undefined;
     await open.save();
@@ -596,6 +628,7 @@ export class CashboxService {
         paymentMethod: e.paymentMethod,
         type: e.type,
         affectsCashbox: e.affectsCashbox ?? true,
+        ...(await this.categorySnap(e.categoryId)),
         notes: e.notes,
         currency: Currency.ARS,
         status: EgressStatus.PENDING,
@@ -986,6 +1019,19 @@ export class CashboxService {
     return { sessionId, transactions: txns };
   }
 
+  /**
+   * Última sesión CERRADA: el frontend la usa al ABRIR la caja para avisar
+   * con cuánto efectivo debería arrancar (lo que quedó en el cajón tras el
+   * retiro del cierre anterior).
+   */
+  async lastClosure(): Promise<CashSessionResponse | null> {
+    const s = await this.cashSessionModel
+      .findOne({ status: 'CLOSED' })
+      .sort({ closedAt: -1 })
+      .exec();
+    return s ? this.mapToResponse(s) : null;
+  }
+
   async findPendingAutoClosure(): Promise<CashSessionResponse | null> {
     const s = await this.cashSessionModel.findOne({ closureType: 'AUTO' }).sort({ openedAt: -1 }).exec();
     return s ? this.mapToResponse(s) : null;
@@ -1022,8 +1068,15 @@ export class CashboxService {
     if (session.closureType !== 'AUTO') throw new BadRequestException('Solo se pueden ajustar cajas con cierre automático');
 
     const discrepancy = Number((dto.countedClosingCash - session.expectedClosingCash!).toFixed(2));
+    const withdrawn = dto.withdrawnAmount ?? 0;
+    if (withdrawn > dto.countedClosingCash) {
+      throw new BadRequestException(
+        'El retiro no puede superar el efectivo contado en la caja.',
+      );
+    }
     session.countedClosingCash = dto.countedClosingCash;
     session.discrepancy = discrepancy;
+    session.withdrawnAmount = withdrawn > 0 ? withdrawn : undefined;
     session.closedByUserId = userId as any;
     session.closingNotes = dto.notes ? dto.notes : 'Arqueado en diferido';
     session.closureType = 'MANUAL';

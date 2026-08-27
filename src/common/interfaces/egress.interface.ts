@@ -8,6 +8,9 @@ export interface IEgress {
   amount: number;
   currency: Currency;
   type: EgressType;
+  affectsCashbox?: boolean;
+  categoryId?: string;
+  categoryName?: string;
   paymentMethod: PaymentMethod;
   status: EgressStatus;
   notes?: string;

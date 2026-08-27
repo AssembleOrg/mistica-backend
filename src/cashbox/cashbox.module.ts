@@ -16,6 +16,11 @@ import {
 } from '../common/schemas';
 import { CashboxCronService } from './cashbox.cron';
 
+import {
+  EgressCategory,
+  EgressCategorySchema,
+} from '../common/schemas/egress-category.schema';
+
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -24,6 +29,7 @@ import { CashboxCronService } from './cashbox.cron';
       { name: Prepaid.name, schema: PrepaidSchema },
       { name: Egress.name, schema: EgressSchema },
       { name: CashIncome.name, schema: CashIncomeSchema },
+      { name: EgressCategory.name, schema: EgressCategorySchema },
     ]),
   ],
   controllers: [CashboxController],

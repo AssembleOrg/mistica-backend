@@ -67,6 +67,15 @@ export class CashSession {
   @Prop()
   discrepancy?: number;
 
+  /**
+   * Retiro de efectivo hecho AL CERRAR (opcional): plata que se saca de la
+   * caja (a la cuenta, al banco, etc.). Lo que queda físicamente en el cajón
+   * (countedClosingCash - withdrawnAmount) se sugiere como apertura de la
+   * próxima sesión.
+   */
+  @Prop({ min: 0 })
+  withdrawnAmount?: number;
+
   @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   openedByUserId?: Types.ObjectId;
 
