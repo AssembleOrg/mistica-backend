@@ -85,6 +85,7 @@ export interface FinanceSummary {
     expectedClosingCash: number | null;
     countedClosingCash: number | null;
     discrepancy: number | null;
+    withdrawnAmount: number | null;
     status: 'OPEN' | 'CLOSED';
     closureType: 'MANUAL' | 'AUTO';
     wasEdited: boolean;
@@ -318,6 +319,7 @@ export class FinanceService {
         expectedClosingCash: s.expectedClosingCash ?? null,
         countedClosingCash: s.countedClosingCash ?? null,
         discrepancy: s.discrepancy ?? null,
+        withdrawnAmount: s.withdrawnAmount ?? null,
         status: s.status,
         closureType: s.closureType ?? 'MANUAL',
         wasEdited: (s.editHistory?.length ?? 0) > 0,
