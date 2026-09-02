@@ -7,6 +7,7 @@ import {
 } from '../common/schemas/professor.schema';
 import { GroupsController } from './groups.controller';
 import { GroupsService } from './groups.service';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 @Module({
   imports: [
@@ -16,7 +17,7 @@ import { GroupsService } from './groups.service';
     ]),
   ],
   controllers: [GroupsController],
-  providers: [GroupsService],
+  providers: [GroupsService, AllowedViewsGuard],
   exports: [GroupsService],
 })
 export class GroupsModule {}

@@ -19,6 +19,8 @@ import {
   UpdateStudentPaymentDto,
 } from '../common/dto/student.dto';
 import { Roles } from '../common/decorators/roles.decorator';
+import { AllowedViews } from '../common/decorators';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 import { UserRole } from '../common/enums/user-role.enum';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -35,15 +37,16 @@ interface AuthRequest extends Request {
  */
 @ApiTags('Alumnos')
 @Controller('students')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard, RolesGuard)
 @ApiBearerAuth()
+@AllowedViews('alumnos')
 export class StudentsController {
   constructor(private readonly service: StudentsService) {}
 
   @Get()
   @ApiOperation({ summary: 'Listar alumnos' })
-  list(@Query('includeInactive') includeInactive?: string) {
-    return this.service.list(includeInactive === 'true');
+  list(@Query('includeInactive') includeInactive: string | undefined, @Req() req: AuthRequest) {
+    return this.service.list(req.user, includeInactive === 'true');
   }
 
   @Get('payment-alerts')
@@ -59,8 +62,8 @@ export class StudentsController {
   @ApiOperation({
     summary: 'Ficha PRÁCTICA (grupos, asistencia, piezas; sin plata)',
   })
-  practical(@Param('id') id: string) {
-    return this.service.practicalProfile(id);
+  practical(@Param('id') id: string, @Req() req: AuthRequest) {
+    return this.service.practicalProfile(id, req.user);
   }
 
   @Get(':id/admin')
@@ -130,7 +133,7 @@ export class StudentsController {
     summary: 'Guardar la asistencia de un grupo para un día (upsert)',
   })
   saveAttendance(@Body() dto: SaveAttendanceDto, @Req() req: AuthRequest) {
-    return this.service.saveAttendance(dto, req.user?.id);
+    return this.service.saveAttendance(dto, req.user);
   }
 
   @Get('attendance/of-group/:groupId')
@@ -138,7 +141,8 @@ export class StudentsController {
   attendanceOfGroup(
     @Param('groupId') groupId: string,
     @Query('limit') limit?: string,
+    @Req() req?: AuthRequest,
   ) {
-    return this.service.attendanceOfGroup(groupId, limit ? Number(limit) : 30);
+    return this.service.attendanceOfGroup(groupId, limit ? Number(limit) : 30, req?.user);
   }
 }

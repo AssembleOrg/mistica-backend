@@ -18,6 +18,8 @@ import {
   UpdateStaffTaskDto,
 } from '../common/dto/staff.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { AllowedViews } from '../common/decorators';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 import { StaffService } from './staff.service';
 
 interface AuthRequest extends Request {
@@ -30,8 +32,9 @@ interface AuthRequest extends Request {
  */
 @ApiTags('Equipo')
 @Controller('staff')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
 @ApiBearerAuth()
+@AllowedViews('equipo')
 export class StaffController {
   constructor(private readonly service: StaffService) {}
 

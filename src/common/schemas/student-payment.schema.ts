@@ -44,6 +44,13 @@ export class StudentPayment {
   @Prop({ type: Date })
   deletedAt?: Date;
 
+  // Recordatorios internos idempotentes (al equipo, no al alumno).
+  @Prop({ type: Date })
+  dueReminderSentAt?: Date;
+
+  @Prop({ type: Date })
+  overdueReminderSentAt?: Date;
+
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
 

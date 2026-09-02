@@ -52,7 +52,9 @@ export class GroupsService {
     // Un profesor ve sólo sus grupos; el admin (o cuentas de gestión) ve todos.
     if (!this.isAdmin(actor)) {
       const prof = await this.professorOf(actor);
-      if (prof) filter.professorId = prof._id;
+      // Una cuenta sin profesor asociado no puede ver los grupos de otros.
+      if (!prof) return [];
+      filter.professorId = prof._id;
     }
     return this.groupModel.find(filter).sort({ name: 1 }).lean();
   }
@@ -124,13 +126,19 @@ export class GroupsService {
   }
 
   /** Grupos en los que cursa un alumno (para su ficha). */
-  async groupsOfStudent(studentId: string) {
+  async groupsOfStudent(studentId: string, actor?: Actor) {
     if (!Types.ObjectId.isValid(studentId)) return [];
+    const filter: Record<string, unknown> = {
+      studentIds: new Types.ObjectId(studentId),
+      deletedAt: { $exists: false },
+    };
+    if (!this.isAdmin(actor)) {
+      const prof = await this.professorOf(actor);
+      if (!prof) return [];
+      filter.professorId = prof._id;
+    }
     return this.groupModel
-      .find({
-        studentIds: new Types.ObjectId(studentId),
-        deletedAt: { $exists: false },
-      })
+      .find(filter)
       .sort({ name: 1 })
       .lean();
   }

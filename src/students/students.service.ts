@@ -1,10 +1,12 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { Cron } from '@nestjs/schedule';
 import { Student, StudentDocument } from '../common/schemas/student.schema';
 import {
   StudentPayment,
@@ -16,6 +18,16 @@ import {
 } from '../common/schemas/attendance.schema';
 import { Group, GroupDocument } from '../common/schemas/group.schema';
 import { Piece, PieceDocument } from '../common/schemas/piece.schema';
+import {
+  Professor,
+  ProfessorDocument,
+} from '../common/schemas/professor.schema';
+import { UserRole } from '../common/enums/user-role.enum';
+import {
+  StudentRegularityEvent,
+  StudentRegularityEventDocument,
+} from '../common/schemas/student-regularity-event.schema';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   CreateStudentDto,
   CreateStudentPaymentDto,
@@ -42,14 +54,41 @@ export class StudentsService {
     private readonly groupModel: Model<GroupDocument>,
     @InjectModel(Piece.name)
     private readonly pieceModel: Model<PieceDocument>,
+    @InjectModel(Professor.name)
+    private readonly professorModel: Model<ProfessorDocument>,
+    @InjectModel(StudentRegularityEvent.name)
+    private readonly regularityEventModel: Model<StudentRegularityEventDocument>,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // ── Alumnos ──────────────────────────────────────────────────────────────
 
-  async list(includeInactive = false) {
+  async list(
+    actor?: { id?: string; role?: string },
+    includeInactive = false,
+  ) {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (!includeInactive) filter.isActive = true;
-    return this.studentModel.find(filter).sort({ name: 1 }).lean();
+    if (actor?.role === UserRole.ADMIN) {
+      return this.studentModel.find(filter).sort({ name: 1 }).lean();
+    }
+
+    const professor = await this.professorOf(actor);
+    if (!professor) return [];
+    const groupRows = await this.groupModel
+      .find({ professorId: professor._id, deletedAt: { $exists: false } })
+      .select('studentIds')
+      .lean();
+    const ids = [
+      ...new Set(groupRows.flatMap((group) => group.studentIds.map(String))),
+    ];
+    if (!ids.length) return [];
+    // El listado de profesor no incluye datos personales/administrativos.
+    return this.studentModel
+      .find({ ...filter, _id: { $in: ids } })
+      .select('name isActive createdAt updatedAt')
+      .sort({ name: 1 })
+      .lean();
   }
 
   async create(dto: CreateStudentDto) {
@@ -86,9 +125,10 @@ export class StudentsService {
    * que cursa (con días y horarios), últimas asistencias (incluye si está
    * recuperando) y sus piezas con estado y fotos. Sin datos de plata.
    */
-  async practicalProfile(id: string) {
+  async practicalProfile(id: string, actor?: { id?: string; role?: string }) {
     const student = await this.findOrThrow(id);
     const sid = student._id as Types.ObjectId;
+    await this.assertCanReadPractical(sid, actor);
     const [groups, recentAttendance, pieces] = await Promise.all([
       this.groupModel
         .find({ studentIds: sid, deletedAt: { $exists: false } })
@@ -128,7 +168,10 @@ export class StudentsService {
   async adminProfile(id: string) {
     const student = await this.findOrThrow(id);
     const sid = student._id as Types.ObjectId;
-    const [groups, payments] = await Promise.all([
+    // Crea el primer punto de la línea de tiempo al observar al alumno, sin
+    // intentar inventar cómo estaba antes de que existiera este módulo.
+    await this.recordRegularity(sid, 'DAILY_CHECK');
+    const [groups, payments, regularityHistory] = await Promise.all([
       this.groupModel
         .find({ studentIds: sid, deletedAt: { $exists: false } })
         .sort({ name: 1 })
@@ -136,6 +179,11 @@ export class StudentsService {
       this.paymentModel
         .find({ studentId: sid, deletedAt: { $exists: false } })
         .sort({ createdAt: -1 })
+        .lean(),
+      this.regularityEventModel
+        .find({ studentId: sid })
+        .sort({ createdAt: -1 })
+        .limit(30)
         .lean(),
     ]);
     const now = new Date();
@@ -152,6 +200,7 @@ export class StudentsService {
         overdueCount: overdue.length,
         overdueAmount: overdue.reduce((a, p) => a + (p.amount || 0), 0),
       },
+      regularityHistory,
     };
   }
 
@@ -163,7 +212,7 @@ export class StudentsService {
     userId?: string,
   ) {
     const student = await this.findOrThrow(studentId);
-    return this.paymentModel.create({
+    const payment = await this.paymentModel.create({
       studentId: student._id,
       concept: dto.concept,
       amount: dto.amount,
@@ -178,6 +227,8 @@ export class StudentsService {
       notes: dto.notes,
       createdById: userId && Types.ObjectId.isValid(userId) ? userId : undefined,
     });
+    await this.recordRegularity(student._id as Types.ObjectId, 'PAYMENT_CREATED');
+    return payment;
   }
 
   async updatePayment(paymentId: string, dto: UpdateStudentPaymentDto) {
@@ -196,6 +247,7 @@ export class StudentsService {
     if (dto.status === 'PAID' && !payment.paidAt) payment.paidAt = new Date();
     payment.updatedAt = new Date();
     await payment.save();
+    await this.recordRegularity(payment.studentId, 'PAYMENT_UPDATED');
     return payment;
   }
 
@@ -207,6 +259,7 @@ export class StudentsService {
       throw new NotFoundException('Pago no encontrado');
     payment.deletedAt = new Date();
     await payment.save();
+    await this.recordRegularity(payment.studentId, 'PAYMENT_REMOVED');
     return { success: true };
   }
 
@@ -246,9 +299,13 @@ export class StudentsService {
   // ── Asistencia ───────────────────────────────────────────────────────────
 
   /** Crea o reemplaza la asistencia de un grupo para un día (upsert). */
-  async saveAttendance(dto: SaveAttendanceDto, userId?: string) {
+  async saveAttendance(
+    dto: SaveAttendanceDto,
+    actor?: { id?: string; role?: string },
+  ) {
     if (!Types.ObjectId.isValid(dto.groupId))
       throw new BadRequestException('groupId inválido');
+    await this.assertCanManageGroup(new Types.ObjectId(dto.groupId), actor);
     const records = dto.records.map((r) => ({
       studentId: new Types.ObjectId(r.studentId),
       status: r.status,
@@ -260,7 +317,7 @@ export class StudentsService {
         $set: {
           records,
           takenById:
-            userId && Types.ObjectId.isValid(userId) ? userId : undefined,
+            actor?.id && Types.ObjectId.isValid(actor.id) ? actor.id : undefined,
           updatedAt: new Date(),
         },
         $setOnInsert: { createdAt: new Date() },
@@ -269,9 +326,14 @@ export class StudentsService {
     );
   }
 
-  async attendanceOfGroup(groupId: string, limit = 30) {
+  async attendanceOfGroup(
+    groupId: string,
+    limit = 30,
+    actor?: { id?: string; role?: string },
+  ) {
     if (!Types.ObjectId.isValid(groupId))
       throw new BadRequestException('groupId inválido');
+    await this.assertCanReadGroup(new Types.ObjectId(groupId), actor);
     return this.attendanceModel
       .find({ groupId: new Types.ObjectId(groupId) })
       .sort({ dateKey: -1 })
@@ -286,5 +348,107 @@ export class StudentsService {
     if (!student || student.deletedAt)
       throw new NotFoundException('Alumno no encontrado');
     return student;
+  }
+
+  /** Guarda sólo cambios de estado, sin inventar una historia previa. */
+  private async recordRegularity(
+    studentId: Types.ObjectId,
+    source: StudentRegularityEvent['source'],
+  ) {
+    const now = new Date();
+    const overdue = await this.paymentModel
+      .find({ studentId, status: 'PENDING', deletedAt: { $exists: false }, dueDate: { $lt: now } })
+      .select('amount')
+      .lean();
+    const next = {
+      status: overdue.length ? ('OVERDUE' as const) : ('UP_TO_DATE' as const),
+      overdueCount: overdue.length,
+      overdueAmount: overdue.reduce((sum, item) => sum + (item.amount || 0), 0),
+    };
+    const previous = await this.regularityEventModel
+      .findOne({ studentId })
+      .sort({ createdAt: -1 })
+      .lean();
+    if (
+      previous &&
+      previous.status === next.status &&
+      previous.overdueCount === next.overdueCount &&
+      previous.overdueAmount === next.overdueAmount
+    ) return;
+    await this.regularityEventModel.create({ studentId, ...next, source });
+  }
+
+  /** Recalcula vencimientos y avisa una vez al equipo: a 3 días y al vencer. */
+  @Cron('5 9 * * *', { timeZone: 'America/Argentina/Buenos_Aires' })
+  async dailyPaymentFollowUp() {
+    const now = new Date();
+    const inThreeDays = new Date(now);
+    inThreeDays.setDate(inThreeDays.getDate() + 3);
+    const [dueSoon, overdue] = await Promise.all([
+      this.paymentModel.find({ status: 'PENDING', deletedAt: { $exists: false }, dueDate: { $gte: now, $lte: inThreeDays }, dueReminderSentAt: { $exists: false } }),
+      this.paymentModel.find({ status: 'PENDING', deletedAt: { $exists: false }, dueDate: { $lt: now }, overdueReminderSentAt: { $exists: false } }),
+    ]);
+    const pending = [...dueSoon, ...overdue];
+    if (!pending.length) return;
+    const students = await this.studentModel.find({ _id: { $in: pending.map((p) => p.studentId) } }).select('name').lean();
+    const names = new Map(students.map((student) => [String(student._id), student.name]));
+    const lines = pending.map((payment) => `• ${names.get(String(payment.studentId)) ?? 'Alumno'}: ${payment.concept}`);
+    const studentIds = [...new Set(pending.map((payment) => String(payment.studentId)))];
+    for (const id of studentIds) {
+      await this.recordRegularity(new Types.ObjectId(id), 'DAILY_CHECK');
+    }
+    const delivered = await this.notifications.notifyTeam(
+      `Recordatorio administrativo de cuotas:\n${lines.join('\n')}`,
+    );
+    if (!delivered) return;
+    await Promise.all([
+      ...dueSoon.map((payment) => this.paymentModel.updateOne({ _id: payment._id }, { $set: { dueReminderSentAt: new Date() } })),
+      ...overdue.map((payment) => this.paymentModel.updateOne({ _id: payment._id }, { $set: { overdueReminderSentAt: new Date() } })),
+    ]);
+  }
+
+  private async professorOf(actor?: { id?: string }): Promise<ProfessorDocument | null> {
+    if (!actor?.id || !Types.ObjectId.isValid(actor.id)) return null;
+    return this.professorModel
+      .findOne({ userId: actor.id, deletedAt: { $exists: false } })
+      .exec();
+  }
+
+  private async assertCanReadPractical(
+    studentId: Types.ObjectId,
+    actor?: { id?: string; role?: string },
+  ) {
+    if (actor?.role === UserRole.ADMIN) return;
+    const professor = await this.professorOf(actor);
+    if (!professor) {
+      throw new ForbiddenException('Tu cuenta no está vinculada a un profesor.');
+    }
+    const belongs = await this.groupModel.exists({
+      professorId: professor._id,
+      studentIds: studentId,
+      deletedAt: { $exists: false },
+    });
+    if (!belongs) throw new ForbiddenException('Sólo podés consultar alumnos de tus grupos.');
+  }
+
+  private async assertCanReadGroup(
+    groupId: Types.ObjectId,
+    actor?: { id?: string; role?: string },
+  ) {
+    if (actor?.role === UserRole.ADMIN) return;
+    const professor = await this.professorOf(actor);
+    const owns = professor && (await this.groupModel.exists({
+      _id: groupId,
+      professorId: professor._id,
+      deletedAt: { $exists: false },
+    }));
+    if (!owns) throw new ForbiddenException('Sólo podés consultar tus propios grupos.');
+  }
+
+  private async assertCanManageGroup(
+    groupId: Types.ObjectId,
+    actor?: { id?: string; role?: string },
+  ) {
+    return this.assertCanReadGroup(groupId, actor);
   }
 }

@@ -13,6 +13,7 @@ import {
   AppSettingSchema,
 } from '../common/schemas/app-setting.schema';
 import { ProfessorsModule } from '../professors/professors.module';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 @Module({
   imports: [
@@ -25,7 +26,7 @@ import { ProfessorsModule } from '../professors/professors.module';
     ProfessorsModule,
   ],
   controllers: [PiecesController],
-  providers: [PiecesService],
+  providers: [PiecesService, AllowedViewsGuard],
   exports: [PiecesService],
 })
 export class PiecesModule {}

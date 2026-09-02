@@ -14,6 +14,8 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CreateGroupDto, UpdateGroupDto } from '../common/dto/group.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { GroupsService, Actor } from './groups.service';
+import { AllowedViews } from '../common/decorators';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 interface AuthRequest extends Request {
   user?: Actor;
@@ -25,8 +27,9 @@ interface AuthRequest extends Request {
  */
 @ApiTags('Grupos')
 @Controller('groups')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
 @ApiBearerAuth()
+@AllowedViews('alumnos')
 export class GroupsController {
   constructor(private readonly service: GroupsService) {}
 
@@ -41,8 +44,8 @@ export class GroupsController {
 
   @Get('of-student/:studentId')
   @ApiOperation({ summary: 'Grupos en los que cursa un alumno' })
-  ofStudent(@Param('studentId') studentId: string) {
-    return this.service.groupsOfStudent(studentId);
+  ofStudent(@Param('studentId') studentId: string, @Req() req: AuthRequest) {
+    return this.service.groupsOfStudent(studentId, req.user);
   }
 
   @Post()

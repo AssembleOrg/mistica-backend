@@ -11,6 +11,7 @@ import {
 import { User, UserSchema } from '../common/schemas/user.schema';
 import { StaffController } from './staff.controller';
 import { StaffService } from './staff.service';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import { StaffService } from './staff.service';
     ]),
   ],
   controllers: [StaffController],
-  providers: [StaffService],
+  providers: [StaffService, AllowedViewsGuard],
   exports: [StaffService],
 })
 export class StaffModule {}

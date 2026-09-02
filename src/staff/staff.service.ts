@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { Cron } from '@nestjs/schedule';
 import {
   StaffTask,
   StaffTaskDocument,
@@ -20,6 +21,7 @@ import {
   UpdateShoppingItemDto,
   UpdateStaffTaskDto,
 } from '../common/dto/staff.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /**
  * Herramientas internas del equipo: TAREAS asignables a integrantes del
@@ -35,6 +37,7 @@ export class StaffService {
     private readonly shoppingModel: Model<ShoppingItemDocument>,
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // ── Tareas ───────────────────────────────────────────────────────────────
@@ -61,7 +64,14 @@ export class StaffService {
       data.assigneeUserId = user._id;
       data.assigneeName = user.name ?? user.email;
     }
-    return this.taskModel.create(data);
+    const task = await this.taskModel.create(data);
+    // Aviso interno best-effort: la tarea sigue creada aunque WhatsApp no esté
+    // configurado. El destinatario es el equipo porque las cuentas no guardan
+    // teléfono de trabajo individual.
+    await this.notifications.notifyTeam(
+      `Nueva tarea interna: ${task.title}${task.assigneeName ? ` · asignada a ${task.assigneeName}` : ''}`,
+    );
+    return task;
   }
 
   async updateTask(id: string, dto: UpdateStaffTaskDto) {
@@ -170,5 +180,29 @@ export class StaffService {
     if (!item || item.deletedAt)
       throw new NotFoundException('Ítem no encontrado');
     return item;
+  }
+
+  @Cron('10 9 * * *', { timeZone: 'America/Argentina/Buenos_Aires' })
+  async dailyTaskFollowUp() {
+    const now = new Date();
+    const endOfToday = new Date(now);
+    endOfToday.setHours(23, 59, 59, 999);
+    const tasks = await this.taskModel.find({
+      status: 'PENDING',
+      deletedAt: { $exists: false },
+      dueDate: { $lte: endOfToday },
+      dueReminderSentAt: { $exists: false },
+    });
+    if (!tasks.length) return;
+    const delivered = await this.notifications.notifyTeam(
+      `Tareas que requieren atención:\n${tasks
+        .map((task) => `• ${task.title}${task.assigneeName ? ` · ${task.assigneeName}` : ''}`)
+        .join('\n')}`,
+    );
+    if (!delivered) return;
+    await this.taskModel.updateMany(
+      { _id: { $in: tasks.map((task) => task._id) } },
+      { $set: { dueReminderSentAt: new Date() } },
+    );
   }
 }

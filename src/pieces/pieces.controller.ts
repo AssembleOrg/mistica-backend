@@ -24,12 +24,15 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { Public } from '../common/decorators';
+import { AllowedViews } from '../common/decorators';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 import { envConfig } from '../config/env.config';
 
 @ApiTags('Piezas')
 @Controller('pieces')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
 @ApiBearerAuth()
+@AllowedViews('reservas:piezas')
 export class PiecesController {
   constructor(private readonly piecesService: PiecesService) {}
 
@@ -37,6 +40,7 @@ export class PiecesController {
   // secreto compartido bot↔backend. Va ANTES de las rutas admin.
   @Get('by-phone')
   @Public()
+  @AllowedViews()
   @ApiOperation({ summary: 'Piezas del cliente por teléfono (interno del bot)' })
   async byPhone(
     @Query('phone') phone: string,
@@ -88,6 +92,8 @@ export class PiecesController {
   }
 
   @Delete(':id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Eliminar (soft) una pieza (admin)' })
   remove(@Param('id') id: string) {
     return this.piecesService.remove(id);
