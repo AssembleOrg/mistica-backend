@@ -22,6 +22,7 @@ import {
   UpdateStaffTaskDto,
 } from '../common/dto/staff.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { InAppNotificationsService } from '../in-app-notifications/in-app-notifications.service';
 
 /**
  * Herramientas internas del equipo: TAREAS asignables a integrantes del
@@ -38,6 +39,7 @@ export class StaffService {
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
     private readonly notifications: NotificationsService,
+    private readonly inAppNotifications: InAppNotificationsService,
   ) {}
 
   // ── Tareas ───────────────────────────────────────────────────────────────
@@ -194,12 +196,15 @@ export class StaffService {
       dueReminderSentAt: { $exists: false },
     });
     if (!tasks.length) return;
-    const delivered = await this.notifications.notifyTeam(
-      `Tareas que requieren atención:\n${tasks
-        .map((task) => `• ${task.title}${task.assigneeName ? ` · ${task.assigneeName}` : ''}`)
-        .join('\n')}`,
-    );
-    if (!delivered) return;
+    const body = tasks
+      .map((task) => `• ${task.title}${task.assigneeName ? ` · ${task.assigneeName}` : ''}`)
+      .join('\n');
+    await this.inAppNotifications.create({
+      type: 'TASK_DUE',
+      title: `Tareas que requieren atención (${tasks.length})`,
+      body,
+    });
+    await this.notifications.notifyTeam(`Tareas que requieren atención:\n${body}`);
     await this.taskModel.updateMany(
       { _id: { $in: tasks.map((task) => task._id) } },
       { $set: { dueReminderSentAt: new Date() } },

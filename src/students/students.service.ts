@@ -28,6 +28,7 @@ import {
   StudentRegularityEventDocument,
 } from '../common/schemas/student-regularity-event.schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { InAppNotificationsService } from '../in-app-notifications/in-app-notifications.service';
 import {
   CreateStudentDto,
   CreateStudentPaymentDto,
@@ -59,6 +60,7 @@ export class StudentsService {
     @InjectModel(StudentRegularityEvent.name)
     private readonly regularityEventModel: Model<StudentRegularityEventDocument>,
     private readonly notifications: NotificationsService,
+    private readonly inAppNotifications: InAppNotificationsService,
   ) {}
 
   // ── Alumnos ──────────────────────────────────────────────────────────────
@@ -397,10 +399,16 @@ export class StudentsService {
     for (const id of studentIds) {
       await this.recordRegularity(new Types.ObjectId(id), 'DAILY_CHECK');
     }
-    const delivered = await this.notifications.notifyTeam(
+    // El aviso en sistema es la fuente de verdad: no depende de WhatsApp ni
+    // de que haya una cuenta conectada en ese momento (queda persistido).
+    await this.inAppNotifications.create({
+      type: 'PAYMENT_DUE',
+      title: `Cuotas para revisar (${pending.length})`,
+      body: lines.join('\n'),
+    });
+    await this.notifications.notifyTeam(
       `Recordatorio administrativo de cuotas:\n${lines.join('\n')}`,
     );
-    if (!delivered) return;
     await Promise.all([
       ...dueSoon.map((payment) => this.paymentModel.updateOne({ _id: payment._id }, { $set: { dueReminderSentAt: new Date() } })),
       ...overdue.map((payment) => this.paymentModel.updateOne({ _id: payment._id }, { $set: { overdueReminderSentAt: new Date() } })),

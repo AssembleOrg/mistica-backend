@@ -17,15 +17,14 @@ export class AuthService {
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
-    this.logger.log('Validating user', email);
-    this.logger.log('Password', password, 'length', password.length, 'type', typeof password);
+    this.logger.log(`Validando credenciales para ${email}`);
     if (!email || !password) {
-      this.logger.log('Invalid email or password', email, password);
+      this.logger.warn(`Credenciales incompletas para ${email || '(sin email)'}`);
       return null;
     }
 
     try {
-      const user = await this.userModel.findOne({ 
+      const user = await this.userModel.findOne({
         email: { $regex: new RegExp(`^${email}$`, 'i') },
         deletedAt: { $exists: false }
       }).exec();
@@ -42,7 +41,7 @@ export class AuthService {
   }
 
   async login(loginUserDto: LoginUserDto) {
-    this.logger.log('Login request received', loginUserDto);
+    this.logger.log(`Login solicitado para ${loginUserDto.email || '(sin email)'}`);
     if (!loginUserDto.email || !loginUserDto.password) {
       throw new BadRequestException('Email y contraseña son requeridos');
     }
@@ -85,7 +84,7 @@ export class AuthService {
     }
 
     try {
-      const existingUser = await this.userModel.findOne({ 
+      const existingUser = await this.userModel.findOne({
         email: { $regex: new RegExp(`^${createUserDto.email}$`, 'i') },
         deletedAt: { $exists: false }
       }).exec();
@@ -125,7 +124,7 @@ export class AuthService {
     }
 
     try {
-      const existingUser = await this.userModel.findOne({ 
+      const existingUser = await this.userModel.findOne({
         email: { $regex: new RegExp(`^${createUserDto.email}$`, 'i') },
         deletedAt: { $exists: false }
       }).exec();
@@ -159,4 +158,4 @@ export class AuthService {
       throw new BadRequestException('Error al crear el usuario administrador');
     }
   }
-} 
+}

@@ -36,6 +36,7 @@ import { SpaceBlocksModule } from './space-blocks/space-blocks.module';
 import { SettingsModule } from './settings/settings.module';
 import { TablesModule } from './tables/tables.module';
 import { ConversationsModule } from './conversations/conversations.module';
+import { InAppNotificationsModule } from './in-app-notifications/in-app-notifications.module';
 
 @Module({
   imports: [
@@ -74,6 +75,7 @@ import { ConversationsModule } from './conversations/conversations.module';
     NotificationsModule,
     BotControlModule,
     SettingsModule,
+    InAppNotificationsModule,
   ],
   controllers: [AppController],
   providers: [

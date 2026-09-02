@@ -27,7 +27,8 @@ export class AppController {
         status: connectionStatus,
       },
       environment: process.env.NODE_ENV || 'unknown',
-      databaseUrl: process.env.DATABASE_URL?.substring(0, 50) + '...',
+      // Nunca exponer la URL: puede incluir usuario y contraseña de Mongo.
+      databaseConfigured: Boolean(process.env.DATABASE_URL),
     };
   }
 

@@ -27,3 +27,4 @@ export * from './professor.schema';
 export * from './conversation.schema';
 export * from './conversation-message.schema';
 export * from './student-regularity-event.schema';
+export * from './in-app-notification.schema';
