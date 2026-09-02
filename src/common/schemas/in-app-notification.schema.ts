@@ -15,6 +15,13 @@ export class InAppNotification {
   @Prop({ required: true, enum: ['PAYMENT_DUE', 'TASK_DUE', 'INFO'] })
   type: 'PAYMENT_DUE' | 'TASK_DUE' | 'INFO';
 
+  /** Destinatarios explícitos. Vacío = aviso por rol (administración por defecto). */
+  @Prop({ type: [SchemaTypes.ObjectId], ref: 'User', default: [] })
+  targetUserIds: Types.ObjectId[];
+
+  @Prop({ type: [String], enum: ['admin', 'user'], default: ['admin'] })
+  visibleToRoles: string[];
+
   @Prop({ type: [SchemaTypes.ObjectId], ref: 'User', default: [] })
   readByUserIds: Types.ObjectId[];
 

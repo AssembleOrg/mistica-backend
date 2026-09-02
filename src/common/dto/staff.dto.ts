@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
+  IsArray,
   IsDateString,
   IsIn,
   IsMongoId,
@@ -22,7 +23,14 @@ export class CreateStaffTaskDto {
   @MaxLength(1000)
   description?: string;
 
-  @ApiPropertyOptional({ description: 'Cuenta del integrante asignado' })
+  @ApiPropertyOptional({ description: 'Cuentas de integrantes asignados' })
+  @IsOptional()
+  @IsArray()
+  @IsMongoId({ each: true })
+  assigneeUserIds?: string[];
+
+  /** Compatibilidad con clientes anteriores: se convierte a una lista de uno. */
+  @ApiPropertyOptional({ deprecated: true, description: 'Cuenta de un integrante asignado' })
   @IsOptional()
   @IsMongoId()
   assigneeUserId?: string;

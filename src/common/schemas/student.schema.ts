@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 
 export type StudentDocument = Student & Document;
 
@@ -17,6 +17,13 @@ export type StudentDocument = Student & Document;
 export class Student {
   @Prop({ required: true, trim: true })
   name: string;
+
+  /** Cliente existente asociado: evita duplicar la ficha de contacto. */
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Client' })
+  clientId?: Types.ObjectId;
+
+  @Prop({ trim: true })
+  clientName?: string;
 
   @Prop({ trim: true })
   phone?: string;
@@ -62,3 +69,4 @@ export const StudentSchema = SchemaFactory.createForClass(Student);
 
 StudentSchema.index({ deletedAt: 1, isActive: 1 });
 StudentSchema.index({ name: 1 });
+StudentSchema.index({ clientId: 1 });

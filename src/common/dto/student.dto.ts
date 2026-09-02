@@ -25,6 +25,11 @@ export class CreateStudentDto {
   @MaxLength(120)
   name: string;
 
+  @ApiPropertyOptional({ description: 'Cliente existente a asociar' })
+  @IsOptional()
+  @IsMongoId()
+  clientId?: string;
+
   @ApiPropertyOptional({ description: 'Teléfono / WhatsApp' })
   @IsOptional()
   @IsString()

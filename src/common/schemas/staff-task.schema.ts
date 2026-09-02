@@ -15,7 +15,14 @@ export class StaffTask {
   @Prop({ trim: true })
   description?: string;
 
-  // Integrante asignado (cuenta del sistema) + snapshot del nombre.
+  // Responsables asignados (cuentas del sistema) + snapshots de nombre.
+  @Prop({
+    type: [{ userId: { type: SchemaTypes.ObjectId, ref: 'User', required: true }, name: { type: String, required: true } }],
+    default: [],
+  })
+  assignees: { userId: Types.ObjectId; name: string }[];
+
+  // Campos legacy: se mantienen para no romper tareas existentes.
   @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   assigneeUserId?: Types.ObjectId;
 
@@ -52,3 +59,4 @@ export const StaffTaskSchema = SchemaFactory.createForClass(StaffTask);
 
 StaffTaskSchema.index({ deletedAt: 1, status: 1 });
 StaffTaskSchema.index({ assigneeUserId: 1, status: 1 });
+StaffTaskSchema.index({ 'assignees.userId': 1, status: 1 });

@@ -8,6 +8,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Cron } from '@nestjs/schedule';
 import { Student, StudentDocument } from '../common/schemas/student.schema';
+import { Client, ClientDocument } from '../common/schemas/client.schema';
 import {
   StudentPayment,
   StudentPaymentDocument,
@@ -47,6 +48,8 @@ export class StudentsService {
   constructor(
     @InjectModel(Student.name)
     private readonly studentModel: Model<StudentDocument>,
+    @InjectModel(Client.name)
+    private readonly clientModel: Model<ClientDocument>,
     @InjectModel(StudentPayment.name)
     private readonly paymentModel: Model<StudentPaymentDocument>,
     @InjectModel(Attendance.name)
@@ -94,8 +97,11 @@ export class StudentsService {
   }
 
   async create(dto: CreateStudentDto) {
+    const client = await this.clientFor(dto.clientId);
     return this.studentModel.create({
       ...dto,
+      clientId: client?._id,
+      clientName: client?.fullName,
       birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
       joinedAt: dto.joinedAt ? new Date(dto.joinedAt) : new Date(),
     });
@@ -103,8 +109,13 @@ export class StudentsService {
 
   async update(id: string, dto: UpdateStudentDto) {
     const student = await this.findOrThrow(id);
-    const { birthDate, joinedAt, ...rest } = dto;
+    const { birthDate, joinedAt, clientId, ...rest } = dto;
     Object.assign(student, rest);
+    if (clientId !== undefined) {
+      const client = await this.clientFor(clientId);
+      student.clientId = client?._id as Types.ObjectId | undefined;
+      student.clientName = client?.fullName;
+    }
     if (birthDate !== undefined)
       student.birthDate = birthDate ? new Date(birthDate) : undefined;
     if (joinedAt !== undefined && joinedAt)
@@ -112,6 +123,15 @@ export class StudentsService {
     student.updatedAt = new Date();
     await student.save();
     return student;
+  }
+
+
+  private async clientFor(id?: string) {
+    if (!id) return undefined;
+    if (!Types.ObjectId.isValid(id)) throw new BadRequestException('clientId inválido');
+    const client = await this.clientModel.findOne({ _id: id, deletedAt: { $exists: false } }).exec();
+    if (!client) throw new NotFoundException('Cliente no encontrado');
+    return client;
   }
 
   async remove(id: string) {

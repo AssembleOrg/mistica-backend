@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Student, StudentSchema } from '../common/schemas/student.schema';
+import { Client, ClientSchema } from '../common/schemas/client.schema';
 import {
   StudentPayment,
   StudentPaymentSchema,
@@ -27,6 +28,7 @@ import { StudentsService } from './students.service';
   imports: [
     MongooseModule.forFeature([
       { name: Student.name, schema: StudentSchema },
+      { name: Client.name, schema: ClientSchema },
       { name: StudentPayment.name, schema: StudentPaymentSchema },
       { name: Attendance.name, schema: AttendanceSchema },
       { name: Group.name, schema: GroupSchema },

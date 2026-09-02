@@ -50,7 +50,8 @@ export class StaffService {
     return this.taskModel
       .find(filter)
       .sort({ status: 1, dueDate: 1, createdAt: -1 })
-      .lean();
+      .lean()
+      .then((tasks) => tasks.map((task) => ({ ...task, assignees: task.assignees?.length ? task.assignees : (task.assigneeUserId && task.assigneeName ? [{ userId: task.assigneeUserId, name: task.assigneeName }] : []) })));
   }
 
   async createTask(dto: CreateStaffTaskDto, userId?: string) {
@@ -61,32 +62,29 @@ export class StaffService {
       createdById:
         userId && Types.ObjectId.isValid(userId) ? userId : undefined,
     };
-    if (dto.assigneeUserId) {
-      const user = await this.findUser(dto.assigneeUserId);
-      data.assigneeUserId = user._id;
-      data.assigneeName = user.name ?? user.email;
+    const assignees = await this.resolveAssignees(dto);
+    if (assignees.length) {
+      data.assignees = assignees;
+      // Compatibilidad con registros/clientes anteriores.
+      data.assigneeUserId = assignees[0].userId;
+      data.assigneeName = assignees[0].name;
     }
     const task = await this.taskModel.create(data);
-    // Aviso interno best-effort: la tarea sigue creada aunque WhatsApp no esté
-    // configurado. El destinatario es el equipo porque las cuentas no guardan
-    // teléfono de trabajo individual.
-    await this.notifications.notifyTeam(
-      `Nueva tarea interna: ${task.title}${task.assigneeName ? ` · asignada a ${task.assigneeName}` : ''}`,
-    );
+    await this.notifyAssignees(task, assignees.map((assignee) => String(assignee.userId)), 'Nueva tarea asignada');
+    await this.notifications.notifyTeam(`Nueva tarea interna: ${task.title}${assignees.length ? ` · asignada a ${assignees.map((a) => a.name).join(', ')}` : ''}`);
     return task;
   }
 
   async updateTask(id: string, dto: UpdateStaffTaskDto) {
     const task = await this.findTask(id);
-    if (dto.assigneeUserId !== undefined) {
-      if (dto.assigneeUserId) {
-        const user = await this.findUser(dto.assigneeUserId);
-        task.assigneeUserId = user._id as Types.ObjectId;
-        task.assigneeName = user.name ?? user.email;
-      } else {
-        task.assigneeUserId = undefined;
-        task.assigneeName = undefined;
-      }
+    let newAssigneeIds: string[] = [];
+    if (dto.assigneeUserIds !== undefined || dto.assigneeUserId !== undefined) {
+      const assignees = await this.resolveAssignees(dto);
+      const oldIds = this.taskAssignees(task).map((assignee) => String(assignee.userId));
+      newAssigneeIds = assignees.map((assignee) => String(assignee.userId)).filter((id) => !oldIds.includes(id));
+      task.assignees = assignees;
+      task.assigneeUserId = assignees[0]?.userId;
+      task.assigneeName = assignees[0]?.name;
     }
     if (dto.title !== undefined) task.title = dto.title;
     if (dto.description !== undefined) task.description = dto.description;
@@ -98,6 +96,7 @@ export class StaffService {
     }
     task.updatedAt = new Date();
     await task.save();
+    if (newAssigneeIds.length) await this.notifyAssignees(task, newAssigneeIds, 'Te asignaron una tarea');
     return task;
   }
 
@@ -157,6 +156,27 @@ export class StaffService {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
+
+  private taskAssignees(task: StaffTaskDocument) {
+    if (task.assignees?.length) return task.assignees;
+    return task.assigneeUserId && task.assigneeName ? [{ userId: task.assigneeUserId, name: task.assigneeName }] : [];
+  }
+
+  private async resolveAssignees(dto: Pick<CreateStaffTaskDto, 'assigneeUserIds' | 'assigneeUserId'>) {
+    const ids = [...new Set(dto.assigneeUserIds ?? (dto.assigneeUserId ? [dto.assigneeUserId] : []))];
+    return Promise.all(ids.map(async (id) => {
+      const user = await this.findUser(id);
+      return { userId: user._id as Types.ObjectId, name: user.name ?? user.email };
+    }));
+  }
+
+  private async notifyAssignees(task: StaffTaskDocument, userIds: string[], prefix: string) {
+    if (!userIds.length) return;
+    const due = task.dueDate ? ` · límite ${task.dueDate.toLocaleDateString('es-AR')}` : '';
+    await this.inAppNotifications.create({
+      type: 'INFO', title: prefix, body: `${task.title}${due}`, targetUserIds: userIds,
+    });
+  }
 
   private async findUser(id: string): Promise<UserDocument> {
     if (!Types.ObjectId.isValid(id))

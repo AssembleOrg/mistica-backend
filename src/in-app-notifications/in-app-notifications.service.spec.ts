@@ -28,6 +28,8 @@ describe('InAppNotificationsService', () => {
       title: row.title,
       body: row.body,
       type: 'PAYMENT_DUE',
+      targetUserIds: [],
+      visibleToRoles: ['admin'],
     });
     expect(notification).toMatchObject({ title: row.title, read: false });
     expect(received).toEqual([
