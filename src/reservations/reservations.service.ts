@@ -227,6 +227,15 @@ export class ReservationsService {
       throw err;
     }
 
+    // TESTING (AUTO_CONFIRM_HOLDS): la reserva nace confirmada sin esperar el
+    // comprobante. El bot detecta status=CONFIRMED y no pide la transferencia.
+    if (envConfig.autoConfirmHolds) {
+      reservation.status = ReservationStatus.CONFIRMED;
+      reservation.confirmedAt = new Date();
+      await reservation.save();
+      return this.holdResponse(reservation);
+    }
+
     // El hold queda esperando el comprobante de transferencia: el bot lo lee
     // con visión y llama resolveTransferProof para confirmarlo.
     return this.holdResponse(reservation);

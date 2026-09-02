@@ -33,6 +33,10 @@ export const envConfig = {
     ownerName: process.env.TRANSFER_OWNER_NAME || '',
     bank: process.env.TRANSFER_BANK || '',
   },
+  // TESTING: confirma las reservas públicas al crear el hold, SIN esperar el
+  // comprobante de transferencia. Sólo para probar el flujo de punta a punta;
+  // NUNCA encender en producción real (los turnos quedarían tomados sin seña).
+  autoConfirmHolds: process.env.AUTO_CONFIRM_HOLDS === 'true',
   // WhatsApp del negocio al que el cliente manda el comprobante (formato
   // internacional sin +, ej. 5491122334455). La landing arma el link wa.me.
   businessWhatsapp: process.env.BUSINESS_WHATSAPP || '',
