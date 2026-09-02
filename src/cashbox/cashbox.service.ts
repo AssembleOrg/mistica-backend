@@ -830,6 +830,7 @@ export class CashboxService {
       createdAt: Date;
       reference?: string;
       afipCae?: string;
+      affectsCashbox?: boolean;
       isSena?: boolean;
       checked: boolean;
     }>;
@@ -859,14 +860,15 @@ export class CashboxService {
         })
         .lean()
         .exec(),
-      // Sólo los egresos que tocan la caja: los externos (affectsCashbox=false)
-      // no son movimientos de esta sesión, viven en finanzas/egresos.
+      // Todos los egresos de la ventana, INCLUIDOS los externos (affectsCashbox=
+      // false). Se listan para que el operador los vea (con un rótulo "no afecta
+      // caja" en el front); el efectivo esperado se calcula aparte en
+      // computeExpectedClosingCash, que sí los excluye.
       this.egressModel
         .find({
           createdAt: { $gte: from, $lte: to },
           deletedAt: { $exists: false },
           status: { $ne: 'CANCELLED' },
-          affectsCashbox: { $ne: false },
         })
         .lean()
         .exec(),
@@ -917,6 +919,8 @@ export class CashboxService {
       createdAt: Date;
       reference?: string;
       afipCae?: string;
+      // Sólo egresos. false = gasto externo: se lista pero no tocó caja.
+      affectsCashbox?: boolean;
       // true cuando el movimiento es una seña: prepaid (saldo a favor) o
       // venta con saldo pendiente (status PARTIAL). El front lo usa para el
       // chip "Seña" unificado en el detalle de sesión.
@@ -995,6 +999,8 @@ export class CashboxService {
         paymentMethod: e.paymentMethod,
         createdAt: e.createdAt,
         reference: e.egressNumber,
+        // false = gasto externo: se lista pero no bajó el efectivo esperado.
+        affectsCashbox: e.affectsCashbox,
         checked: e.checked ?? false,
       });
     }
