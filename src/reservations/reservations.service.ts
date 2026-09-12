@@ -843,6 +843,15 @@ export class ReservationsService {
     if (query.sessionId) filter.sessionId = new Types.ObjectId(query.sessionId);
     if (query.experienceId)
       filter.experienceId = new Types.ObjectId(query.experienceId);
+    if (query.date) {
+      const start = DateTime.fromISO(query.date, {
+        zone: envConfig.timezone,
+      }).startOf('day');
+      filter.startAt = {
+        $gte: start.toJSDate(),
+        $lt: start.plus({ days: 1 }).toJSDate(),
+      };
+    }
 
     // Búsqueda libre: por nombre (con el texto tal cual) y por código/teléfono
     // (sin separadores, así "LKU-867" matchea el code guardado "LKU867").

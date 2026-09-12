@@ -3,14 +3,11 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { PieceDocument, ReservationDocument } from '../common/schemas';
-import {
-  AppSetting,
-  AppSettingDocument,
-} from '../common/schemas/app-setting.schema';
 import {
   Student,
   StudentDocument,
@@ -23,11 +20,13 @@ import {
 } from '../common/enums/piece.enum';
 import {
   CreatePieceDto,
+  CreateReservationPiecesDto,
   UpdatePieceDto,
   ListPiecesQueryDto,
 } from '../common/dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { envConfig } from '../config/env.config';
+import { UserRole } from '../common/enums/user-role.enum';
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -42,7 +41,7 @@ function phoneCore(raw: string): string {
 }
 
 @Injectable()
-export class PiecesService {
+export class PiecesService implements OnModuleInit {
   private readonly logger = new Logger(PiecesService.name);
 
   constructor(
@@ -51,11 +50,25 @@ export class PiecesService {
     private readonly reservationModel: Model<ReservationDocument>,
     @InjectModel(Student.name)
     private readonly studentModel: Model<StudentDocument>,
-    @InjectModel(AppSetting.name)
-    private readonly settingModel: Model<AppSettingDocument>,
     private readonly notifications: NotificationsService,
     private readonly professors: ProfessorsService,
   ) {}
+
+  async onModuleInit() {
+    await this.pieceModel.updateMany(
+      {
+        status: {
+          $in: [
+            PieceStatus.SECADO,
+            PieceStatus.PRIMERA_HORNEADA,
+            PieceStatus.ESMALTADO,
+            PieceStatus.SEGUNDA_HORNEADA,
+          ],
+        },
+      },
+      { $set: { status: PieceStatus.PENDIENTE } },
+    );
+  }
 
   // ── Estados configurables ────────────────────────────────────────────────
 
@@ -63,16 +76,7 @@ export class PiecesService {
 
   /** Estados vigentes (los del taller si los editó; si no, los default). */
   async statusConfig(): Promise<PieceStatusConfig[]> {
-    const doc = await this.settingModel
-      .findOne({ key: PiecesService.STATUSES_KEY })
-      .lean();
-    if (!doc?.value) return DEFAULT_PIECE_STATUS_CONFIG;
-    try {
-      const parsed = JSON.parse(doc.value) as PieceStatusConfig[];
-      return parsed.length ? parsed : DEFAULT_PIECE_STATUS_CONFIG;
-    } catch {
-      return DEFAULT_PIECE_STATUS_CONFIG;
-    }
+    return DEFAULT_PIECE_STATUS_CONFIG;
   }
 
   /**
@@ -80,35 +84,10 @@ export class PiecesService {
    * estado con isReady (si no, nunca se dispararía el aviso de "lista").
    */
   async setStatusConfig(statuses: PieceStatusConfig[]) {
-    const clean = statuses
-      .map((s) => ({
-        key: s.key
-          .trim()
-          .toUpperCase()
-          .normalize('NFKD')
-          .replace(/[̀-ͯ]/g, '')
-          .replace(/[^A-Z0-9]+/g, '_')
-          .replace(/^_+|_+$/g, ''),
-        label: s.label.trim(),
-        isReady: !!s.isReady,
-        isFinal: !!s.isFinal,
-      }))
-      .filter((s) => s.key && s.label);
-    if (!clean.length)
-      throw new BadRequestException('Tiene que quedar al menos un estado.');
-    const keys = new Set(clean.map((s) => s.key));
-    if (keys.size !== clean.length)
-      throw new BadRequestException('Hay estados con la misma clave.');
-    if (!clean.some((s) => s.isReady))
-      throw new BadRequestException(
-        'Marcá al menos un estado como "lista para retirar": es el que dispara el aviso al cliente.',
-      );
-    await this.settingModel.updateOne(
-      { key: PiecesService.STATUSES_KEY },
-      { $set: { value: JSON.stringify(clean) } },
-      { upsert: true },
+    void statuses;
+    throw new BadRequestException(
+      'El seguimiento de piezas ahora usa únicamente En preparación, Lista para retirar y Retirada.',
     );
-    return clean;
   }
 
   private async assertValidStatus(status: string) {
@@ -130,7 +109,7 @@ export class PiecesService {
    */
   async create(dto: CreatePieceDto): Promise<PieceDocument> {
     const now = new Date();
-    const status = dto.status ?? PieceStatus.SECADO;
+    const status = dto.status ?? PieceStatus.PENDIENTE;
     const statusCfg = await this.assertValidStatus(status);
 
     let customerPhone = dto.customerPhone?.trim() ?? '';
@@ -193,27 +172,42 @@ export class PiecesService {
     });
   }
 
+  async createReservationBatch(
+    dto: CreateReservationPiecesDto,
+    actor?: { id?: string; role?: string },
+  ) {
+    const reservation = await this.reservationModel
+      .findOne({ _id: dto.reservationId, deletedAt: { $exists: false } })
+      .select(
+        'code customerName customerPhone experienceName quantity startAt',
+      )
+      .lean();
+    if (!reservation) throw new BadRequestException('Reserva no encontrada');
+    const professor = await this.professors.ofUser(actor?.id);
+    const documents = dto.entries.map((entry) => ({
+      reservationId: reservation._id,
+      reservationCode: reservation.code,
+      customerName: reservation.customerName,
+      customerPhone: reservation.customerPhone ?? '',
+      experienceName: reservation.experienceName,
+      professorId: professor?._id,
+      professorName: professor?.name,
+      quantity: 1,
+      status: PieceStatus.PENDIENTE,
+      personName: entry.personName.trim(),
+      signature: entry.signature.trim(),
+      pieceType: entry.pieceType.trim(),
+      colorsUsed: entry.colorsUsed.trim(),
+      photos: [],
+    }));
+    return this.pieceModel.insertMany(documents);
+  }
+
   async list(query: ListPiecesQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+    const filter = this.buildListFilter(query);
     if (query.status) filter.status = query.status;
-    if (query.professorId)
-      filter.professorId = new Types.ObjectId(query.professorId);
-    if (query.studentId)
-      filter.studentId = new Types.ObjectId(query.studentId);
-    const term = query.search?.trim();
-    if (term) {
-      const rx = new RegExp(escapeRegex(term), 'i');
-      const or: Record<string, unknown>[] = [
-        { customerName: rx },
-        { experienceName: rx },
-        { studentName: rx },
-      ];
-      const compact = term.replace(/[^a-zA-Z0-9]/g, '');
-      if (compact) or.push({ customerPhone: new RegExp(escapeRegex(compact), 'i') });
-      filter.$or = or;
-    }
     const [items, total] = await Promise.all([
       this.pieceModel
         .find(filter)
@@ -232,12 +226,69 @@ export class PiecesService {
     };
   }
 
-  async update(id: string, dto: UpdatePieceDto): Promise<PieceDocument> {
+  async counts(query: ListPiecesQueryDto) {
+    const filter = this.buildListFilter(query);
+    const rows = await this.pieceModel.aggregate<{ _id: string; count: number }>([
+      { $match: filter },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]);
+    const byStatus = Object.fromEntries(rows.map((row) => [row._id, row.count]));
+    return {
+      total: rows.reduce((sum, row) => sum + row.count, 0),
+      byStatus,
+    };
+  }
+
+  private buildListFilter(query: ListPiecesQueryDto): Record<string, any> {
+    const filter: Record<string, any> = { deletedAt: { $exists: false } };
+    if (query.professorId)
+      filter.professorId = new Types.ObjectId(query.professorId);
+    if (query.studentId)
+      filter.studentId = new Types.ObjectId(query.studentId);
+    const term = query.search?.trim();
+    if (term) {
+      const rx = new RegExp(escapeRegex(term), 'i');
+      const or: Record<string, unknown>[] = [
+        { personName: rx },
+        { signature: rx },
+        { pieceType: rx },
+        { colorsUsed: rx },
+        { customerName: rx },
+        { experienceName: rx },
+        { studentName: rx },
+      ];
+      const compact = term.replace(/[^a-zA-Z0-9]/g, '');
+      if (compact) or.push({ customerPhone: new RegExp(escapeRegex(compact), 'i') });
+      filter.$or = or;
+    }
+    return filter;
+  }
+
+  async update(
+    id: string,
+    dto: UpdatePieceDto,
+    actor?: { id?: string; role?: string },
+  ): Promise<PieceDocument> {
     const piece = await this.pieceModel.findOne({
       _id: id,
       deletedAt: { $exists: false },
     });
     if (!piece) throw new NotFoundException('Pieza no encontrada');
+
+    if (actor?.role !== UserRole.ADMIN) {
+      const changedFields = Object.keys(dto).filter(
+        (key) => dto[key as keyof UpdatePieceDto] !== undefined,
+      );
+      if (
+        changedFields.length !== 1 ||
+        changedFields[0] !== 'status' ||
+        dto.status !== PieceStatus.LISTA
+      ) {
+        throw new BadRequestException(
+          'La profesora sólo puede marcar una pieza como lista para retirar.',
+        );
+      }
+    }
 
     if (dto.quantity != null) piece.quantity = dto.quantity;
     if (dto.customerName != null) piece.customerName = dto.customerName.trim();
@@ -270,22 +321,47 @@ export class PiecesService {
       }
     }
 
-    let becameReady = false;
     if (dto.status && dto.status !== piece.status) {
       const statusCfg = await this.assertValidStatus(dto.status);
       piece.status = dto.status;
       const now = new Date();
       if (statusCfg.isReady && !piece.readyAt) piece.readyAt = now;
       if (statusCfg.isFinal && !piece.pickedUpAt) piece.pickedUpAt = now;
-      becameReady = !!statusCfg.isReady;
     }
 
     await piece.save();
 
-    // Aviso de "lista" (idempotente): sólo la primera vez que entra a un
-    // estado marcado isReady.
-    if (becameReady && !piece.notifiedReadyAt) {
-      await this.notifyReady(piece);
+    return piece;
+  }
+
+  async notifyReadyByAdmin(id: string) {
+    const piece = await this.pieceModel.findOne({
+      _id: id,
+      deletedAt: { $exists: false },
+    });
+    if (!piece) throw new NotFoundException('Pieza no encontrada');
+    const status = await this.assertValidStatus(piece.status);
+    if (!status.isReady) {
+      throw new BadRequestException(
+        'La pieza todavía no está lista para retirar.',
+      );
+    }
+    if (piece.notifiedReadyAt) return piece;
+    const sent = await this.notifyReady(piece);
+    if (!sent) {
+      throw new BadRequestException(
+        'No se pudo enviar el aviso de retiro. Revisá el teléfono o la conexión de WhatsApp.',
+      );
+    }
+    if (piece.reservationId && piece.notifiedReadyAt) {
+      await this.pieceModel.updateMany(
+        {
+          reservationId: piece.reservationId,
+          status: PieceStatus.LISTA,
+          deletedAt: { $exists: false },
+        },
+        { $set: { notifiedReadyAt: piece.notifiedReadyAt } },
+      );
     }
     return piece;
   }
@@ -300,7 +376,7 @@ export class PiecesService {
   }
 
   /** Aviso por WhatsApp de que las piezas están para retirar (una sola vez). */
-  private async notifyReady(piece: PieceDocument): Promise<void> {
+  private async notifyReady(piece: PieceDocument): Promise<boolean> {
     const name = piece.customerName ? ` ${piece.customerName.split(' ')[0]}` : '';
     const exp = piece.experienceName ? ` de *${piece.experienceName}*` : '';
     const msg =
@@ -310,10 +386,12 @@ export class PiecesService {
     if (ok) {
       piece.notifiedReadyAt = new Date();
       await piece.save();
+      return true;
     } else {
       this.logger.warn(
         `No se pudo avisar piezas listas a ***${piece.customerPhone.slice(-4)}`,
       );
+      return false;
     }
   }
 

@@ -16,6 +16,9 @@ export class Professor {
   @Prop({ trim: true })
   phone?: string;
 
+  @Prop({ trim: true })
+  emergencyPhone?: string;
+
   @Prop({ trim: true, lowercase: true })
   email?: string;
 

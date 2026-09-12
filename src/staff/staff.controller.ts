@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
+  AddStaffTaskCommentDto,
   CreateShoppingItemDto,
   CreateStaffTaskDto,
   UpdateShoppingItemDto,
@@ -56,6 +57,16 @@ export class StaffController {
   @ApiOperation({ summary: 'Editar tarea / marcarla hecha' })
   updateTask(@Param('id') id: string, @Body() dto: UpdateStaffTaskDto) {
     return this.service.updateTask(id, dto);
+  }
+
+  @Post('tasks/:id/comments')
+  @ApiOperation({ summary: 'Agregar una actualización al historial de la tarea' })
+  addTaskComment(
+    @Param('id') id: string,
+    @Body() dto: AddStaffTaskCommentDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.service.addTaskComment(id, dto.body, req.user?.id);
   }
 
   @Delete('tasks/:id')

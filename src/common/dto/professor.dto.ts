@@ -23,6 +23,12 @@ export class CreateProfessorDto {
   @MaxLength(40)
   phone?: string;
 
+  @ApiPropertyOptional({ description: 'Teléfono de emergencia' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  emergencyPhone?: string;
+
   @ApiPropertyOptional({ description: 'Email de contacto' })
   @IsOptional()
   @IsEmail()

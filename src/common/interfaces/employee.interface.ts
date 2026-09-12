@@ -7,9 +7,10 @@ export interface Employee {
   email: string;
   role: EmployeeRole;
   phone: string | null;
+  emergencyPhone: string | null;
   address: string | null;
   startDate: Date;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
-} 
+}

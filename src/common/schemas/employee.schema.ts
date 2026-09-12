@@ -22,6 +22,9 @@ export class Employee {
   phone?: string;
 
   @Prop({ trim: true })
+  emergencyPhone?: string;
+
+  @Prop({ trim: true })
   address?: string;
 
   @Prop({ required: true, type: Date })

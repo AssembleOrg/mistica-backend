@@ -2,6 +2,8 @@ import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  ArrayMaxSize,
+  ArrayMinSize,
   IsBoolean,
   IsInt,
   IsMongoId,
@@ -52,12 +54,16 @@ export class CreateGroupDto {
   @IsMongoId()
   professorId?: string;
 
-  @ApiPropertyOptional({ type: [GroupSlotDto], description: 'Días y horarios' })
-  @IsOptional()
+  @ApiProperty({
+    type: [GroupSlotDto],
+    description: 'Único día y horario semanal',
+  })
   @IsArray()
+  @ArrayMinSize(1, { message: 'El grupo debe tener un día y horario' })
+  @ArrayMaxSize(1, { message: 'El grupo acepta un único día y horario' })
   @ValidateNested({ each: true })
   @Type(() => GroupSlotDto)
-  schedule?: GroupSlotDto[];
+  schedule: GroupSlotDto[];
 
   @ApiPropertyOptional({ type: [String], description: 'Alumnos asociados' })
   @IsOptional()

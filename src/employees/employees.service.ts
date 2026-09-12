@@ -22,6 +22,7 @@ export class EmployeesService {
       email: employeeObj.email,
       role: employeeObj.role,
       phone: employeeObj.phone,
+      emergencyPhone: employeeObj.emergencyPhone,
       address: employeeObj.address,
       startDate: employeeObj.startDate,
       createdAt: employeeObj.createdAt,
@@ -55,7 +56,7 @@ export class EmployeesService {
 
     // Construir filtros
     const filters: any = { deletedAt: { $exists: false } };
-    
+
     // Filtro de búsqueda por nombre, email o documento
     if (search) {
       filters.$or = [
@@ -64,7 +65,7 @@ export class EmployeesService {
         { document: { $regex: search, $options: 'i' } }
       ];
     }
-    
+
     // Filtros de fecha
     const dateFilter = buildDateFilter(from, to);
     Object.assign(filters, dateFilter);
@@ -94,8 +95,8 @@ export class EmployeesService {
   }
 
   async findWithoutPagination(): Promise<Employee[]> {
-    const employees = await this.employeeModel.find({ 
-      deletedAt: { $exists: false } 
+    const employees = await this.employeeModel.find({
+      deletedAt: { $exists: false }
     }).sort({ createdAt: -1 }).exec();
 
     return employees.map(employee => this.mapToEmployeeResponse(employee));
@@ -130,7 +131,7 @@ export class EmployeesService {
     }
 
     let updateData = { ...updateEmployeeDto };
-    
+
     if (updateEmployeeDto.email) {
       updateData.email = updateEmployeeDto.email.toLowerCase();
     }
@@ -154,7 +155,7 @@ export class EmployeesService {
 
   async remove(id: string): Promise<void> {
     const employee = await this.findOne(id);
-    
+
     await this.employeeModel.findByIdAndUpdate(id, {
       deletedAt: new Date()
     }).exec();
@@ -181,4 +182,4 @@ export class EmployeesService {
 
     return this.mapToEmployeeResponse(employee);
   }
-} 
+}

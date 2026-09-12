@@ -1,6 +1,7 @@
 // Etapas de una pieza de cerámica, del secado al retiro. El orden importa para
 // avanzar de estado y para saber si ya está "lista para retirar".
 export enum PieceStatus {
+  PENDIENTE = 'PENDIENTE',
   SECADO = 'SECADO',
   PRIMERA_HORNEADA = 'PRIMERA_HORNEADA',
   ESMALTADO = 'ESMALTADO',
@@ -21,6 +22,7 @@ export const PIECE_STATUS_ORDER: PieceStatus[] = [
 
 // Etiquetas legibles (es-AR) para mostrar y para el bot.
 export const PIECE_STATUS_LABEL: Record<PieceStatus, string> = {
+  [PieceStatus.PENDIENTE]: 'En preparación',
   [PieceStatus.SECADO]: 'En secado',
   [PieceStatus.PRIMERA_HORNEADA]: 'Primera horneada',
   [PieceStatus.ESMALTADO]: 'Esmaltado',
@@ -45,9 +47,8 @@ export interface PieceStatusConfig {
 
 // Config por defecto: el proceso actual del taller.
 export const DEFAULT_PIECE_STATUS_CONFIG: PieceStatusConfig[] =
-  PIECE_STATUS_ORDER.map((key) => ({
-    key,
-    label: PIECE_STATUS_LABEL[key],
-    isReady: key === PieceStatus.LISTA,
-    isFinal: key === PieceStatus.RETIRADA,
-  }));
+  [
+    { key: PieceStatus.PENDIENTE, label: 'En preparación' },
+    { key: PieceStatus.LISTA, label: 'Lista para retirar', isReady: true },
+    { key: PieceStatus.RETIRADA, label: 'Retirada', isFinal: true },
+  ];

@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
@@ -15,6 +16,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PiecesService } from './pieces.service';
 import {
   CreatePieceDto,
+  CreateReservationPiecesDto,
   UpdatePieceDto,
   ListPiecesQueryDto,
 } from '../common/dto';
@@ -27,6 +29,11 @@ import { Public } from '../common/decorators';
 import { AllowedViews } from '../common/decorators';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 import { envConfig } from '../config/env.config';
+import { Request } from 'express';
+
+interface AuthRequest extends Request {
+  user?: { id: string; role?: string };
+}
 
 @ApiTags('Piezas')
 @Controller('pieces')
@@ -53,12 +60,9 @@ export class PiecesController {
     return this.piecesService.byPhone(phone || '');
   }
 
-  // Estados CONFIGURABLES del proceso (Fresco, En proceso, Horneado…). La
-  // lista la ven todas las cuentas con la vista de piezas; editarla es cosa
-  // del admin (guard por rol en el service no: acá, vía Roles en el front —
-  // el backend valida admin en el PUT del módulo de abajo).
+  // Flujo fijo y deliberadamente corto: en preparación, lista y retirada.
   @Get('statuses')
-  @ApiOperation({ summary: 'Estados vigentes de las piezas (configurables)' })
+  @ApiOperation({ summary: 'Estados vigentes del flujo simplificado de piezas' })
   statuses() {
     return this.piecesService.statusConfig();
   }
@@ -66,9 +70,7 @@ export class PiecesController {
   @Patch('statuses')
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN)
-  @ApiOperation({
-    summary: 'Reemplazar los estados de pieza (adaptables al taller)',
-  })
+  @ApiOperation({ summary: 'Intentar reemplazar estados (flujo fijo)' })
   setStatuses(@Body() dto: SetPieceStatusesDto) {
     return this.piecesService.setStatusConfig(dto.statuses);
   }
@@ -79,16 +81,43 @@ export class PiecesController {
     return this.piecesService.create(dto);
   }
 
+  @Post('reservation-batch')
+  @ApiOperation({ summary: 'Registrar las fichas de piezas de una reserva' })
+  createReservationBatch(
+    @Body() dto: CreateReservationPiecesDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.piecesService.createReservationBatch(dto, req.user);
+  }
+
   @Get()
   @ApiOperation({ summary: 'Listar piezas (admin)' })
   list(@Query() query: ListPiecesQueryDto) {
     return this.piecesService.list(query);
   }
 
+  @Get('counts')
+  @ApiOperation({ summary: 'Contar piezas por estado' })
+  counts(@Query() query: ListPiecesQueryDto) {
+    return this.piecesService.counts(query);
+  }
+
   @Patch(':id')
-  @ApiOperation({ summary: 'Actualizar / avanzar estado de una pieza (admin)' })
-  update(@Param('id') id: string, @Body() dto: UpdatePieceDto) {
-    return this.piecesService.update(id, dto);
+  @ApiOperation({ summary: 'Actualizar una pieza o marcarla lista' })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePieceDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.piecesService.update(id, dto, req.user);
+  }
+
+  @Post(':id/notify-ready')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Enviar manualmente el aviso de retiro' })
+  notifyReady(@Param('id') id: string) {
+    return this.piecesService.notifyReadyByAdmin(id);
   }
 
   @Delete(':id')

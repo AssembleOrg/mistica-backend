@@ -1,15 +1,56 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMinSize,
   IsArray,
   ValidateNested,
   IsInt,
   IsMongoId,
+  IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
   Min,
 } from 'class-validator';
+
+export class ReservationPieceEntryDto {
+  @ApiProperty({ description: 'Nombre y apellido de la persona' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  personName: string;
+
+  @ApiProperty({ description: 'Firma colocada físicamente en la pieza' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  signature: string;
+
+  @ApiProperty({ description: 'Pieza elegida' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  pieceType: string;
+
+  @ApiProperty({ description: 'Colores utilizados' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(300)
+  colorsUsed: string;
+}
+
+export class CreateReservationPiecesDto {
+  @ApiProperty({ description: 'Reserva del día seleccionada' })
+  @IsMongoId()
+  reservationId: string;
+
+  @ApiProperty({ type: [ReservationPieceEntryDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => ReservationPieceEntryDto)
+  entries: ReservationPieceEntryDto[];
+}
 
 export class CreatePieceDto {
   // Camino NORMAL: asignar la pieza a una reserva. El contacto (teléfono,
@@ -186,7 +227,10 @@ export class ListPiecesQueryDto {
   @MaxLength(40)
   status?: string;
 
-  @ApiPropertyOptional({ description: 'Busca por teléfono, nombre o experiencia' })
+  @ApiPropertyOptional({
+    description:
+      'Busca por persona, firma, pieza, colores, teléfono, cliente o experiencia',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(80)

@@ -460,6 +460,11 @@ export class ResolveReviewDto {
 }
 
 export class ListReservationsQueryDto {
+  @ApiPropertyOptional({ description: 'Filtrar por día local, YYYY-MM-DD' })
+  @IsOptional()
+  @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })
+  date?: string;
+
   @ApiPropertyOptional({ enum: ReservationStatus })
   @IsOptional()
   @IsEnum(ReservationStatus)

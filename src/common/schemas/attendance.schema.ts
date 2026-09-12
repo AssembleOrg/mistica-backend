@@ -19,6 +19,25 @@ export class AttendanceRecord {
   })
   status: 'PRESENT' | 'ABSENT' | 'MAKEUP';
 
+  // Clase original que el alumno está recuperando. Guardamos grupo + fecha
+  // para que el dato siga siendo inequívoco aunque recupere en otro grupo.
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Group' })
+  makeupForGroupId?: Types.ObjectId;
+
+  @Prop({ trim: true })
+  makeupForDate?: string;
+
+  // En la clase original conserva el vínculo con la asistencia donde se
+  // realizó la recuperación, sin perder que originalmente estuvo ausente.
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Group' })
+  recoveredInGroupId?: Types.ObjectId;
+
+  @Prop({ trim: true })
+  recoveredInDate?: string;
+
+  @Prop({ type: Date })
+  recoveredAt?: Date;
+
   @Prop({ trim: true })
   notes?: string;
 }

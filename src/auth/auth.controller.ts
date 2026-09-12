@@ -21,6 +21,9 @@ import { AuthService } from './auth.service';
 import { CreateUserDto, LoginUserDto } from '../common/dto';
 import { Public } from '../common/decorators';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
 import { ACCESS_TOKEN_COOKIE } from './strategies/jwt.strategy';
 
 interface AuthenticatedRequest extends Request {
@@ -102,7 +105,8 @@ export class AuthController {
     return this.authService.register(createUserDto);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Post('admin/register')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Registrar nuevo usuario administrador' })

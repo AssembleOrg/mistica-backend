@@ -328,13 +328,48 @@ export class StudentsService {
     if (!Types.ObjectId.isValid(dto.groupId))
       throw new BadRequestException('groupId inválido');
     await this.assertCanManageGroup(new Types.ObjectId(dto.groupId), actor);
-    const records = dto.records.map((r) => ({
-      studentId: new Types.ObjectId(r.studentId),
-      status: r.status,
-      notes: r.notes,
-    }));
-    return this.attendanceModel.findOneAndUpdate(
-      { groupId: new Types.ObjectId(dto.groupId), dateKey: dto.date },
+    const targetGroupId = new Types.ObjectId(dto.groupId);
+    const previous = await this.attendanceModel
+      .findOne({ groupId: targetGroupId, dateKey: dto.date })
+      .lean();
+    const records = dto.records.map((r) => {
+      const existingRecord = previous?.records.find(
+        (candidate) => String(candidate.studentId) === r.studentId,
+      );
+      if (
+        r.status === 'MAKEUP' &&
+        (!r.makeupForGroupId || !r.makeupForDate)
+      ) {
+        throw new BadRequestException(
+          'Cada recuperación debe indicar el grupo y la fecha de la clase original.',
+        );
+      }
+      if (
+        r.status === 'MAKEUP' &&
+        r.makeupForGroupId === dto.groupId &&
+        r.makeupForDate === dto.date
+      ) {
+        throw new BadRequestException(
+          'Una clase no puede recuperarse en sí misma.',
+        );
+      }
+      return {
+        studentId: new Types.ObjectId(r.studentId),
+        status: r.status,
+        notes: r.notes,
+        makeupForGroupId:
+          r.status === 'MAKEUP' && r.makeupForGroupId
+            ? new Types.ObjectId(r.makeupForGroupId)
+            : undefined,
+        makeupForDate:
+          r.status === 'MAKEUP' ? r.makeupForDate : undefined,
+        recoveredInGroupId: existingRecord?.recoveredInGroupId,
+        recoveredInDate: existingRecord?.recoveredInDate,
+        recoveredAt: existingRecord?.recoveredAt,
+      };
+    });
+    const saved = await this.attendanceModel.findOneAndUpdate(
+      { groupId: targetGroupId, dateKey: dto.date },
       {
         $set: {
           records,
@@ -346,6 +381,45 @@ export class StudentsService {
       },
       { upsert: true, new: true },
     );
+
+    const newLinks = new Set(
+      records
+        .filter((r) => r.status === 'MAKEUP')
+        .map(
+          (r) =>
+            `${String(r.studentId)}:${String(r.makeupForGroupId)}:${r.makeupForDate}`,
+        ),
+    );
+    for (const old of previous?.records ?? []) {
+      if (old.status !== 'MAKEUP' || !old.makeupForGroupId || !old.makeupForDate)
+        continue;
+      const key = `${String(old.studentId)}:${String(old.makeupForGroupId)}:${old.makeupForDate}`;
+      if (!newLinks.has(key)) {
+        await this.clearRecoveryLink(
+          old.studentId,
+          old.makeupForGroupId,
+          old.makeupForDate,
+          targetGroupId,
+          dto.date,
+        );
+      }
+    }
+    for (const record of records) {
+      if (
+        record.status === 'MAKEUP' &&
+        record.makeupForGroupId &&
+        record.makeupForDate
+      ) {
+        await this.linkRecoveredClass(
+          record.studentId,
+          record.makeupForGroupId,
+          record.makeupForDate,
+          targetGroupId,
+          dto.date,
+        );
+      }
+    }
+    return saved;
   }
 
   async attendanceOfGroup(
@@ -361,6 +435,74 @@ export class StudentsService {
       .sort({ dateKey: -1 })
       .limit(limit)
       .lean();
+  }
+
+  private async linkRecoveredClass(
+    studentId: Types.ObjectId,
+    sourceGroupId: Types.ObjectId,
+    sourceDate: string,
+    targetGroupId: Types.ObjectId,
+    targetDate: string,
+  ) {
+    const source = await this.attendanceModel.findOne({
+      groupId: sourceGroupId,
+      dateKey: sourceDate,
+    });
+    const recovery = {
+      recoveredInGroupId: targetGroupId,
+      recoveredInDate: targetDate,
+      recoveredAt: new Date(),
+    };
+    if (!source) {
+      await this.attendanceModel.create({
+        groupId: sourceGroupId,
+        dateKey: sourceDate,
+        records: [{ studentId, status: 'ABSENT', ...recovery }],
+      });
+      return;
+    }
+    const record = source.records.find(
+      (candidate) => String(candidate.studentId) === String(studentId),
+    );
+    if (record) {
+      record.recoveredInGroupId = recovery.recoveredInGroupId;
+      record.recoveredInDate = recovery.recoveredInDate;
+      record.recoveredAt = recovery.recoveredAt;
+    } else {
+      source.records.push({
+        studentId,
+        status: 'ABSENT',
+        ...recovery,
+      } as never);
+    }
+    await source.save();
+  }
+
+  private async clearRecoveryLink(
+    studentId: Types.ObjectId,
+    sourceGroupId: Types.ObjectId,
+    sourceDate: string,
+    targetGroupId: Types.ObjectId,
+    targetDate: string,
+  ) {
+    const source = await this.attendanceModel.findOne({
+      groupId: sourceGroupId,
+      dateKey: sourceDate,
+    });
+    const record = source?.records.find(
+      (candidate) => String(candidate.studentId) === String(studentId),
+    );
+    if (
+      !source ||
+      !record ||
+      String(record.recoveredInGroupId) !== String(targetGroupId) ||
+      record.recoveredInDate !== targetDate
+    )
+      return;
+    record.recoveredInGroupId = undefined;
+    record.recoveredInDate = undefined;
+    record.recoveredAt = undefined;
+    await source.save();
   }
 
   private async findOrThrow(id: string): Promise<StudentDocument> {

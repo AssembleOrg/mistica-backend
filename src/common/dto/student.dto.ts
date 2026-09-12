@@ -53,7 +53,9 @@ export class CreateStudentDto {
   @IsDateString()
   birthDate?: string;
 
-  @ApiPropertyOptional({ description: 'Fecha de incorporación al taller (ISO)' })
+  @ApiPropertyOptional({
+    description: 'Fecha de incorporación al taller (ISO)',
+  })
   @IsOptional()
   @IsDateString()
   joinedAt?: string;
@@ -64,7 +66,9 @@ export class CreateStudentDto {
   @MaxLength(1000)
   adminNotes?: string;
 
-  @ApiPropertyOptional({ description: 'Notas de práctica (las ve el profesor)' })
+  @ApiPropertyOptional({
+    description: 'Notas de práctica (las ve el profesor)',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(1000)
@@ -138,6 +142,22 @@ export class AttendanceRecordDto {
   })
   @IsIn(['PRESENT', 'ABSENT', 'MAKEUP'])
   status: 'PRESENT' | 'ABSENT' | 'MAKEUP';
+
+  @ApiPropertyOptional({
+    description: 'Grupo de la clase original que recupera',
+  })
+  @IsOptional()
+  @IsMongoId()
+  makeupForGroupId?: string;
+
+  @ApiPropertyOptional({
+    description: "Fecha de la clase original, 'YYYY-MM-DD'",
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'makeupForDate debe ser YYYY-MM-DD',
+  })
+  makeupForDate?: string;
 
   @ApiPropertyOptional({ description: 'Notas' })
   @IsOptional()

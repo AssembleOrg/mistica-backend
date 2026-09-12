@@ -31,8 +31,20 @@ export class Piece {
   // Clave del estado. Los estados son CONFIGURABLES (app_settings
   // 'pieceStatuses'): sin enum acá para permitir estados propios del taller
   // (Fresco, En proceso, Horneado…). La validación vive en PiecesService.
-  @Prop({ required: true, trim: true, default: PieceStatus.SECADO })
+  @Prop({ required: true, trim: true, default: PieceStatus.PENDIENTE })
   status: string;
+
+  @Prop({ trim: true })
+  personName?: string;
+
+  @Prop({ trim: true })
+  signature?: string;
+
+  @Prop({ trim: true })
+  pieceType?: string;
+
+  @Prop({ trim: true })
+  colorsUsed?: string;
 
   @Prop({ trim: true })
   notes?: string;
@@ -86,4 +98,5 @@ export const PieceSchema = SchemaFactory.createForClass(Piece);
 
 PieceSchema.index({ customerPhone: 1 });
 PieceSchema.index({ status: 1 });
+PieceSchema.index({ reservationId: 1 });
 PieceSchema.index({ deletedAt: 1 });

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -20,6 +21,7 @@ export interface ProfessorView {
   id: string;
   name: string;
   phone?: string;
+  emergencyPhone?: string;
   email?: string;
   notes?: string;
   active: boolean;
@@ -30,13 +32,26 @@ export interface ProfessorView {
 }
 
 @Injectable()
-export class ProfessorsService {
+export class ProfessorsService implements OnModuleInit {
   constructor(
     @InjectModel(Professor.name)
     private readonly model: Model<ProfessorDocument>,
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
   ) {}
+
+  /** Asegura que las cuentas de profesoras existentes puedan ver Alumnos y grupos. */
+  async onModuleInit() {
+    const linked = await this.model
+      .find({ userId: { $exists: true }, deletedAt: { $exists: false } })
+      .distinct('userId');
+    if (linked.length) {
+      await this.userModel.updateMany(
+        { _id: { $in: linked }, 'allowedViews.0': { $exists: true } },
+        { $addToSet: { allowedViews: 'alumnos' } },
+      );
+    }
+  }
 
   async list(): Promise<ProfessorView[]> {
     const rows = await this.model
@@ -58,6 +73,7 @@ export class ProfessorsService {
       id: String(r._id),
       name: r.name,
       phone: r.phone,
+      emergencyPhone: r.emergencyPhone,
       email: r.email,
       notes: r.notes,
       active: r.active,
@@ -68,10 +84,12 @@ export class ProfessorsService {
   }
 
   async create(dto: CreateProfessorDto): Promise<ProfessorDocument> {
-    return this.model.create({
+    const professor = await this.model.create({
       ...dto,
       userId: dto.userId ? new Types.ObjectId(dto.userId) : undefined,
     });
+    if (professor.userId) await this.grantGroupsAccess(professor.userId);
+    return professor;
   }
 
   async update(id: string, dto: UpdateProfessorDto): Promise<ProfessorDocument> {
@@ -80,9 +98,17 @@ export class ProfessorsService {
     Object.assign(prof, rest, { updatedAt: new Date() });
     if (userId !== undefined) {
       prof.userId = userId ? new Types.ObjectId(userId) : undefined;
+      if (prof.userId) await this.grantGroupsAccess(prof.userId);
     }
     await prof.save();
     return prof;
+  }
+
+  private async grantGroupsAccess(userId: Types.ObjectId) {
+    await this.userModel.updateOne(
+      { _id: userId, 'allowedViews.0': { $exists: true } },
+      { $addToSet: { allowedViews: 'alumnos' } },
+    );
   }
 
   async remove(id: string): Promise<{ success: boolean }> {
@@ -101,6 +127,14 @@ export class ProfessorsService {
       .lean();
     if (!prof) throw new BadRequestException('Profesor no encontrado');
     return prof.name;
+  }
+
+  async ofUser(userId?: string) {
+    if (!userId || !Types.ObjectId.isValid(userId)) return null;
+    return this.model
+      .findOne({ userId, deletedAt: { $exists: false }, active: true })
+      .select('name')
+      .lean();
   }
 
   private async findOrThrow(id: string): Promise<ProfessorDocument> {

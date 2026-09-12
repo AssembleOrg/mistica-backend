@@ -60,6 +60,7 @@ export class GroupsService {
   }
 
   async create(dto: CreateGroupDto, actor?: Actor) {
+    this.assertSingleSchedule(dto.schedule);
     const data: Record<string, unknown> = {
       name: dto.name,
       description: dto.description,
@@ -106,7 +107,10 @@ export class GroupsService {
     }
     if (dto.name !== undefined) group.name = dto.name;
     if (dto.description !== undefined) group.description = dto.description;
-    if (dto.schedule !== undefined) group.schedule = dto.schedule as never;
+    if (dto.schedule !== undefined) {
+      this.assertSingleSchedule(dto.schedule);
+      group.schedule = dto.schedule as never;
+    }
     if (dto.studentIds !== undefined)
       group.studentIds = dto.studentIds.map((s) => new Types.ObjectId(s));
     if (dto.notes !== undefined) group.notes = dto.notes;
@@ -137,10 +141,7 @@ export class GroupsService {
       if (!prof) return [];
       filter.professorId = prof._id;
     }
-    return this.groupModel
-      .find(filter)
-      .sort({ name: 1 })
-      .lean();
+    return this.groupModel.find(filter).sort({ name: 1 }).lean();
   }
 
   private async assertCanManage(group: GroupDocument, actor?: Actor) {
@@ -159,6 +160,21 @@ export class GroupsService {
       .exec();
     if (!prof) throw new NotFoundException('Profesor no encontrado');
     return prof;
+  }
+
+  private assertSingleSchedule(
+    schedule?: Array<{ start: string; end: string }>,
+  ) {
+    if (!schedule || schedule.length !== 1) {
+      throw new BadRequestException(
+        'El grupo debe tener un único día y horario.',
+      );
+    }
+    if (schedule[0].start >= schedule[0].end) {
+      throw new BadRequestException(
+        'La hora de fin debe ser posterior a la hora de inicio.',
+      );
+    }
   }
 
   private async findOrThrow(id: string): Promise<GroupDocument> {

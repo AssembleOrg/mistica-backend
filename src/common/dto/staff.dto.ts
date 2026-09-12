@@ -48,6 +48,14 @@ export class UpdateStaffTaskDto extends PartialType(CreateStaffTaskDto) {
   status?: 'PENDING' | 'DONE';
 }
 
+export class AddStaffTaskCommentDto {
+  @ApiProperty({ description: 'Progreso, información, necesidad u observación' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
+  body: string;
+}
+
 export class CreateShoppingItemDto {
   @ApiProperty({ description: 'Producto o insumo que hace falta' })
   @IsString()

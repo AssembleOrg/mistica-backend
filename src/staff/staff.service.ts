@@ -107,6 +107,24 @@ export class StaffService {
     return { success: true };
   }
 
+  async addTaskComment(id: string, body: string, userId?: string) {
+    const task = await this.findTask(id);
+    const cleanBody = body.trim();
+    if (!cleanBody) throw new BadRequestException('El comentario está vacío');
+    const author = userId && Types.ObjectId.isValid(userId)
+      ? await this.userModel.findById(userId).lean()
+      : null;
+    task.comments.push({
+      authorUserId: author?._id as Types.ObjectId | undefined,
+      authorName: author?.name ?? author?.email ?? 'Integrante del equipo',
+      body: cleanBody,
+      createdAt: new Date(),
+    } as never);
+    task.updatedAt = new Date();
+    await task.save();
+    return task;
+  }
+
   // ── Lista de compras ─────────────────────────────────────────────────────
 
   async listShopping(status?: 'PENDING' | 'BOUGHT') {

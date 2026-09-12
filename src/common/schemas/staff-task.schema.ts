@@ -38,6 +38,25 @@ export class StaffTask {
   @Prop({ type: Date })
   completedAt?: Date;
 
+  @Prop({
+    type: [
+      {
+        authorUserId: { type: SchemaTypes.ObjectId, ref: 'User' },
+        authorName: { type: String, required: true },
+        body: { type: String, required: true, trim: true },
+        createdAt: { type: Date, required: true, default: Date.now },
+      },
+    ],
+    default: [],
+  })
+  comments: Array<{
+    _id: Types.ObjectId;
+    authorUserId?: Types.ObjectId;
+    authorName: string;
+    body: string;
+    createdAt: Date;
+  }>;
+
   // Evita repetir el recordatorio interno de vencimiento cada mañana.
   @Prop({ type: Date })
   dueReminderSentAt?: Date;

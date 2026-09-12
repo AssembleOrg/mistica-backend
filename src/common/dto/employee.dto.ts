@@ -20,6 +20,11 @@ export class CreateEmployeeDto {
   @IsString()
   phone?: string;
 
+  @ApiPropertyOptional({ description: 'Teléfono de emergencia' })
+  @IsOptional()
+  @IsString()
+  emergencyPhone?: string;
+
   @ApiPropertyOptional({ description: 'Dirección del empleado' })
   @IsOptional()
   @IsString()
@@ -51,6 +56,11 @@ export class UpdateEmployeeDto {
   @IsString()
   phone?: string;
 
+  @ApiPropertyOptional({ description: 'Teléfono de emergencia' })
+  @IsOptional()
+  @IsString()
+  emergencyPhone?: string;
+
   @ApiPropertyOptional({ description: 'Dirección del empleado' })
   @IsOptional()
   @IsString()
@@ -60,4 +70,4 @@ export class UpdateEmployeeDto {
   @IsOptional()
   @IsDateString()
   startDate?: string;
-} 
+}
