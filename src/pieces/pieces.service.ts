@@ -279,11 +279,14 @@ export class PiecesService implements OnModuleInit {
       const changedFields = Object.keys(dto).filter(
         (key) => dto[key as keyof UpdatePieceDto] !== undefined,
       );
-      if (
-        changedFields.length !== 1 ||
-        changedFields[0] !== 'status' ||
-        dto.status !== PieceStatus.LISTA
-      ) {
+      // La profesora sólo marca "lista para retirar" y carga fotos; el resto
+      // (retiro, datos de la ficha, aviso) queda para el admin.
+      const allowed = changedFields.every(
+        (key) =>
+          key === 'photos' ||
+          (key === 'status' && dto.status === PieceStatus.LISTA),
+      );
+      if (!changedFields.length || !allowed) {
         throw new BadRequestException(
           'La profesora sólo puede marcar una pieza como lista para retirar.',
         );

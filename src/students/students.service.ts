@@ -353,16 +353,18 @@ export class StudentsService {
           'Una clase no puede recuperarse en sí misma.',
         );
       }
+      // Un alumno sumado para recuperar que finalmente no vino queda AUSENTE
+      // pero conserva qué clase iba a recuperar (no se marca como recuperada).
+      const keepsMakeupRef =
+        r.status !== 'PRESENT' && !!r.makeupForGroupId && !!r.makeupForDate;
       return {
         studentId: new Types.ObjectId(r.studentId),
         status: r.status,
         notes: r.notes,
-        makeupForGroupId:
-          r.status === 'MAKEUP' && r.makeupForGroupId
-            ? new Types.ObjectId(r.makeupForGroupId)
-            : undefined,
-        makeupForDate:
-          r.status === 'MAKEUP' ? r.makeupForDate : undefined,
+        makeupForGroupId: keepsMakeupRef
+          ? new Types.ObjectId(r.makeupForGroupId)
+          : undefined,
+        makeupForDate: keepsMakeupRef ? r.makeupForDate : undefined,
         recoveredInGroupId: existingRecord?.recoveredInGroupId,
         recoveredInDate: existingRecord?.recoveredInDate,
         recoveredAt: existingRecord?.recoveredAt,
