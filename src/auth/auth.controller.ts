@@ -93,7 +93,7 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Usuario actual' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   me(@Req() req: AuthenticatedRequest) {
-    return req.user;
+    return this.authService.me(req.user);
   }
 
   @Post('register')

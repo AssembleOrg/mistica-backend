@@ -78,6 +78,20 @@ export class AuthService {
     }
   }
 
+  /**
+   * Usuario de la sesión actual. El token no lleva el nombre, así que se
+   * completa desde la base; rol y vistas se mantienen los del token porque
+   * son los que efectivamente aplica el API hasta el próximo login.
+   */
+  async me(sessionUser: { id: string; email: string; role: string }) {
+    const user = await this.userModel
+      .findOne({ _id: sessionUser.id, deletedAt: { $exists: false } })
+      .select('name')
+      .lean();
+    if (!user) throw new UnauthorizedException('Sesión inválida');
+    return { ...sessionUser, name: user.name };
+  }
+
   async register(createUserDto: CreateUserDto) {
     if (!createUserDto.email || !createUserDto.password || !createUserDto.name) {
       throw new BadRequestException('Email, contraseña y nombre son requeridos');
