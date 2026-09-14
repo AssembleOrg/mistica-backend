@@ -542,11 +542,11 @@ export class ReservationsService {
   /** Estado de una reserva por id (para polling del front). */
   async getStatus(id: string) {
     const r = await this.findByIdOrThrow(id);
-    return this.publicView(r);
+    return this.lookupView(r);
   }
 
   /** Búsqueda pública por código de gestión. */
-  async getByCode(code: string) {
+  async getByCode(code: string, opts: { includePhone?: boolean } = {}) {
     const r = await this.reservationModel
       .findOne({
         code: code.trim().toUpperCase(),
@@ -554,7 +554,7 @@ export class ReservationsService {
       })
       .exec();
     if (!r) throw new NotFoundException('Reserva no encontrada');
-    return this.publicView(r);
+    return this.lookupView(r, opts);
   }
 
   /**
@@ -574,7 +574,7 @@ export class ReservationsService {
       r.status === ReservationStatus.CANCELLED ||
       r.status === ReservationStatus.EXPIRED
     ) {
-      return this.publicView(r);
+      return this.lookupView(r);
     }
     if (r.status === ReservationStatus.NEEDS_REVIEW) {
       throw new ConflictException(
@@ -597,7 +597,7 @@ export class ReservationsService {
       },
       { new: true },
     );
-    if (!won) return this.publicView(await this.findByIdOrThrow(String(r._id)));
+    if (!won) return this.lookupView(await this.findByIdOrThrow(String(r._id)));
 
     await this.tables.release(won._id as Types.ObjectId, won.startAt);
     await this.releaseSeats(won.sessionId, won.quantity);
@@ -608,7 +608,7 @@ export class ReservationsService {
     ) {
       await this.refundReservation(won);
     }
-    return this.publicView(won);
+    return this.lookupView(won);
   }
 
   // ───────────────────────── Webhook MercadoPago ─────────────────────────
@@ -1563,6 +1563,37 @@ export class ReservationsService {
         bank: envConfig.transfer.bank,
       },
       whatsapp: envConfig.businessWhatsapp,
+    };
+  }
+
+  /**
+   * Vista de los endpoints PÚBLICOS sin autenticación (estado por id, búsqueda
+   * y cancelación por código). No lleva datos personales: el código y el id se
+   * pueden adivinar, así que acertar uno no tiene que exponer nombre, email,
+   * teléfono ni notas. El bot (con X-Bot-Secret) recibe además el teléfono
+   * para verificar que la reserva sea del número que escribe.
+   */
+  private lookupView(
+    r: ReservationDocument,
+    opts: { includePhone?: boolean } = {},
+  ) {
+    return {
+      reservationId: String(r._id),
+      code: r.code,
+      status: r.status,
+      experienceName: r.experienceName,
+      startAt: r.startAt,
+      quantity: r.quantity,
+      unitPrice: r.unitPrice,
+      amount: r.amount,
+      depositAmount: r.depositAmount,
+      totalAmount: r.totalAmount,
+      balanceDue: r.balanceDue,
+      paymentMethod: r.paymentMethod,
+      expiresAt: r.expiresAt,
+      confirmedAt: r.confirmedAt,
+      cancelledAt: r.cancelledAt,
+      ...(opts.includePhone ? { customerPhone: r.customerPhone } : {}),
     };
   }
 

@@ -71,6 +71,7 @@ export class ReservationsController {
 
   @Get(':id/status')
   @Public()
+  @Throttle(30, 60) // el front consulta cada 3 s (20/min); el id no es secreto
   @ApiOperation({ summary: 'Estado de una reserva (polling)' })
   async status(@Param('id') id: string) {
     return this.reservationsService.getStatus(id);
@@ -80,8 +81,15 @@ export class ReservationsController {
   @Public()
   @Throttle(20, 60) // anti fuerza bruta de códigos de gestión
   @ApiOperation({ summary: 'Buscar reserva por código de gestión' })
-  async byCode(@Param('code') code: string) {
-    return this.reservationsService.getByCode(code);
+  async byCode(
+    @Param('code') code: string,
+    @Headers('x-bot-secret') secret?: string,
+  ) {
+    // Sin secreto: vista sin datos personales. El bot la pide con secreto
+    // para recibir el teléfono y chequear que coincida con quien escribe.
+    return this.reservationsService.getByCode(code, {
+      includePhone: this.isBotSecret(secret),
+    });
   }
 
   @Post('code/:code/cancel')
@@ -123,9 +131,13 @@ export class ReservationsController {
     return this.reservationsService.resolveTransferProof(id, dto);
   }
 
-  private assertBotSecret(secret?: string): void {
+  private isBotSecret(secret?: string): boolean {
     const expected = envConfig.botControl.secret;
-    if (!expected || secret !== expected) {
+    return !!expected && secret === expected;
+  }
+
+  private assertBotSecret(secret?: string): void {
+    if (!this.isBotSecret(secret)) {
       throw new UnauthorizedException('No autorizado');
     }
   }
