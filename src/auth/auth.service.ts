@@ -98,13 +98,18 @@ export class AuthService {
     }
 
     try {
+      // El índice único de email incluye cuentas borradas: sin este chequeo,
+      // Mongo rechaza el alta con E11000 y la respuesta es un 500.
       const existingUser = await this.userModel.findOne({
-        email: { $regex: new RegExp(`^${createUserDto.email}$`, 'i') },
-        deletedAt: { $exists: false }
+        email: createUserDto.email.toLowerCase(),
       }).exec();
 
       if (existingUser) {
-        throw new ConflictException('El email ya está registrado');
+        throw new ConflictException(
+          existingUser.deletedAt
+            ? 'El email pertenece a una cuenta eliminada. Restaurala o usá otro email.'
+            : 'El email ya está registrado',
+        );
       }
 
       const hashedPassword = await bcrypt.hash(createUserDto.password, 12);
@@ -138,13 +143,18 @@ export class AuthService {
     }
 
     try {
+      // El índice único de email incluye cuentas borradas: sin este chequeo,
+      // Mongo rechaza el alta con E11000 y la respuesta es un 500.
       const existingUser = await this.userModel.findOne({
-        email: { $regex: new RegExp(`^${createUserDto.email}$`, 'i') },
-        deletedAt: { $exists: false }
+        email: createUserDto.email.toLowerCase(),
       }).exec();
 
       if (existingUser) {
-        throw new ConflictException('El email ya está registrado');
+        throw new ConflictException(
+          existingUser.deletedAt
+            ? 'El email pertenece a una cuenta eliminada. Restaurala o usá otro email.'
+            : 'El email ya está registrado',
+        );
       }
 
       const hashedPassword = await bcrypt.hash(createUserDto.password, 12);

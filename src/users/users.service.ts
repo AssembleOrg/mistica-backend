@@ -8,6 +8,11 @@ import { UserDocument } from '../common/schemas';
 import { buildDateFilter } from '../common/utils';
 import * as bcrypt from 'bcryptjs';
 
+function isDuplicateEmailError(err: unknown): boolean {
+  const e = err as { code?: number; keyPattern?: Record<string, unknown> };
+  return e?.code === 11000 && !!e.keyPattern?.email;
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -30,24 +35,58 @@ export class UsersService {
   }
 
   async create(createUserDto: CreateUserDto): Promise<UserResponse> {
-    const existingUser = await this.userModel.findOne({ 
-      email: createUserDto.email.toLowerCase(),
-      deletedAt: { $exists: false }
-    }).exec();
+    const email = createUserDto.email.toLowerCase();
+    // El índice único de email incluye las cuentas borradas (soft delete), así
+    // que buscamos sin filtrar por deletedAt.
+    const existingUser = await this.userModel.findOne({ email }).exec();
 
-    if (existingUser) {
+    if (existingUser && !existingUser.deletedAt) {
       throw new EmailYaExisteException(createUserDto.email);
     }
 
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
 
-    const user = await this.userModel.create({
-      ...createUserDto,
-      email: createUserDto.email.toLowerCase(),
-      password: hashedPassword,
-    });
+    if (existingUser) {
+      // Volver a crear una cuenta borrada la reactiva con los datos nuevos. Se
+      // conserva el id, así que lo que ya apuntaba a ella (p. ej. la profesora
+      // vinculada) vuelve a funcionar.
+      const { allowedViews, ...rest } = createUserDto;
+      const user = await this.userModel
+        .findByIdAndUpdate(
+          existingUser._id,
+          {
+            $set: {
+              ...rest,
+              email,
+              password: hashedPassword,
+              updatedAt: new Date(),
+              ...(allowedViews !== undefined ? { allowedViews } : {}),
+            },
+            $unset: {
+              deletedAt: 1,
+              ...(allowedViews === undefined ? { allowedViews: 1 } : {}),
+            },
+          },
+          { new: true, runValidators: true },
+        )
+        .exec();
+      if (!user) throw new UsuarioNoEncontradoException(String(existingUser._id));
+      return this.mapToUserResponse(user);
+    }
 
-    return this.mapToUserResponse(user);
+    try {
+      const user = await this.userModel.create({
+        ...createUserDto,
+        email,
+        password: hashedPassword,
+      });
+      return this.mapToUserResponse(user);
+    } catch (err) {
+      if (isDuplicateEmailError(err)) {
+        throw new EmailYaExisteException(createUserDto.email);
+      }
+      throw err;
+    }
   }
 
   async findAll(paginationDto?: PaginatedDateFilterDto): Promise<PaginatedResponse<UserResponse>> {
@@ -120,14 +159,17 @@ export class UsersService {
     const existingUser = await this.findOne(id);
 
     if (updateUserDto.email && updateUserDto.email !== existingUser.email) {
-      const emailExists = await this.userModel.findOne({ 
+      const emailExists = await this.userModel.findOne({
         email: updateUserDto.email.toLowerCase(),
         _id: { $ne: id },
-        deletedAt: { $exists: false }
       }).exec();
 
       if (emailExists) {
-        throw new ConflictException('El email ya está registrado');
+        throw new ConflictException(
+          emailExists.deletedAt
+            ? 'El email pertenece a una cuenta eliminada. Restaurala o usá otro email.'
+            : 'El email ya está registrado',
+        );
       }
     }
 
