@@ -7,8 +7,10 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public, AllowedViews } from '../common/decorators';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -19,6 +21,10 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { ReservationsService } from '../reservations/reservations.service';
 import { ExperiencesService } from './experiences.service';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
+
+interface AuthRequest extends Request {
+  user?: { id: string; role?: string; allowedViews?: string[] };
+}
 
 @ApiTags('Turnos')
 @Controller('experience-sessions')
@@ -88,9 +94,12 @@ export class ExperienceSessionsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Anotados de un turno' })
-  async attendees(@Param('id') id: string) {
+  async attendees(@Param('id') id: string, @Req() req: AuthRequest) {
     const session = await this.experiencesService.getSession(id);
-    const reservations = await this.reservationsService.listBySession(id);
+    const reservations = await this.reservationsService.listBySession(
+      id,
+      req.user,
+    );
     return { session, reservations };
   }
 

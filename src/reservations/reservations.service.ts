@@ -854,9 +854,10 @@ export class ReservationsService {
   }
 
   /**
-   * Reserva vista por cocina/taller: sólo lo necesario para preparar el día.
-   * Lista blanca a propósito — sin nombre, contacto, importes ni el código de
-   * gestión (con ese código se puede cancelar la reserva desde la web).
+   * Reserva vista por cocina/taller: sólo lo necesario para organizar el día.
+   * Lista blanca a propósito — muestra el nombre de quien reserva (para saber
+   * quién viene) pero NO el contacto, los importes ni el código de gestión
+   * (con ese código se puede cancelar la reserva desde la web).
    */
   private redactReservation(r: Record<string, any>): Record<string, any> {
     return {
@@ -865,6 +866,7 @@ export class ReservationsService {
       sessionId: r.sessionId,
       experienceId: r.experienceId,
       experienceName: r.experienceName,
+      customerName: r.customerName,
       startAt: r.startAt,
       quantity: r.quantity,
       dietaryTags: r.dietaryTags ?? [],
@@ -931,10 +933,10 @@ export class ReservationsService {
   }
 
   /** Anotados de un turno (para "ver los anotados"). */
-  async listBySession(sessionId: string) {
+  async listBySession(sessionId: string, actor?: Actor) {
     if (!Types.ObjectId.isValid(sessionId))
       throw new BadRequestException('sessionId inválido');
-    return this.reservationModel
+    const items = await this.reservationModel
       .find({
         sessionId: new Types.ObjectId(sessionId),
         status: {
@@ -944,6 +946,12 @@ export class ReservationsService {
       })
       .sort({ createdAt: 1 })
       .lean();
+    // Una cuenta con la Agenda recortada (cocina/tutores, sólo 'reservas:agenda')
+    // ve nombre, cantidad, actividad y restricciones, pero no contacto ni
+    // importes. El admin y quien tenga la vista Reservas completa ven todo.
+    return this.canSeeReservationDetails(actor)
+      ? items
+      : items.map((r) => this.redactReservation(r as Record<string, any>));
   }
 
   // ───────────────────────── Helpers internos ─────────────────────────
