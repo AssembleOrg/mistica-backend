@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { map, Observable } from 'rxjs';
-import { Public } from '../common/decorators';
+import { Public, AllowedViews } from '../common/decorators';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -25,6 +25,7 @@ import {
 } from '../common/dto/conversation.dto';
 import { envConfig } from '../config/env.config';
 import { ConversationsService } from './conversations.service';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 /** Lo que el guard de JWT deja en la request. */
 interface RequestWithUser {
@@ -33,6 +34,8 @@ interface RequestWithUser {
 
 @ApiTags('Conversaciones')
 @Controller('conversations')
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
+@AllowedViews('reservas')
 export class ConversationsController {
   constructor(private readonly service: ConversationsService) {}
 
@@ -84,8 +87,8 @@ export class ConversationsController {
 
   @Get('stream')
   @Sse()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, AllowedViewsGuard)
+  @AllowedViews('reservas')
   @ApiBearerAuth()
   @ApiOperation({
     summary:
@@ -96,8 +99,8 @@ export class ConversationsController {
   }
 
   @Get()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, AllowedViewsGuard)
+  @AllowedViews('reservas')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Bandeja de charlas' })
   list(@Query('status') status?: string) {
@@ -105,8 +108,8 @@ export class ConversationsController {
   }
 
   @Get(':id/messages')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, AllowedViewsGuard)
+  @AllowedViews('reservas')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Mensajes de una charla' })
   messages(@Param('id') id: string) {
@@ -114,8 +117,8 @@ export class ConversationsController {
   }
 
   @Post(':id/take')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, AllowedViewsGuard)
+  @AllowedViews('reservas')
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Tomar la charla (pasa a atendida por una persona)',
@@ -125,8 +128,8 @@ export class ConversationsController {
   }
 
   @Post(':id/messages')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, AllowedViewsGuard)
+  @AllowedViews('reservas')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Responder al cliente por WhatsApp' })
   reply(
@@ -138,8 +141,8 @@ export class ConversationsController {
   }
 
   @Post(':id/close')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, AllowedViewsGuard)
+  @AllowedViews('reservas')
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Dar por terminada la charla y devolverle el chat al bot',

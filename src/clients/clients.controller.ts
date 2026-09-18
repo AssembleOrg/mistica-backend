@@ -17,15 +17,17 @@ import { CreateClientDto, UpdateClientDto, PaginatedDateFilterDto } from '../com
 import { Client, ClientWithPrepaids, PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { Auditory, Public } from '../common/decorators';
+import { Auditory, Public, AllowedViews } from '../common/decorators';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { envConfig } from '../config/env.config';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 @ApiTags('Clientes')
 @Controller('clients')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
 @ApiBearerAuth()
+@AllowedViews('clients', 'sales', 'alumnos')
 export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
 

@@ -15,14 +15,16 @@ import { CreateSaleDto, UpdateSaleDto, SalesPaginatedFilterDto, DailySalesQueryD
 import { Sale, PaginatedResponse, DailySalesResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { Auditory } from '../common/decorators';
+import { Auditory, AllowedViews } from '../common/decorators';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 @ApiTags('Ventas')
 @Controller('sales')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
 @ApiBearerAuth()
+@AllowedViews('sales')
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 

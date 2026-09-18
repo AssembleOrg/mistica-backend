@@ -18,6 +18,8 @@ import type { Request } from 'express';
 import { CreditNotesService } from './credit-notes.service';
 import { IssueCreditNoteDto } from '../common/dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { AllowedViews } from '../common/decorators';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 interface AuthRequest extends Request {
   user?: { id: string };
@@ -25,8 +27,9 @@ interface AuthRequest extends Request {
 
 @ApiTags('Notas de Crédito')
 @Controller()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
 @ApiBearerAuth()
+@AllowedViews('sales')
 export class CreditNotesController {
   constructor(private readonly cnService: CreditNotesService) {}
 

@@ -34,8 +34,9 @@ import {
 } from '../common/dto';
 import { IEgress, PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { Auditory } from '../common/decorators';
+import { Auditory, AllowedViews } from '../common/decorators';
 import { EgressStatus, EgressType, Currency } from '../common/enums';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 interface AuthRequest extends Request {
   user?: { id: string; email?: string };
@@ -43,8 +44,9 @@ interface AuthRequest extends Request {
 
 @ApiTags('Egresos')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('egresses')
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
+@AllowedViews('finances')
 export class EgressesController {
   constructor(private readonly egressesService: EgressesService) {}
 

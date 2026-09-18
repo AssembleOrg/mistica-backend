@@ -26,11 +26,13 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { TablesService } from './tables.service';
 import { ShiftsService } from './shifts.service';
 import { RecurringBlocksService } from './recurring-blocks.service';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
+import { AllowedViews } from '../common/decorators';
 
 @ApiTags('Mesas')
 @Controller('tables')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
+@AllowedViews('reservas')
 @ApiBearerAuth()
 export class TablesController {
   constructor(

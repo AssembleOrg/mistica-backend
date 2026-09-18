@@ -23,8 +23,9 @@ import { SaleStatus } from 'src/common/enums';
 
 @ApiTags('Usuarios')
 @Controller('users')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
+@Roles(UserRole.ADMIN)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 

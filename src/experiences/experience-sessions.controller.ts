@@ -10,7 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Public } from '../common/decorators';
+import { Public, AllowedViews } from '../common/decorators';
 import { Roles } from '../common/decorators/roles.decorator';
 import { GenerateSessionsDto, UpdateSessionDto } from '../common/dto';
 import { SessionStatus, UserRole } from '../common/enums';
@@ -18,9 +18,12 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ReservationsService } from '../reservations/reservations.service';
 import { ExperiencesService } from './experiences.service';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 @ApiTags('Turnos')
 @Controller('experience-sessions')
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
+@AllowedViews('reservas')
 export class ExperienceSessionsController {
   constructor(
     private readonly experiencesService: ExperiencesService,

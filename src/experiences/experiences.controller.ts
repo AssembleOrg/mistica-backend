@@ -10,16 +10,19 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Public } from '../common/decorators';
+import { Public, AllowedViews } from '../common/decorators';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CreateExperienceDto, UpdateExperienceDto } from '../common/dto';
 import { UserRole } from '../common/enums/user-role.enum';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ExperiencesService } from './experiences.service';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 @ApiTags('Experiencias')
 @Controller('experiences')
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
+@AllowedViews('reservas')
 export class ExperiencesController {
   constructor(private readonly experiencesService: ExperiencesService) {}
 

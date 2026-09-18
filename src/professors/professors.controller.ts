@@ -18,11 +18,14 @@ import { UserRole } from '../common/enums/user-role.enum';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ProfessorsService } from './professors.service';
+import { AllowedViews } from '../common/decorators';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 @ApiTags('Profesores')
 @Controller('professors')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, AllowedViewsGuard)
 @ApiBearerAuth()
+@AllowedViews('reservas', 'alumnos', 'cuentas')
 export class ProfessorsController {
   constructor(private readonly service: ProfessorsService) {}
 

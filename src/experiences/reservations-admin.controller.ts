@@ -24,6 +24,8 @@ import { UserRole } from '../common/enums/user-role.enum';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ReservationsService } from '../reservations/reservations.service';
+import { AllowedViews } from '../common/decorators';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 interface AuthRequest extends Request {
   user?: { id: string };
@@ -31,8 +33,9 @@ interface AuthRequest extends Request {
 
 @ApiTags('Reservas (admin)')
 @Controller('admin/reservations')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
 @ApiBearerAuth()
+@AllowedViews('reservas')
 export class ReservationsAdminController {
   constructor(private readonly reservationsService: ReservationsService) {}
 

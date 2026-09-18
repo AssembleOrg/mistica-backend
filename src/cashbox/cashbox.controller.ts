@@ -28,7 +28,8 @@ import {
   UpdateTransactionCheckedDto,
 } from '../common/dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { Auditory } from '../common/decorators';
+import { Auditory, AllowedViews } from '../common/decorators';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 interface AuthRequest extends Request {
   user?: { id: string };
@@ -36,8 +37,9 @@ interface AuthRequest extends Request {
 
 @ApiTags('Caja')
 @Controller('cashbox')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
 @ApiBearerAuth()
+@AllowedViews('sales', 'finances')
 export class CashboxController {
   constructor(private readonly cashboxService: CashboxService) { }
 

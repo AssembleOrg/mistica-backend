@@ -3,11 +3,14 @@ import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { ClientLabelsService } from './client-labels.service';
 import { CreateClientLabelDto, UpdateClientLabelDto } from '../common/dto/client-label.dto';
+import { AllowedViews } from '../common/decorators';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 @ApiTags('Etiquetas de Clientes')
 @Controller('client-labels')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
 @ApiBearerAuth()
+@AllowedViews('clients', 'sales')
 export class ClientLabelsController {
   constructor(private readonly service: ClientLabelsService) {}
 

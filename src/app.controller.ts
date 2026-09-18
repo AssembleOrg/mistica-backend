@@ -1,4 +1,8 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { RolesGuard } from './common/guards/roles.guard';
+import { Roles } from './common/decorators/roles.decorator';
+import { UserRole } from './common/enums/user-role.enum';
 import { AppService } from './app.service';
 import { DatabaseService } from './database/database.service';
 
@@ -32,6 +36,9 @@ export class AppController {
     };
   }
 
+  // Diagnóstico: expone versión y tamaños de la base, sólo para el admin.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Get('db-info')
   async getDatabaseInfo() {
     const dbInfo = await this.databaseService.getDatabaseInfo();

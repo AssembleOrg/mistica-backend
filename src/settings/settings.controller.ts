@@ -9,6 +9,9 @@ import type { Request } from 'express';
 import { SettingsService } from './settings.service';
 import { SetCashDeletePinDto } from '../common/dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
+import { RolesGuard } from '../common/guards/roles.guard';
 
 interface AuthRequest extends Request {
   user?: { id: string; email?: string };
@@ -16,8 +19,9 @@ interface AuthRequest extends Request {
 
 @ApiTags('Ajustes')
 @Controller('settings')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
+@Roles(UserRole.ADMIN)
 export class SettingsController {
   constructor(private readonly settingsService: SettingsService) {}
 

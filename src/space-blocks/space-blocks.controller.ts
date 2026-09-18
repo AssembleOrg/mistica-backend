@@ -15,11 +15,13 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
+import { AllowedViews } from '../common/decorators';
 
 @ApiTags('Bloqueos de espacio')
 @Controller('space-blocks')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
+@AllowedViews('reservas')
 @ApiBearerAuth()
 export class SpaceBlocksController {
   constructor(private readonly service: SpaceBlocksService) {}

@@ -19,8 +19,9 @@ import { UserRole } from '../common/enums/user-role.enum';
 
 @ApiTags('Categorías')
 @Controller('categories')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
+@Roles(UserRole.ADMIN)
 export class CategoriesController {
   constructor(private readonly service: CategoriesService) {}
 

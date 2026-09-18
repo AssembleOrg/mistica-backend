@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Public, Throttle } from '../common/decorators';
+import { Public, Throttle, AllowedViews } from '../common/decorators';
 import { SimpleThrottleGuard } from '../common/guards/simple-throttle.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
@@ -25,6 +25,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { envConfig } from '../config/env.config';
 import { LeadsService } from './leads.service';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 @ApiTags('Consultas (leads)')
 @Controller('leads')
@@ -60,8 +61,8 @@ export class LeadsController {
 
   // ── Admin ──
   @Get('receipt-image')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, AllowedViewsGuard)
+  @AllowedViews('reservas')
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'URL firmada (corta vida) de la imagen de un comprobante (admin)',
@@ -71,8 +72,8 @@ export class LeadsController {
   }
 
   @Get()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, AllowedViewsGuard)
+  @AllowedViews('reservas')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Listar consultas (admin)' })
   async list(@Query() query: ListLeadsQueryDto) {
@@ -80,8 +81,8 @@ export class LeadsController {
   }
 
   @Patch(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, AllowedViewsGuard)
+  @AllowedViews('reservas')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Actualizar estado/datos de una consulta (admin)' })
   async update(@Param('id') id: string, @Body() dto: UpdateLeadDto) {

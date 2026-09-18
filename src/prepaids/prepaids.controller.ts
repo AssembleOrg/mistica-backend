@@ -13,12 +13,14 @@ import { CreatePrepaidDto, PaginationDto } from '../common/dto';
 import { PrepaidPaginationDto } from '../common/dto/prepaid-pagination.dto';
 import { Prepaid, PaginatedResponse } from '../common/interfaces';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { Auditory } from '../common/decorators';
+import { Auditory, AllowedViews } from '../common/decorators';
+import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 @ApiTags('Prepaids')
 @Controller('prepaids')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AllowedViewsGuard)
 @ApiBearerAuth()
+@AllowedViews('clients', 'sales')
 export class PrepaidsController {
   constructor(private readonly prepaidsService: PrepaidsService) {}
 
