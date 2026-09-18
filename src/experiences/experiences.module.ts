@@ -6,6 +6,10 @@ import {
   ExperienceSession,
   ExperienceSessionSchema,
 } from '../common/schemas';
+import {
+  Reservation,
+  ReservationSchema,
+} from '../common/schemas/reservation.schema';
 import { ReservationsModule } from '../reservations/reservations.module';
 import { ClosedDatesModule } from '../closed-dates/closed-dates.module';
 import { TablesModule } from '../tables/tables.module';
@@ -19,6 +23,7 @@ import { ReservationsAdminController } from './reservations-admin.controller';
     MongooseModule.forFeature([
       { name: Experience.name, schema: ExperienceSchema },
       { name: ExperienceSession.name, schema: ExperienceSessionSchema },
+      { name: Reservation.name, schema: ReservationSchema },
     ]),
     ReservationsModule,
     ClosedDatesModule,

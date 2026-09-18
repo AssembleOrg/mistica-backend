@@ -14,6 +14,11 @@ import {
   UpdateSessionDto,
 } from '../common/dto';
 import { SessionStatus } from '../common/enums';
+import { ReservationStatus } from '../common/enums/reservation.enum';
+import {
+  Reservation,
+  ReservationDocument,
+} from '../common/schemas/reservation.schema';
 import {
   Experience,
   ExperienceDocument,
@@ -38,6 +43,8 @@ export class ExperiencesService {
     private readonly experienceModel: Model<ExperienceDocument>,
     @InjectModel(ExperienceSession.name)
     private readonly sessionModel: Model<ExperienceSessionDocument>,
+    @InjectModel(Reservation.name)
+    private readonly reservationModel: Model<ReservationDocument>,
     private readonly closedDates: ClosedDatesService,
     private readonly tables: TablesService,
   ) {}
@@ -222,6 +229,27 @@ export class ExperiencesService {
       .lean();
     const colorByExp = new Map(exps.map((e) => [String(e._id), e.color]));
 
+    // Personas CONFIRMADAS por turno. `seatsTaken` incluye reservas pendientes
+    // (holds del bot/landing) para no sobrevender; la Agenda, en cambio, es la
+    // fuente de verdad del negocio y cuenta sólo lo confirmado.
+    const sessionIds = sessions.map((s) => s._id as Types.ObjectId);
+    const confirmedAgg = await this.reservationModel.aggregate<{
+      _id: Types.ObjectId;
+      seats: number;
+    }>([
+      {
+        $match: {
+          sessionId: { $in: sessionIds },
+          status: ReservationStatus.CONFIRMED,
+          deletedAt: { $exists: false },
+        },
+      },
+      { $group: { _id: '$sessionId', seats: { $sum: '$quantity' } } },
+    ]);
+    const confirmedBySession = new Map(
+      confirmedAgg.map((r) => [String(r._id), r.seats]),
+    );
+
     // Tope de MESAS: lo que limita de verdad es el grupo más grande que entra
     // en las mesas libres del turno del día. No es la suma de asientos sueltos:
     // si quedan 3 mesas de 2, una reserva sola no puede pasar de 6 personas.
@@ -230,6 +258,7 @@ export class ExperiencesService {
         const view = this.sessionView(
           s as unknown as SessionLike,
           colorByExp.get(String(s.experienceId)),
+          confirmedBySession.get(String(s._id)) ?? 0,
         );
         if (!checkBookingWindow(s.startAt, s.durationMinutes).ok) {
           // Turno mal cargado (fuera de la ventana del negocio): no se puede
@@ -343,7 +372,11 @@ export class ExperiencesService {
     return exp?.color;
   }
 
-  private sessionView(s: SessionLike, experienceColor?: string) {
+  private sessionView(
+    s: SessionLike,
+    experienceColor?: string,
+    confirmedSeats?: number,
+  ) {
     // El turno sugerido se deriva de la hora de inicio y la duración. Es una
     // etiqueta: un horario fuera de todo turno es válido igual.
     const placed = suggestedShiftFor(s.startAt, s.durationMinutes);
@@ -361,6 +394,9 @@ export class ExperiencesService {
       endAt: s.endAt,
       capacity: s.capacity,
       seatsTaken: s.seatsTaken,
+      // Personas confirmadas (sin holds pendientes). En vistas de un solo turno
+      // no se calcula: cae a seatsTaken para no romper a otros consumidores.
+      confirmedSeats: confirmedSeats ?? s.seatsTaken,
       seatsAvailable: Math.max(0, s.capacity - s.seatsTaken),
       status: s.status,
       notes: s.notes,
