@@ -42,6 +42,15 @@ export class GroupsController {
     return this.service.list(req.user, includeInactive === 'true');
   }
 
+  @Get('agenda')
+  @AllowedViews('reservas', 'alumnos')
+  @ApiOperation({
+    summary: 'Clases del día con cuántos alumnos hay (sin nombres)',
+  })
+  dayAgenda(@Query('date') date: string) {
+    return this.service.dayAgenda(date ?? '');
+  }
+
   @Get('of-student/:studentId')
   @ApiOperation({ summary: 'Grupos en los que cursa un alumno' })
   ofStudent(@Param('studentId') studentId: string, @Req() req: AuthRequest) {

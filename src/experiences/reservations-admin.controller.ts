@@ -28,7 +28,7 @@ import { AllowedViews } from '../common/decorators';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 interface AuthRequest extends Request {
-  user?: { id: string };
+  user?: { id: string; role?: string; allowedViews?: string[] };
 }
 
 @ApiTags('Reservas (admin)')
@@ -52,8 +52,8 @@ export class ReservationsAdminController {
 
   @Get()
   @ApiOperation({ summary: 'Listar reservas (admin)' })
-  async list(@Query() query: ListReservationsQueryDto) {
-    return this.reservationsService.list(query);
+  async list(@Query() query: ListReservationsQueryDto, @Req() req: AuthRequest) {
+    return this.reservationsService.list(query, req.user);
   }
 
   @Post(':id/cancel')

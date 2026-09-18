@@ -55,6 +55,7 @@ import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { TablesService } from '../tables/tables.service';
 import { businessDateKey } from '../tables/shifts';
 import { AvailabilityService } from './availability.service';
+import { UserRole } from '../common/enums/user-role.enum';
 
 // Minutos que vive un hold esperando el comprobante de transferencia antes de
 // liberar el cupo y las mesas (el cliente transfiere y manda la captura por
@@ -76,6 +77,12 @@ interface MongoDupError {
 /** Escapa metacaracteres para usar un texto libre dentro de un RegExp. */
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+interface Actor {
+  id?: string;
+  role?: string;
+  allowedViews?: string[];
 }
 
 @Injectable()
@@ -834,8 +841,43 @@ export class ReservationsService {
     return this.publicView(reservation);
   }
 
+  /**
+   * ¿Esta cuenta puede ver los datos personales y la plata de las reservas?
+   * Los admin y las cuentas con la vista Reservas completa sí; una cuenta con
+   * sólo alguna pestaña suelta (p. ej. cocina, con 'reservas:agenda') ve los
+   * turnos, la cantidad de personas y las restricciones, nada más.
+   */
+  private canSeeReservationDetails(actor?: Actor): boolean {
+    if (actor?.role === UserRole.ADMIN) return true;
+    const views = actor?.allowedViews ?? [];
+    return views.length === 0 || views.includes('reservas');
+  }
+
+  /**
+   * Reserva vista por cocina/taller: sólo lo necesario para preparar el día.
+   * Lista blanca a propósito — sin nombre, contacto, importes ni el código de
+   * gestión (con ese código se puede cancelar la reserva desde la web).
+   */
+  private redactReservation(r: Record<string, any>): Record<string, any> {
+    return {
+      _id: r._id,
+      status: r.status,
+      sessionId: r.sessionId,
+      experienceId: r.experienceId,
+      experienceName: r.experienceName,
+      startAt: r.startAt,
+      quantity: r.quantity,
+      dietaryTags: r.dietaryTags ?? [],
+      dietaryNotes: r.dietaryNotes,
+      isBirthday: r.isBirthday ?? false,
+      shiftKey: r.shiftKey,
+      tableCodes: r.tableCodes ?? [],
+      sharedTable: r.sharedTable ?? false,
+    };
+  }
+
   /** Listado paginado para el admin (con filtros). */
-  async list(query: ListReservationsQueryDto) {
+  async list(query: ListReservationsQueryDto, actor?: Actor) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
@@ -878,7 +920,9 @@ export class ReservationsService {
     ]);
 
     return {
-      items,
+      items: this.canSeeReservationDetails(actor)
+        ? items
+        : items.map((r) => this.redactReservation(r as Record<string, any>)),
       total,
       page,
       limit,

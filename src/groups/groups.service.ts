@@ -13,6 +13,8 @@ import {
 } from '../common/schemas/professor.schema';
 import { CreateGroupDto, UpdateGroupDto } from '../common/dto/group.dto';
 import { UserRole } from '../common/enums/user-role.enum';
+import { DateTime } from 'luxon';
+import { envConfig } from '../config/env.config';
 
 export interface Actor {
   id: string;
@@ -142,6 +144,36 @@ export class GroupsService {
       filter.professorId = prof._id;
     }
     return this.groupModel.find(filter).sort({ name: 1 }).lean();
+  }
+
+  /**
+   * Clases que tienen los grupos ese día, con cuántos alumnos hay anotados.
+   * Sin nombres: la usa cocina para saber cuánta gente viene al taller.
+   */
+  async dayAgenda(dateKey: string) {
+    const weekday = DateTime.fromISO(dateKey, {
+      zone: envConfig.timezone,
+    }).weekday;
+    if (!Number.isFinite(weekday))
+      throw new BadRequestException('date debe ser YYYY-MM-DD');
+    const groups = await this.groupModel
+      .find({ deletedAt: { $exists: false }, isActive: true })
+      .select('name schedule studentIds professorName')
+      .lean();
+    return groups
+      .filter((g) => (g.schedule ?? []).some((slot) => slot.weekday === weekday))
+      .map((g) => {
+        const slot = (g.schedule ?? []).find((sl) => sl.weekday === weekday);
+        return {
+          groupId: String(g._id),
+          name: g.name,
+          professorName: g.professorName,
+          start: slot?.start ?? '',
+          end: slot?.end ?? '',
+          students: g.studentIds?.length ?? 0,
+        };
+      })
+      .sort((a, b) => a.start.localeCompare(b.start));
   }
 
   private async assertCanManage(group: GroupDocument, actor?: Actor) {
