@@ -96,8 +96,14 @@ export class AuthController {
     return this.authService.me(req.user);
   }
 
+  // Alta de cuentas: SIEMPRE la hace un admin (el panel usa POST /users). Sin
+  // guard, cualquiera podía crearse una cuenta —incluso con role: 'admin'—
+  // porque el rol viaja en el body.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Post('register')
-  @ApiOperation({ summary: 'Registrar nuevo usuario' })
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Registrar nuevo usuario (admin)' })
   @ApiResponse({ status: 201, description: 'Usuario registrado exitosamente' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   @ApiResponse({ status: 409, description: 'Email ya registrado' })
