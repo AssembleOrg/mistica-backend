@@ -8,9 +8,12 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Subject, Observable } from 'rxjs';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import {
+  ACTIVE_CONVERSATION_STATUSES,
   Conversation,
   ConversationDocument,
+  ConversationStatus,
 } from '../common/schemas/conversation.schema';
 import {
   ConversationMessage,
@@ -18,13 +21,19 @@ import {
   MessageAuthor,
 } from '../common/schemas/conversation-message.schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SpacesService } from '../common/services/spaces.service';
 import { BotHandoffService } from './bot-handoff.service';
+import { envConfig } from '../config/env.config';
 
 /** Error de clave duplicada de MongoDB. */
 const DUP_KEY = 11000;
 
 /** Cuántos mensajes del bot se guardan como contexto al abrir la charla. */
 const CONTEXT_MESSAGES = 12;
+
+/** Sin actividad por más de esto, una charla del bot se da por cerrada. */
+const SESSION_TTL_MS =
+  Math.max(1, envConfig.botControl.conversationSessionMinutes) * 60_000;
 
 /** Evento que se empuja al panel por SSE. */
 export interface ConversationEvent {
@@ -37,6 +46,11 @@ export interface ConversationEvent {
     authorName?: string;
     body: string;
     createdAt: Date;
+    mediaKind?: 'image' | 'document';
+    mediaMime?: string;
+    mediaName?: string;
+    /** URL firmada de corta vida para ver/descargar el adjunto. */
+    mediaUrl?: string;
   };
   /** Estado actual de la charla, para refrescar la bandeja sin pedirla. */
   conversation?: Record<string, unknown>;
@@ -67,6 +81,7 @@ export class ConversationsService {
     private readonly messageModel: Model<ConversationMessageDocument>,
     private readonly notifications: NotificationsService,
     private readonly botHandoff: BotHandoffService,
+    private readonly spaces: SpacesService,
   ) {}
 
   /** Stream de eventos para el panel (SSE). */
@@ -75,6 +90,172 @@ export class ConversationsService {
   }
 
   // ───────────────────── Entrada del bot ─────────────────────
+
+  /**
+   * Registra un turno de la charla con el bot (cliente + respuesta del bot).
+   * Toda consulta por WhatsApp queda persistida acá, turno a turno, sin pausar
+   * al bot. Reusa la charla viva del teléfono; si venció la sesión (o no hay),
+   * abre una nueva. NO suma "no leídos": la bandeja sólo marca lo que necesita
+   * atención humana (handoff), no cada charla que el bot resolvió solo.
+   */
+  async logTurn(params: {
+    phone: string;
+    customerName?: string;
+    userText: string;
+    botText?: string;
+    intent?: string;
+    tags?: string[];
+  }): Promise<{ conversationId: string; status: ConversationStatus } | null> {
+    const phone = this.normalizePhone(params.phone);
+    if (!phone) throw new BadRequestException('Teléfono inválido');
+    const userText = (params.userText ?? '').trim();
+    if (!userText && !params.botText?.trim()) return null;
+
+    const { conversation, opened } = await this.resolveActive(phone, {
+      customerName: params.customerName,
+      intent: params.intent,
+      tags: params.tags,
+    });
+
+    // Si la charla está en manos de una persona, el bot no debería estar
+    // respondiendo: no duplicamos su texto. El mensaje del cliente ya entra
+    // por appendInbound. Salimos sin tocar nada.
+    if (conversation.status === 'HUMAN' || conversation.status === 'WAITING') {
+      return {
+        conversationId: String(conversation._id),
+        status: conversation.status,
+      };
+    }
+
+    // (nombre/tema ya los enriqueció resolveActive)
+    const docs: Array<Partial<ConversationMessage>> = [];
+    if (userText)
+      docs.push({
+        conversationId: conversation._id as Types.ObjectId,
+        author: 'CLIENT',
+        body: userText,
+      });
+    const botText = (params.botText ?? '').trim();
+    if (botText)
+      docs.push({
+        conversationId: conversation._id as Types.ObjectId,
+        author: 'BOT',
+        body: botText,
+      });
+    if (docs.length) await this.messageModel.insertMany(docs);
+
+    // El preview es lo último dicho (respuesta del bot, o el cliente si no hubo).
+    conversation.lastMessageAt = new Date();
+    conversation.lastMessagePreview = (botText || userText).slice(0, 140);
+    await conversation.save();
+
+    this.emit({
+      type: opened ? 'opened' : 'message',
+      conversationId: String(conversation._id),
+      phone,
+      message: docs.length
+        ? {
+            author: docs[docs.length - 1].author as MessageAuthor,
+            body: docs[docs.length - 1].body as string,
+            createdAt: new Date(),
+          }
+        : undefined,
+      conversation: this.view(conversation),
+    });
+    return {
+      conversationId: String(conversation._id),
+      status: conversation.status,
+    };
+  }
+
+  /**
+   * Adjunto (imagen o documento) que mandó el cliente. Lo sube el bot para que
+   * quede EN la charla. Va a Spaces privado (nunca público); el panel lo ve con
+   * URL firmada de corta vida. Se registra como mensaje del cliente, aunque la
+   * charla la esté atendiendo una persona (ahí además cuenta como no leído).
+   */
+  async attachMedia(params: {
+    phone: string;
+    customerName?: string;
+    kind: 'image' | 'document';
+    mime: string;
+    name?: string;
+    caption?: string;
+    dataBase64: string;
+    intent?: string;
+    tags?: string[];
+  }): Promise<{ stored: boolean; messageId?: string }> {
+    const phone = this.normalizePhone(params.phone);
+    if (!phone) throw new BadRequestException('Teléfono inválido');
+
+    const { conversation, opened } = await this.resolveActive(phone, {
+      customerName: params.customerName,
+      intent: params.intent,
+      tags: params.tags,
+    });
+    const inHumanHands =
+      conversation.status === 'HUMAN' || conversation.status === 'WAITING';
+
+    // Subida a Spaces (privada). Best-effort: si falla o no hay bucket, igual
+    // dejamos constancia del adjunto (sin archivo) para que el equipo sepa que
+    // llegó algo.
+    let mediaKey = '';
+    if (this.spaces.enabled) {
+      try {
+        const buf = Buffer.from(params.dataBase64, 'base64');
+        const ext = this.extForMime(params.mime, params.name);
+        const rand = Math.random().toString(36).slice(2, 10);
+        mediaKey = await this.spaces.uploadPrivate(
+          `conversations/${String(conversation._id)}/${Date.now()}-${rand}${ext}`,
+          buf,
+          params.mime || 'application/octet-stream',
+        );
+      } catch (err) {
+        this.logger.warn(
+          `No se pudo subir el adjunto a Spaces: ${String(err)}`,
+        );
+        mediaKey = '';
+      }
+    }
+
+    const caption = (params.caption ?? '').trim();
+    const msg = await this.messageModel.create({
+      conversationId: conversation._id as Types.ObjectId,
+      author: 'CLIENT',
+      body: caption,
+      mediaKey: mediaKey || undefined,
+      mediaKind: params.kind,
+      mediaMime: params.mime,
+      mediaName: params.name,
+    });
+
+    const label =
+      params.kind === 'image' ? '📷 Foto' : `📎 ${params.name || 'Archivo'}`;
+    const preview = caption ? `${label} · ${caption}` : label;
+    await this.touch(
+      conversation,
+      preview,
+      inHumanHands ? conversation.unreadForAdmin + 1 : 0,
+    );
+
+    const mediaUrl = mediaKey ? await this.signedFor(mediaKey) : undefined;
+    this.emit({
+      type: opened ? 'opened' : 'message',
+      conversationId: String(conversation._id),
+      phone,
+      message: {
+        author: 'CLIENT',
+        body: caption,
+        createdAt: msg.createdAt,
+        mediaKind: params.kind,
+        mediaMime: params.mime,
+        mediaName: params.name,
+        mediaUrl,
+      },
+      conversation: this.view(conversation),
+    });
+    return { stored: true, messageId: String(msg._id) };
+  }
 
   /**
    * El cliente pidió hablar con una persona. Abre la charla (o devuelve la que
@@ -91,13 +272,36 @@ export class ConversationsService {
     const phone = this.normalizePhone(params.phone);
     if (!phone) throw new BadRequestException('Teléfono inválido');
 
-    const open = await this.openFor(phone);
-    if (open) {
-      // Ya estaba esperando: no abrimos otra ni duplicamos el contexto.
+    const active = await this.activeFor(phone);
+    if (active && active.status !== 'BOT') {
+      // Ya estaba en manos del equipo (WAITING/HUMAN): no abrimos otra.
       this.logger.log(
         `Handoff repetido para ***${phone.slice(-4)}: reuso la charla`,
       );
-      return open;
+      return active;
+    }
+
+    // Si venía charlando con el bot, promovemos ESA misma charla a WAITING: el
+    // hilo ya está persistido turno a turno, no hace falta volcar contexto.
+    if (active && active.status === 'BOT') {
+      active.status = 'WAITING';
+      active.reason = params.reason ?? active.reason;
+      active.requestedAt = new Date();
+      if (params.customerName && !active.customerName) {
+        active.customerName = params.customerName;
+      }
+      await this.touch(
+        active,
+        params.reason ?? 'Pidió hablar con una persona',
+        active.unreadForAdmin + 1,
+      );
+      this.emit({
+        type: 'opened',
+        conversationId: String(active._id),
+        phone,
+        conversation: this.view(active),
+      });
+      return active;
     }
 
     let conversation: ConversationDocument;
@@ -113,7 +317,7 @@ export class ConversationsService {
     } catch (err) {
       // Carrera: dos mensajes seguidos pidiendo lo mismo.
       if ((err as { code?: number })?.code === DUP_KEY) {
-        const winner = await this.openFor(phone);
+        const winner = await this.activeFor(phone);
         if (winner) return winner;
       }
       throw err;
@@ -181,14 +385,23 @@ export class ConversationsService {
 
   // ───────────────────── Panel ─────────────────────
 
-  /** Bandeja: primero las que esperan, después por actividad reciente. */
+  /**
+   * Bandeja de consultas. Sin filtro trae TODAS (bot y handoff) por actividad
+   * reciente, con lo que necesita atención (no leído) arriba. `status` acepta
+   * uno o varios separados por coma (ej. "WAITING,HUMAN" para "pendientes").
+   */
   async list(status?: string) {
     const filter: Record<string, unknown> = {};
-    if (status) filter.status = status;
+    const wanted = (status ?? '')
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+    if (wanted.length === 1) filter.status = wanted[0];
+    else if (wanted.length > 1) filter.status = { $in: wanted };
     const rows = await this.conversationModel
       .find(filter)
-      .sort({ status: 1, lastMessageAt: -1 })
-      .limit(100)
+      .sort({ unreadForAdmin: -1, lastMessageAt: -1 })
+      .limit(200)
       .lean();
     return rows.map((r) => this.view(r as unknown as ConversationDocument));
   }
@@ -199,17 +412,22 @@ export class ConversationsService {
       .find({ conversationId: conversation._id as Types.ObjectId })
       .sort({ createdAt: 1 })
       .lean();
-    return {
-      conversation: this.view(conversation),
-      messages: rows.map((m) => ({
+    const messages = await Promise.all(
+      rows.map(async (m) => ({
         id: (m._id as Types.ObjectId).toHexString(),
         author: m.author,
         authorName: m.authorName,
         body: m.body,
         delivered: m.delivered,
         createdAt: m.createdAt,
+        mediaKind: m.mediaKind,
+        mediaMime: m.mediaMime,
+        mediaName: m.mediaName,
+        // URL firmada de corta vida: el panel la usa recién al abrir la charla.
+        mediaUrl: m.mediaKey ? await this.signedFor(m.mediaKey) : undefined,
       })),
-    };
+    );
+    return { conversation: this.view(conversation), messages };
   }
 
   /** Alguien del equipo toma la charla: pasa a HUMAN y se marca leída. */
@@ -218,12 +436,16 @@ export class ConversationsService {
     if (conversation.status === 'CLOSED') {
       throw new ConflictException('Esa charla ya está cerrada.');
     }
+    // Si la venía atendiendo el bot, hay que callarlo YA: sin este empujón el
+    // bot seguiría respondiendo hasta que venza su caché de "pausado".
+    const wasBot = conversation.status === 'BOT';
     conversation.status = 'HUMAN';
     conversation.takenAt = conversation.takenAt ?? new Date();
     conversation.takenByName = user.name ?? conversation.takenByName;
     if (user.id) conversation.takenById = new Types.ObjectId(user.id);
     conversation.unreadForAdmin = 0;
     await conversation.save();
+    if (wasBot) await this.botHandoff.setPaused(conversation.phone, true);
 
     this.emit({
       type: 'message',
@@ -253,13 +475,17 @@ export class ConversationsService {
     const text = body.trim();
     if (!text) throw new BadRequestException('El mensaje está vacío.');
 
-    // Primer mensaje del equipo: la charla queda tomada.
-    if (conversation.status === 'WAITING') {
+    // Primer mensaje del equipo: la charla queda tomada. Si la atendía el bot,
+    // además hay que pausarlo ya (no esperar a que venza su caché) para que no
+    // respondan los dos encima.
+    const wasBot = conversation.status === 'BOT';
+    if (conversation.status === 'WAITING' || wasBot) {
       conversation.status = 'HUMAN';
       conversation.takenAt = new Date();
       conversation.takenByName = user.name;
       if (user.id) conversation.takenById = new Types.ObjectId(user.id);
     }
+    if (wasBot) await this.botHandoff.setPaused(conversation.phone, true);
 
     const delivered = await this.notifications.notify(conversation.phone, text);
     const msg = await this.messageModel.create({
@@ -321,7 +547,138 @@ export class ConversationsService {
     return this.view(conversation);
   }
 
+  // ───────────────────── Mantenimiento ─────────────────────
+
+  /**
+   * Cierra las charlas del bot que quedaron sin actividad más allá del TTL de
+   * sesión. Así la próxima consulta del mismo teléfono abre una charla nueva
+   * (una consulta = una sesión) y no se queda un "BOT" vivo para siempre
+   * bloqueando el índice único. Sólo toca BOT: las WAITING/HUMAN son del equipo.
+   */
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async closeStaleBotConversations(): Promise<void> {
+    const cutoff = new Date(Date.now() - SESSION_TTL_MS);
+    const res = await this.conversationModel.updateMany(
+      { status: 'BOT', lastMessageAt: { $lt: cutoff } },
+      { $set: { status: 'CLOSED', closedAt: new Date(), unreadForAdmin: 0 } },
+    );
+    const n = (res as { modifiedCount?: number }).modifiedCount ?? 0;
+    if (n) this.logger.log(`Cerradas ${n} charla(s) del bot por inactividad`);
+  }
+
   // ───────────────────── Helpers ─────────────────────
+
+  /**
+   * Devuelve la charla viva del teléfono para colgarle un mensaje del cliente
+   * (texto o adjunto), abriéndola si no hay o si la del bot venció. NO promueve
+   * ni cambia el estado de las que están en manos del equipo.
+   */
+  private async resolveActive(
+    phone: string,
+    meta: { customerName?: string; intent?: string; tags?: string[] },
+  ): Promise<{ conversation: ConversationDocument; opened: boolean }> {
+    let conversation = await this.activeFor(phone);
+
+    // Charla del bot vencida: se cierra y arranca una nueva (una consulta = una
+    // sesión). Las WAITING/HUMAN no se tocan: son del equipo.
+    if (
+      conversation &&
+      conversation.status === 'BOT' &&
+      this.isStale(conversation)
+    ) {
+      await this.markClosed(conversation);
+      conversation = null;
+    }
+
+    if (conversation) {
+      // Enriquecer datos que el bot va descubriendo, sin pisar lo cargado.
+      const patch: Record<string, unknown> = {};
+      if (meta.customerName && !conversation.customerName) {
+        conversation.customerName = meta.customerName;
+        patch.customerName = meta.customerName;
+      }
+      if (meta.intent && conversation.intent !== meta.intent) {
+        conversation.intent = meta.intent;
+        patch.intent = meta.intent;
+      }
+      if (meta.tags?.length) {
+        const merged = Array.from(
+          new Set([...(conversation.tags ?? []), ...meta.tags]),
+        );
+        conversation.tags = merged;
+        patch.tags = merged;
+      }
+      if (Object.keys(patch).length) await conversation.save();
+      return { conversation, opened: false };
+    }
+
+    try {
+      conversation = await this.conversationModel.create({
+        phone,
+        customerName: meta.customerName,
+        status: 'BOT',
+        intent: meta.intent,
+        tags: meta.tags?.length ? meta.tags : undefined,
+        requestedAt: new Date(),
+        lastMessageAt: new Date(),
+      });
+      return { conversation, opened: true };
+    } catch (err) {
+      // Carrera: dos mensajes casi simultáneos del mismo teléfono.
+      if ((err as { code?: number })?.code === DUP_KEY) {
+        const winner = await this.activeFor(phone);
+        if (winner) return { conversation: winner, opened: false };
+      }
+      throw err;
+    }
+  }
+
+  /** URL firmada de corta vida para un adjunto privado (best-effort). */
+  private async signedFor(key: string): Promise<string | undefined> {
+    if (!key || !this.spaces.enabled) return undefined;
+    try {
+      return await this.spaces.signedUrl(key);
+    } catch (err) {
+      this.logger.warn(`No pude firmar la URL del adjunto: ${String(err)}`);
+      return undefined;
+    }
+  }
+
+  /** Extensión de archivo a partir del mime o del nombre original. */
+  private extForMime(mime: string, name?: string): string {
+    const fromName = name && name.includes('.') ? name.split('.').pop() : '';
+    if (fromName) return `.${fromName.toLowerCase().slice(0, 8)}`;
+    const m = (mime || '').toLowerCase();
+    if (m.includes('png')) return '.png';
+    if (m.includes('webp')) return '.webp';
+    if (m.includes('jpeg') || m.includes('jpg')) return '.jpg';
+    if (m.includes('pdf')) return '.pdf';
+    if (m.includes('gif')) return '.gif';
+    return '';
+  }
+
+  /** ¿La charla venció por inactividad (sesión del bot terminada)? */
+  private isStale(conversation: ConversationDocument): boolean {
+    const last = conversation.lastMessageAt?.getTime() ?? 0;
+    return Date.now() - last > SESSION_TTL_MS;
+  }
+
+  /** Marca una charla como cerrada (sin avisar al bot: nunca estuvo pausado). */
+  private async markClosed(conversation: ConversationDocument): Promise<void> {
+    conversation.status = 'CLOSED';
+    conversation.closedAt = new Date();
+    conversation.unreadForAdmin = 0;
+    await conversation.save();
+  }
+
+  /** La charla viva del teléfono (bot o en handoff), si hay. */
+  private async activeFor(phone: string): Promise<ConversationDocument | null> {
+    if (!phone) return null;
+    return this.conversationModel
+      .findOne({ phone, status: { $in: ACTIVE_CONVERSATION_STATUSES } })
+      .sort({ lastMessageAt: -1 })
+      .exec();
+  }
 
   private async openFor(phone: string): Promise<ConversationDocument | null> {
     if (!phone) return null;
@@ -364,6 +721,8 @@ export class ConversationsService {
       phone: c.phone,
       customerName: c.customerName,
       status: c.status,
+      intent: c.intent,
+      tags: c.tags ?? [],
       reason: c.reason,
       requestedAt: c.requestedAt,
       takenByName: c.takenByName,

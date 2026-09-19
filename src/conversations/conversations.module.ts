@@ -7,6 +7,7 @@ import {
   ConversationMessageSchema,
 } from '../common/schemas';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SpacesService } from '../common/services/spaces.service';
 import { BotHandoffService } from './bot-handoff.service';
 import { ConversationsController } from './conversations.controller';
 import { ConversationsService } from './conversations.service';
@@ -20,7 +21,7 @@ import { ConversationsService } from './conversations.service';
     NotificationsModule,
   ],
   controllers: [ConversationsController],
-  providers: [ConversationsService, BotHandoffService],
+  providers: [ConversationsService, BotHandoffService, SpacesService],
   exports: [ConversationsService],
 })
 export class ConversationsModule {}

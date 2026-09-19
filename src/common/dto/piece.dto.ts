@@ -52,6 +52,50 @@ export class CreateReservationPiecesDto {
   entries: ReservationPieceEntryDto[];
 }
 
+/** Una ficha de pieza para un alumno del grupo. */
+export class GroupPieceEntryDto {
+  @ApiProperty({ description: 'Alumno del grupo al que pertenece la pieza' })
+  @IsMongoId()
+  studentId: string;
+
+  @ApiProperty({ description: 'Nombre de la persona (por defecto, el alumno)' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  personName: string;
+
+  @ApiProperty({ description: 'Firma colocada físicamente en la pieza' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  signature: string;
+
+  @ApiProperty({ description: 'Pieza elegida' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  pieceType: string;
+
+  @ApiProperty({ description: 'Colores utilizados' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(300)
+  colorsUsed: string;
+}
+
+export class CreateGroupPiecesDto {
+  @ApiProperty({ description: 'Grupo de taller seleccionado' })
+  @IsMongoId()
+  groupId: string;
+
+  @ApiProperty({ type: [GroupPieceEntryDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => GroupPieceEntryDto)
+  entries: GroupPieceEntryDto[];
+}
+
 export class CreatePieceDto {
   // Camino NORMAL: asignar la pieza a una reserva. El contacto (teléfono,
   // nombre) y la experiencia salen de la reserva; no hay que retipearlos.
@@ -82,7 +126,9 @@ export class CreatePieceDto {
   photos?: string[];
 
   // Camino manual (pieza sin reserva, ej. huérfana): datos de contacto a mano.
-  @ApiPropertyOptional({ description: 'Teléfono del cliente (si no hay reserva)' })
+  @ApiPropertyOptional({
+    description: 'Teléfono del cliente (si no hay reserva)',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(40)
@@ -120,7 +166,6 @@ export class CreatePieceDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
-
 }
 
 export class UpdatePieceDto {
@@ -138,6 +183,33 @@ export class UpdatePieceDto {
   @IsInt()
   @Min(1)
   quantity?: number;
+
+  // Datos de la ficha de la pieza (se cargan en el batch; acá se pueden editar).
+  @ApiPropertyOptional({
+    description: 'Nombre de la persona/autor de la pieza',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  personName?: string;
+
+  @ApiPropertyOptional({ description: 'Firma / marca de la pieza' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  signature?: string;
+
+  @ApiPropertyOptional({ description: 'Tipo de pieza (taza, plato…)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  pieceType?: string;
+
+  @ApiPropertyOptional({ description: 'Colores/esmaltes usados' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  colorsUsed?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

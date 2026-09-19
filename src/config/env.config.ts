@@ -52,6 +52,12 @@ export const envConfig = {
     url: process.env.BOT_CONTROL_URL || '',
     // Secreto compartido (X-Bot-Secret). Sin esto, no se notifica ni se controla.
     secret: process.env.BOT_CONTROL_SECRET || '',
+    // Minutos sin actividad tras los que una charla del bot se da por cerrada
+    // (la próxima consulta del mismo teléfono abre una charla nueva). Debe ser
+    // >= al TTL de sesión del bot (30 min) para no partir una charla viva.
+    conversationSessionMinutes: Number(
+      process.env.CONVERSATION_SESSION_MINUTES || 45,
+    ),
   },
   // WhatsApp del equipo para avisos internos (nuevas consultas, errores).
   teamWhatsapp: process.env.TEAM_WHATSAPP || '',

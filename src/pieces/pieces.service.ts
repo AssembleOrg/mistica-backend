@@ -8,10 +8,8 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { PieceDocument, ReservationDocument } from '../common/schemas';
-import {
-  Student,
-  StudentDocument,
-} from '../common/schemas/student.schema';
+import { Student, StudentDocument } from '../common/schemas/student.schema';
+import { Group, GroupDocument } from '../common/schemas/group.schema';
 import { ProfessorsService } from '../professors/professors.service';
 import {
   PieceStatus,
@@ -21,6 +19,7 @@ import {
 import {
   CreatePieceDto,
   CreateReservationPiecesDto,
+  CreateGroupPiecesDto,
   UpdatePieceDto,
   ListPiecesQueryDto,
 } from '../common/dto';
@@ -50,6 +49,8 @@ export class PiecesService implements OnModuleInit {
     private readonly reservationModel: Model<ReservationDocument>,
     @InjectModel(Student.name)
     private readonly studentModel: Model<StudentDocument>,
+    @InjectModel(Group.name)
+    private readonly groupModel: Model<GroupDocument>,
     private readonly notifications: NotificationsService,
     private readonly professors: ProfessorsService,
   ) {}
@@ -178,9 +179,7 @@ export class PiecesService implements OnModuleInit {
   ) {
     const reservation = await this.reservationModel
       .findOne({ _id: dto.reservationId, deletedAt: { $exists: false } })
-      .select(
-        'code customerName customerPhone experienceName quantity startAt',
-      )
+      .select('code customerName customerPhone experienceName quantity startAt')
       .lean();
     if (!reservation) throw new BadRequestException('Reserva no encontrada');
     const professor = await this.professors.ofUser(actor?.id);
@@ -200,6 +199,67 @@ export class PiecesService implements OnModuleInit {
       colorsUsed: entry.colorsUsed.trim(),
       photos: [],
     }));
+    return this.pieceModel.insertMany(documents);
+  }
+
+  /**
+   * Carga piezas para alumnos de un grupo de taller: una ficha por alumno del
+   * grupo. Cada pieza queda ligada al alumno (studentId), con el profesor del
+   * grupo (o el que hace la carga) asignado al proceso.
+   */
+  async createGroupBatch(
+    dto: CreateGroupPiecesDto,
+    actor?: { id?: string; role?: string },
+  ) {
+    const group = await this.groupModel
+      .findOne({ _id: dto.groupId, deletedAt: { $exists: false } })
+      .select('name studentIds professorId professorName')
+      .lean();
+    if (!group) throw new BadRequestException('Grupo no encontrado');
+
+    const memberIds = new Set((group.studentIds ?? []).map((id) => String(id)));
+    const invalid = dto.entries
+      .map((e) => e.studentId)
+      .filter((id) => !memberIds.has(id));
+    if (invalid.length) {
+      throw new BadRequestException(
+        'Hay alumnos que no pertenecen al grupo seleccionado.',
+      );
+    }
+
+    const requested = dto.entries.map((e) => e.studentId);
+    const students = await this.studentModel
+      .find({ _id: { $in: requested }, deletedAt: { $exists: false } })
+      .select('name phone')
+      .lean();
+    const byId = new Map(
+      students.map((s) => [(s._id as Types.ObjectId).toHexString(), s]),
+    );
+
+    // Profesor del proceso: el del grupo si tiene; si no, el que hace la carga.
+    const own = await this.professors.ofUser(actor?.id);
+    const professorId = group.professorId ?? own?._id;
+    const professorName = group.professorName ?? own?.name;
+
+    const documents = dto.entries.map((entry) => {
+      const s = byId.get(entry.studentId);
+      return {
+        studentId: new Types.ObjectId(entry.studentId),
+        studentName: s?.name,
+        customerName: s?.name,
+        customerPhone: s?.phone ?? '',
+        experienceName: group.name,
+        professorId,
+        professorName,
+        quantity: 1,
+        status: PieceStatus.PENDIENTE,
+        personName: entry.personName.trim(),
+        signature: entry.signature.trim(),
+        pieceType: entry.pieceType.trim(),
+        colorsUsed: entry.colorsUsed.trim(),
+        photos: [],
+      };
+    });
     return this.pieceModel.insertMany(documents);
   }
 
@@ -228,11 +288,16 @@ export class PiecesService implements OnModuleInit {
 
   async counts(query: ListPiecesQueryDto) {
     const filter = this.buildListFilter(query);
-    const rows = await this.pieceModel.aggregate<{ _id: string; count: number }>([
+    const rows = await this.pieceModel.aggregate<{
+      _id: string;
+      count: number;
+    }>([
       { $match: filter },
       { $group: { _id: '$status', count: { $sum: 1 } } },
     ]);
-    const byStatus = Object.fromEntries(rows.map((row) => [row._id, row.count]));
+    const byStatus = Object.fromEntries(
+      rows.map((row) => [row._id, row.count]),
+    );
     return {
       total: rows.reduce((sum, row) => sum + row.count, 0),
       byStatus,
@@ -243,8 +308,7 @@ export class PiecesService implements OnModuleInit {
     const filter: Record<string, any> = { deletedAt: { $exists: false } };
     if (query.professorId)
       filter.professorId = new Types.ObjectId(query.professorId);
-    if (query.studentId)
-      filter.studentId = new Types.ObjectId(query.studentId);
+    if (query.studentId) filter.studentId = new Types.ObjectId(query.studentId);
     const term = query.search?.trim();
     if (term) {
       const rx = new RegExp(escapeRegex(term), 'i');
@@ -258,7 +322,8 @@ export class PiecesService implements OnModuleInit {
         { studentName: rx },
       ];
       const compact = term.replace(/[^a-zA-Z0-9]/g, '');
-      if (compact) or.push({ customerPhone: new RegExp(escapeRegex(compact), 'i') });
+      if (compact)
+        or.push({ customerPhone: new RegExp(escapeRegex(compact), 'i') });
       filter.$or = or;
     }
     return filter;
@@ -294,6 +359,10 @@ export class PiecesService implements OnModuleInit {
     }
 
     if (dto.quantity != null) piece.quantity = dto.quantity;
+    if (dto.personName != null) piece.personName = dto.personName.trim();
+    if (dto.signature != null) piece.signature = dto.signature.trim();
+    if (dto.pieceType != null) piece.pieceType = dto.pieceType.trim();
+    if (dto.colorsUsed != null) piece.colorsUsed = dto.colorsUsed.trim();
     if (dto.customerName != null) piece.customerName = dto.customerName.trim();
     if (dto.experienceName != null)
       piece.experienceName = dto.experienceName.trim();
@@ -380,7 +449,9 @@ export class PiecesService implements OnModuleInit {
 
   /** Aviso por WhatsApp de que las piezas están para retirar (una sola vez). */
   private async notifyReady(piece: PieceDocument): Promise<boolean> {
-    const name = piece.customerName ? ` ${piece.customerName.split(' ')[0]}` : '';
+    const name = piece.customerName
+      ? ` ${piece.customerName.split(' ')[0]}`
+      : '';
     const exp = piece.experienceName ? ` de *${piece.experienceName}*` : '';
     const msg =
       `¡Hola${name}! Tus piezas${exp} ya están listas para retirar 🎨\n\n` +

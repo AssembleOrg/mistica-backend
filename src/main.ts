@@ -22,6 +22,9 @@ async function bootstrap() {
   // conserva el default de Express (100 kb). Va PRIMERO: el parser global de
   // abajo ve el body ya parseado y no lo vuelve a leer.
   app.use('/api/leads/orphan-receipt', json({ limit: '12mb' }));
+  // Adjuntos de la charla (imágenes/documentos que manda el cliente): base64,
+  // hasta ~20 MB de binario ⇒ ~28 MB de JSON. Sólo para esa ruta.
+  app.use('/api/conversations/media', json({ limit: '28mb' }));
   app.use(json());
   app.use(urlencoded({ extended: true }));
 
@@ -50,7 +53,10 @@ async function bootstrap() {
   if (!isProd) {
     corsOrigin = true;
   } else if (corsOriginEnv && corsOriginEnv.length > 0) {
-    corsOrigin = corsOriginEnv.split(',').map((o) => o.trim()).filter(Boolean);
+    corsOrigin = corsOriginEnv
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean);
   } else {
     // Fallback histórico: dominio público actual del frontend. Reemplazar
     // con `CORS_ORIGIN` en Railway cuando esté disponible.
@@ -63,18 +69,20 @@ async function bootstrap() {
   });
 
   // Global validation pipe
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    transform: true,
-    transformOptions: {
-      enableImplicitConversion: true,
-    },
-    validationError: {
-      target: false,
-      value: false,
-    },
-  }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+      validationError: {
+        target: false,
+        value: false,
+      },
+    }),
+  );
 
   // Swagger configuration (only in development)
   if (envConfig.swagger.enabled) {
@@ -98,10 +106,12 @@ async function bootstrap() {
 
   const port = envConfig.app.port;
   await app.listen(port);
-  
+
   console.log(`🚀 Aplicación ejecutándose en el puerto ${port}`);
   if (envConfig.swagger.enabled) {
-    console.log(`📚 Documentación Swagger disponible en http://localhost:${port}/api`);
+    console.log(
+      `📚 Documentación Swagger disponible en http://localhost:${port}/api`,
+    );
   }
 }
 

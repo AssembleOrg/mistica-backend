@@ -4,22 +4,33 @@ import { Document, SchemaTypes, Types } from 'mongoose';
 export type ConversationDocument = Conversation & Document;
 
 /**
- * Estado de una charla derivada a una persona del equipo.
+ * Estado de una charla.
  *
+ * BOT:     la atiende el bot. Se persiste turno a turno como constancia; el bot
+ *          sigue respondiendo (no está pausado). Es el estado de toda consulta
+ *          que entra por WhatsApp mientras nadie del equipo intervino.
  * WAITING: el cliente pidió hablar con alguien y todavía no lo atendieron.
  * HUMAN:   alguien del equipo la tomó y está respondiendo.
- * CLOSED:  el equipo la dio por terminada y el bot volvió a atender.
+ * CLOSED:  terminada (el equipo la cerró, o venció la sesión del bot).
  */
-export type ConversationStatus = 'WAITING' | 'HUMAN' | 'CLOSED';
+export type ConversationStatus = 'BOT' | 'WAITING' | 'HUMAN' | 'CLOSED';
+
+/** Estados en los que la charla está viva (una sola por teléfono). */
+export const ACTIVE_CONVERSATION_STATUSES: ConversationStatus[] = [
+  'BOT',
+  'WAITING',
+  'HUMAN',
+];
 
 /**
- * Charla con una persona real. El cliente puede pedir hablar con alguien del
- * equipo: mientras la charla está abierta el bot NO responde ese chat, y todo
- * lo que se dicen queda persistido como constancia.
+ * Una charla del cliente por WhatsApp: toda consulta con el bot queda acá,
+ * turno a turno. Si el cliente pide hablar con una persona, la MISMA charla
+ * pasa de BOT a WAITING/HUMAN (el bot se calla) y sigue el mismo hilo; al
+ * cerrarla el bot vuelve a atender. Todo queda persistido como constancia.
  *
- * Hay como mucho UNA conversación abierta por teléfono (índice único parcial):
- * si el cliente vuelve a pedir ayuda mientras ya está esperando, se reusa la
- * que ya existe en vez de abrir otra.
+ * Hay como mucho UNA charla viva por teléfono (índice único parcial): mientras
+ * está abierta se reusa en vez de abrir otra. Al vencer la sesión (sin
+ * actividad) se cierra y la próxima vez arranca una charla nueva.
  */
 @Schema({ timestamps: true, collection: 'conversations' })
 export class Conversation {
@@ -35,10 +46,20 @@ export class Conversation {
 
   @Prop({
     required: true,
-    enum: ['WAITING', 'HUMAN', 'CLOSED'],
+    enum: ['BOT', 'WAITING', 'HUMAN', 'CLOSED'],
     default: 'WAITING',
   })
   status: ConversationStatus;
+
+  // Etiqueta del tema de la consulta (lo detecta el bot): "Cumpleaños",
+  // "Taller mensual", "Reserva", etc. Reemplaza la vieja sección de leads:
+  // la intención queda como rótulo de la charla, no como registro aparte.
+  @Prop({ trim: true })
+  intent?: string;
+
+  // Etiquetas libres para filtrar la bandeja (servicio, campaña, etc.).
+  @Prop({ type: [String], default: undefined })
+  tags?: string[];
 
   // Por qué pidió hablar con alguien (lo resume el bot).
   @Prop({ trim: true })
@@ -76,12 +97,16 @@ export class Conversation {
 
 export const ConversationSchema = SchemaFactory.createForClass(Conversation);
 
-// Una sola charla abierta por teléfono. Las cerradas quedan como historial.
+// Una sola charla VIVA por teléfono (bot o en handoff). Las cerradas quedan
+// como historial y no cuentan para el índice único.
 ConversationSchema.index(
   { phone: 1, status: 1 },
   {
     unique: true,
-    partialFilterExpression: { status: { $in: ['WAITING', 'HUMAN'] } },
+    partialFilterExpression: {
+      status: { $in: ['BOT', 'WAITING', 'HUMAN'] },
+    },
   },
 );
 ConversationSchema.index({ status: 1, lastMessageAt: -1 });
+ConversationSchema.index({ lastMessageAt: -1 });

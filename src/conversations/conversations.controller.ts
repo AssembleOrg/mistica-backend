@@ -14,14 +14,13 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { map, Observable } from 'rxjs';
 import { Public, AllowedViews } from '../common/decorators';
-import { Roles } from '../common/decorators/roles.decorator';
-import { UserRole } from '../common/enums/user-role.enum';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
 import {
   AdminReplyDto,
+  AttachMediaDto,
   HandoffRequestDto,
   InboundMessageDto,
+  LogTurnDto,
 } from '../common/dto/conversation.dto';
 import { envConfig } from '../config/env.config';
 import { ConversationsService } from './conversations.service';
@@ -54,6 +53,31 @@ export class ConversationsController {
     this.assertBotSecret(secret);
     const c = await this.service.requestHandoff(dto);
     return { conversationId: String(c._id), status: c.status };
+  }
+
+  @Post('log')
+  @Public()
+  @ApiOperation({
+    summary:
+      'Registrar un turno de la charla con el bot para la bandeja (interno del bot)',
+  })
+  async log(@Body() dto: LogTurnDto, @Headers('x-bot-secret') secret?: string) {
+    this.assertBotSecret(secret);
+    return this.service.logTurn(dto);
+  }
+
+  @Post('media')
+  @Public()
+  @ApiOperation({
+    summary:
+      'Adjuntar una imagen/documento del cliente a la charla (interno del bot)',
+  })
+  async media(
+    @Body() dto: AttachMediaDto,
+    @Headers('x-bot-secret') secret?: string,
+  ) {
+    this.assertBotSecret(secret);
+    return this.service.attachMedia(dto);
   }
 
   @Post('inbound')

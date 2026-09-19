@@ -8,6 +8,7 @@ import {
   ReservationSchema,
 } from '../common/schemas/reservation.schema';
 import { Student, StudentSchema } from '../common/schemas/student.schema';
+import { Group, GroupSchema } from '../common/schemas/group.schema';
 import {
   AppSetting,
   AppSettingSchema,
@@ -21,6 +22,7 @@ import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
       { name: Piece.name, schema: PieceSchema },
       { name: Reservation.name, schema: ReservationSchema },
       { name: Student.name, schema: StudentSchema },
+      { name: Group.name, schema: GroupSchema },
       { name: AppSetting.name, schema: AppSettingSchema },
     ]),
     ProfessorsModule,

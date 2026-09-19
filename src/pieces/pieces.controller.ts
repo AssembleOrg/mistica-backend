@@ -17,6 +17,7 @@ import { PiecesService } from './pieces.service';
 import {
   CreatePieceDto,
   CreateReservationPiecesDto,
+  CreateGroupPiecesDto,
   UpdatePieceDto,
   ListPiecesQueryDto,
 } from '../common/dto';
@@ -47,7 +48,9 @@ export class PiecesController {
   @Get('by-phone')
   @Public()
   @AllowedViews()
-  @ApiOperation({ summary: 'Piezas del cliente por teléfono (interno del bot)' })
+  @ApiOperation({
+    summary: 'Piezas del cliente por teléfono (interno del bot)',
+  })
   async byPhone(
     @Query('phone') phone: string,
     @Headers('x-bot-secret') secret?: string,
@@ -61,7 +64,9 @@ export class PiecesController {
 
   // Flujo fijo y deliberadamente corto: en preparación, lista y retirada.
   @Get('statuses')
-  @ApiOperation({ summary: 'Estados vigentes del flujo simplificado de piezas' })
+  @ApiOperation({
+    summary: 'Estados vigentes del flujo simplificado de piezas',
+  })
   statuses() {
     return this.piecesService.statusConfig();
   }
@@ -87,6 +92,14 @@ export class PiecesController {
     @Req() req: AuthRequest,
   ) {
     return this.piecesService.createReservationBatch(dto, req.user);
+  }
+
+  @Post('group-batch')
+  @ApiOperation({
+    summary: 'Registrar las fichas de piezas de un grupo de taller',
+  })
+  createGroupBatch(@Body() dto: CreateGroupPiecesDto, @Req() req: AuthRequest) {
+    return this.piecesService.createGroupBatch(dto, req.user);
   }
 
   @Get()
