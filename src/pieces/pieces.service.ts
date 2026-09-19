@@ -309,6 +309,8 @@ export class PiecesService implements OnModuleInit {
     if (query.professorId)
       filter.professorId = new Types.ObjectId(query.professorId);
     if (query.studentId) filter.studentId = new Types.ObjectId(query.studentId);
+    if (query.reservationId)
+      filter.reservationId = new Types.ObjectId(query.reservationId);
     const term = query.search?.trim();
     if (term) {
       const rx = new RegExp(escapeRegex(term), 'i');

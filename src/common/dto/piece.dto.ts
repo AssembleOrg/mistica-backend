@@ -291,6 +291,11 @@ export class ListPiecesQueryDto {
   @IsMongoId()
   studentId?: string;
 
+  @ApiPropertyOptional({ description: 'Filtrar por reserva' })
+  @IsOptional()
+  @IsMongoId()
+  reservationId?: string;
+
   @ApiPropertyOptional({
     description: 'Clave de estado (configurable; ver GET /pieces/statuses)',
   })
