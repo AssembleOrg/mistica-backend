@@ -895,6 +895,26 @@ export class ReservationsService {
         $gte: start.toJSDate(),
         $lt: start.plus({ days: 1 }).toJSDate(),
       };
+    } else if (query.from || query.to) {
+      // Rango por fecha de turno (hora de Argentina). `to` es inclusive: cubre
+      // hasta el final de ese día.
+      const range: Record<string, Date> = {};
+      if (query.from) {
+        range.$gte = DateTime.fromISO(query.from, {
+          zone: envConfig.timezone,
+        })
+          .startOf('day')
+          .toJSDate();
+      }
+      if (query.to) {
+        range.$lt = DateTime.fromISO(query.to, {
+          zone: envConfig.timezone,
+        })
+          .startOf('day')
+          .plus({ days: 1 })
+          .toJSDate();
+      }
+      filter.startAt = range;
     }
 
     // Búsqueda libre: por nombre (con el texto tal cual) y por código/teléfono
@@ -911,10 +931,15 @@ export class ReservationsService {
       filter.$or = or;
     }
 
+    // Orden: por defecto los más recientes (createdAt). 'startAt' ordena por
+    // fecha del turno ascendente (las próximas primero), útil para encontrar
+    // una reserva por su día en vez de por cuándo se creó.
+    const sortSpec: Record<string, 1 | -1> =
+      query.sort === 'startAt' ? { startAt: 1 } : { createdAt: -1 };
     const [items, total] = await Promise.all([
       this.reservationModel
         .find(filter)
-        .sort({ createdAt: -1 })
+        .sort(sortSpec)
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),

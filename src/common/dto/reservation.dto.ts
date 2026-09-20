@@ -465,6 +465,30 @@ export class ListReservationsQueryDto {
   @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })
   date?: string;
 
+  @ApiPropertyOptional({
+    description: 'Desde (inclusive) por fecha de turno, YYYY-MM-DD',
+  })
+  @IsOptional()
+  @Matches(YMD, { message: 'from debe ser YYYY-MM-DD' })
+  from?: string;
+
+  @ApiPropertyOptional({
+    description: 'Hasta (inclusive) por fecha de turno, YYYY-MM-DD',
+  })
+  @IsOptional()
+  @Matches(YMD, { message: 'to debe ser YYYY-MM-DD' })
+  to?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Orden: 'created' (más recientes, default) o 'startAt' (por fecha de turno)",
+    enum: ['created', 'startAt'],
+    default: 'created',
+  })
+  @IsOptional()
+  @IsIn(['created', 'startAt'])
+  sort?: 'created' | 'startAt';
+
   @ApiPropertyOptional({ enum: ReservationStatus })
   @IsOptional()
   @IsEnum(ReservationStatus)
