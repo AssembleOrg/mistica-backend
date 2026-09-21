@@ -71,6 +71,16 @@ export class CreateGroupDto {
   @IsMongoId({ each: true })
   studentIds?: string[];
 
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Clientes a sumar al grupo: si todavía no son alumnos se los da de alta vinculados',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsMongoId({ each: true })
+  clientIds?: string[];
+
   @ApiPropertyOptional({ description: 'Información de la actividad' })
   @IsOptional()
   @IsString()

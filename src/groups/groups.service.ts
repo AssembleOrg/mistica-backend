@@ -11,6 +11,8 @@ import {
   Professor,
   ProfessorDocument,
 } from '../common/schemas/professor.schema';
+import { Student, StudentDocument } from '../common/schemas/student.schema';
+import { Client, ClientDocument } from '../common/schemas/client.schema';
 import { CreateGroupDto, UpdateGroupDto } from '../common/dto/group.dto';
 import { UserRole } from '../common/enums/user-role.enum';
 import { DateTime } from 'luxon';
@@ -34,6 +36,10 @@ export class GroupsService {
     private readonly groupModel: Model<GroupDocument>,
     @InjectModel(Professor.name)
     private readonly professorModel: Model<ProfessorDocument>,
+    @InjectModel(Student.name)
+    private readonly studentModel: Model<StudentDocument>,
+    @InjectModel(Client.name)
+    private readonly clientModel: Model<ClientDocument>,
   ) {}
 
   private isAdmin(actor?: Actor): boolean {
@@ -67,7 +73,6 @@ export class GroupsService {
       name: dto.name,
       description: dto.description,
       schedule: dto.schedule ?? [],
-      studentIds: (dto.studentIds ?? []).map((id) => new Types.ObjectId(id)),
       notes: dto.notes,
       isActive: dto.isActive ?? true,
     };
@@ -90,6 +95,11 @@ export class GroupsService {
       data.professorName = prof.name;
     }
 
+    // Después de validar permisos: puede dar de alta alumnos.
+    data.studentIds = await this.resolveStudentIds(
+      dto.studentIds ?? [],
+      dto.clientIds,
+    );
     return this.groupModel.create(data);
   }
 
@@ -97,7 +107,11 @@ export class GroupsService {
     const group = await this.findOrThrow(id);
     await this.assertCanManage(group, actor);
 
-    if (dto.professorId !== undefined && this.isAdmin(actor)) {
+    // Sólo si cambia: el form reenvía el profesor actual, que pudo ser eliminado.
+    const professorChanged =
+      dto.professorId !== undefined &&
+      dto.professorId !== String(group.professorId ?? '');
+    if (professorChanged && this.isAdmin(actor)) {
       if (dto.professorId) {
         const prof = await this.findProfessor(dto.professorId);
         group.professorId = prof._id as Types.ObjectId;
@@ -113,8 +127,12 @@ export class GroupsService {
       this.assertSingleSchedule(dto.schedule);
       group.schedule = dto.schedule as never;
     }
-    if (dto.studentIds !== undefined)
-      group.studentIds = dto.studentIds.map((s) => new Types.ObjectId(s));
+    if (dto.studentIds !== undefined || dto.clientIds?.length) {
+      group.studentIds = await this.resolveStudentIds(
+        dto.studentIds ?? group.studentIds.map(String),
+        dto.clientIds,
+      );
+    }
     if (dto.notes !== undefined) group.notes = dto.notes;
     if (dto.isActive !== undefined) group.isActive = dto.isActive;
     group.updatedAt = new Date();
@@ -182,6 +200,46 @@ export class GroupsService {
     if (!prof || String(group.professorId) !== String(prof._id)) {
       throw new ForbiddenException('Sólo podés gestionar tus propios grupos.');
     }
+  }
+
+  /**
+   * Alumnos finales del grupo: los elegidos + el de cada cliente agregado. Si
+   * el cliente todavía no es alumno se lo da de alta vinculado (clientId); si
+   * estaba dado de baja, vuelve a quedar activo.
+   */
+  private async resolveStudentIds(
+    studentIds: string[],
+    clientIds: string[] = [],
+  ): Promise<Types.ObjectId[]> {
+    const ids = new Set(studentIds);
+    const wanted = [...new Set(clientIds)];
+    // Se validan todos antes de crear nada: un id malo no deja altas a medias.
+    const clients = await this.clientModel
+      .find({ _id: { $in: wanted }, deletedAt: { $exists: false } })
+      .exec();
+    if (clients.length !== wanted.length)
+      throw new NotFoundException('Cliente no encontrado');
+
+    for (const client of clients) {
+      let student = await this.studentModel
+        .findOne({ clientId: client._id, deletedAt: { $exists: false } })
+        .exec();
+      if (!student) {
+        student = await this.studentModel.create({
+          name: client.fullName,
+          clientId: client._id,
+          clientName: client.fullName,
+          phone: client.phone,
+          email: client.email,
+        });
+      } else if (!student.isActive) {
+        student.isActive = true;
+        student.updatedAt = new Date();
+        await student.save();
+      }
+      ids.add(String(student._id));
+    }
+    return [...ids].map((id) => new Types.ObjectId(id));
   }
 
   private async findProfessor(id: string): Promise<ProfessorDocument> {
