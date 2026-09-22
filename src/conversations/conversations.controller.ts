@@ -127,8 +127,25 @@ export class ConversationsController {
   @AllowedViews('reservas')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Bandeja de charlas' })
-  list(@Query('status') status?: string) {
-    return this.service.list(status);
+  list(
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('page') page?: string,
+  ) {
+    return this.service.list(
+      status,
+      limit ? Number(limit) || 40 : 40,
+      page ? Number(page) || 1 : 1,
+    );
+  }
+
+  @Get('counts')
+  @UseGuards(JwtAuthGuard, AllowedViewsGuard)
+  @AllowedViews('reservas')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cantidad de charlas por estado' })
+  counts() {
+    return this.service.counts();
   }
 
   @Get(':id/messages')

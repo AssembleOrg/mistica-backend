@@ -390,7 +390,7 @@ export class ConversationsService {
    * reciente, con lo que necesita atención (no leído) arriba. `status` acepta
    * uno o varios separados por coma (ej. "WAITING,HUMAN" para "pendientes").
    */
-  async list(status?: string) {
+  async list(status?: string, limit = 40, page = 1) {
     const filter: Record<string, unknown> = {};
     const wanted = (status ?? '')
       .split(',')
@@ -398,12 +398,31 @@ export class ConversationsService {
       .filter(Boolean);
     if (wanted.length === 1) filter.status = wanted[0];
     else if (wanted.length > 1) filter.status = { $in: wanted };
+    const take = Math.min(Math.max(limit, 1), 200);
+    const skip = (Math.max(page, 1) - 1) * take;
     const rows = await this.conversationModel
       .find(filter)
       .sort({ unreadForAdmin: -1, lastMessageAt: -1 })
-      .limit(200)
+      .skip(skip)
+      .limit(take)
       .lean();
     return rows.map((r) => this.view(r as unknown as ConversationDocument));
+  }
+
+  /** Cuántas charlas hay por estado (para los chips de la bandeja). */
+  async counts(): Promise<Record<string, number>> {
+    const rows = await this.conversationModel.aggregate<{
+      _id: string;
+      n: number;
+    }>([{ $group: { _id: '$status', n: { $sum: 1 } } }]);
+    const out: Record<string, number> = {
+      BOT: 0,
+      WAITING: 0,
+      HUMAN: 0,
+      CLOSED: 0,
+    };
+    for (const r of rows) out[r._id] = r.n;
+    return out;
   }
 
   async messages(id: string) {
