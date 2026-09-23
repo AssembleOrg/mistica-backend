@@ -4,6 +4,7 @@ import {
   checkBookingWindow,
   earlyStartOf,
   parseShifts,
+  shiftFitting,
   shiftAllowsExperience,
   shiftsFitting,
   shiftsForDate,
@@ -281,5 +282,39 @@ describe('earlyStartOf · inicio anticipado', () => {
   it('sin hueco entre turnos no hay inicio anticipado', () => {
     const pegado = { ...t2, start: '17:30' };
     expect(earlyStartOf(pegado, [t1, pegado])).toBeNull();
+  });
+});
+
+describe('shiftFitting · la reserva entra entera en un turno', () => {
+  // Default: Turno 1 15:00–17:30, Turno 2 17:40–20:00 (anticipado desde 17:30).
+  const m = (hhmm: string) => {
+    const [h, mm] = hhmm.split(':').map(Number);
+    return h * 60 + mm;
+  };
+  const D = '2026-08-01';
+
+  it('una de 1 h puede arrancar más tarde dentro del turno', () => {
+    expect(shiftFitting(D, m('15:30'), 60)?.key).toBe('T1');
+    expect(shiftFitting(D, m('16:30'), 60)?.key).toBe('T1'); // termina 17:30 justo
+  });
+
+  it('a las 17:00 una de 1 h se pasaría a la franja 2: no entra', () => {
+    expect(shiftFitting(D, m('17:00'), 60)).toBeNull();
+  });
+
+  it('una de 2:30 sólo entra arrancando al inicio del turno', () => {
+    expect(shiftFitting(D, m('15:00'), 150)?.key).toBe('T1');
+    expect(shiftFitting(D, m('15:10'), 150)).toBeNull();
+  });
+
+  it('en el turno 2 vale desde el inicio anticipado', () => {
+    expect(shiftFitting(D, m('17:30'), 120)?.key).toBe('T2');
+    expect(shiftFitting(D, m('18:00'), 120)?.key).toBe('T2'); // termina 20:00
+    expect(shiftFitting(D, m('18:10'), 120)).toBeNull(); // pasaría el cierre
+  });
+
+  it('fuera del horario del salón no entra', () => {
+    expect(shiftFitting(D, m('04:00'), 60)).toBeNull();
+    expect(shiftFitting(D, m('14:30'), 60)).toBeNull();
   });
 });

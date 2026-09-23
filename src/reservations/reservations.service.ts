@@ -55,6 +55,7 @@ import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { TablesService } from '../tables/tables.service';
 import { businessDateKey } from '../tables/shifts';
 import { AvailabilityService } from './availability.service';
+import { isOwnSlot } from '../experiences/own-schedule';
 import { UserRole } from '../common/enums/user-role.enum';
 
 // Minutos que vive un hold esperando el comprobante de transferencia antes de
@@ -146,16 +147,19 @@ export class ReservationsService {
 
     // Guarda de MESAS: el grupo tiene que entrar en las mesas libres del turno.
     // Se chequea antes de crear la reserva para fallar barato y con un mensaje
-    // útil (incluido el pedido de aceptar mesa compartida).
-    const preview = await this.tables.previewAssignment({
-      qty,
-      startAt: session.startAt,
-      durationMinutes: session.durationMinutes,
-      sharedAccepted: dto.acceptSharedTable,
-    });
-    if (!preview.fits) {
-      await this.releaseSeats(session._id as Types.ObjectId, qty);
-      throw this.tableError(preview.reason);
+    // útil (incluido el pedido de aceptar mesa compartida). En un horario
+    // PROPIO de la experiencia no aplica: ahí manda el cupo (ya descontado).
+    if (!(await this.isOwnScheduleSession(session))) {
+      const preview = await this.tables.previewAssignment({
+        qty,
+        startAt: session.startAt,
+        durationMinutes: session.durationMinutes,
+        sharedAccepted: dto.acceptSharedTable,
+      });
+      if (!preview.fits) {
+        await this.releaseSeats(session._id as Types.ObjectId, qty);
+        throw this.tableError(preview.reason);
+      }
     }
 
     // Precio efectivo: el del turno, salvo que una promo aplique (tier por
@@ -367,6 +371,11 @@ export class ReservationsService {
     // Igual que el hold: por turno existente o por (experiencia, día, hora).
     // Acá NO se crea nada: sólo se calcula dónde caería.
     const session = await this.sessionForPreview(dto);
+
+    // Horario PROPIO de la experiencia: el lugar es el cupo, no las mesas.
+    if (await this.isOwnScheduleSession(session)) {
+      return this.previewOwnSchedule(session, qty, dto.isBirthday);
+    }
 
     const [preview, remaining, venueMax] = await Promise.all([
       this.tables.previewAssignment({
@@ -1042,6 +1051,9 @@ export class ReservationsService {
     session: ExperienceSessionDocument,
     sharedAccepted?: boolean,
   ): Promise<void> {
+    // Horario PROPIO: el lugar físico lo aparta un bloqueo semanal de mesas;
+    // la reserva cuenta contra el cupo de la experiencia y no toma mesas.
+    if (await this.isOwnScheduleSession(session)) return;
     const assignment = await this.tables.assign({
       reservationId: reservation._id as Types.ObjectId,
       qty: reservation.quantity,
@@ -1053,6 +1065,89 @@ export class ReservationsService {
     reservation.sharedTable = assignment.shared;
     if (assignment.shared) reservation.sharedConsentAt = new Date();
     await reservation.save();
+  }
+
+  /**
+   * ¿El turno cae en un horario PROPIO de su experiencia (ownSchedule)? Ahí la
+   * capacidad es el cupo —que reserveSeats controla de forma atómica— y no se
+   * asignan mesas: el lugar físico lo aparta un bloqueo semanal de mesas.
+   */
+  private async isOwnScheduleSession(session: {
+    experienceId?: Types.ObjectId | string;
+    startAt: Date;
+  }): Promise<boolean> {
+    if (!session?.experienceId) return false;
+    const exp = await this.experienceModel
+      .findById(session.experienceId)
+      .select('ownSchedule')
+      .lean();
+    return isOwnSlot(exp?.ownSchedule, session.startAt);
+  }
+
+  /** Preview de un horario propio: entra si alcanza el cupo del turno. */
+  private async previewOwnSchedule(
+    session: {
+      capacity: number;
+      seatsTaken: number;
+      price?: number;
+      depositPct?: number;
+      experienceId?: Types.ObjectId | string;
+      startAt: Date;
+    },
+    qty: number,
+    isBirthday?: boolean,
+  ) {
+    const left = Math.max(0, (session.capacity ?? 0) - (session.seatsTaken ?? 0));
+    if (qty > left) {
+      return {
+        fits: false,
+        reason: 'NO_CAPACITY',
+        needsSharedConsent: false,
+        maxPartySize: left,
+        venueMaxPartySize: session.capacity ?? left,
+      };
+    }
+    let pricing:
+      | {
+          unitPrice: number;
+          totalAmount: number;
+          depositAmount: number;
+          balanceDue: number;
+          variantName?: string;
+          variantDescription?: string;
+          freeSpots?: number;
+        }
+      | undefined;
+    if (session.price != null) {
+      const variants = await this.variantsFor(session.experienceId, isBirthday);
+      const eff = effectiveUnitPrice(
+        variants,
+        session.price,
+        qty,
+        businessDateKey(session.startAt),
+      );
+      const amounts = computeReservationAmounts(
+        eff.unitPrice,
+        eff.billableQty,
+        session.depositPct ?? 50,
+      );
+      pricing = {
+        unitPrice: eff.unitPrice,
+        totalAmount: amounts.total,
+        depositAmount: amounts.deposit,
+        balanceDue: amounts.balanceDue,
+        variantName: eff.variant?.name,
+        variantDescription: eff.variant?.description,
+        freeSpots: eff.billableQty < qty ? qty - eff.billableQty : undefined,
+      };
+    }
+    return {
+      fits: true,
+      tables: [] as string[],
+      sharedTable: false,
+      maxPartySize: left,
+      pricing,
+    };
   }
 
   /** Mensaje al cliente según por qué no entró el grupo en las mesas. */

@@ -29,6 +29,7 @@ import {
 } from '../common/schemas/experience-session.schema';
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { aliasKeys, cleanAliases, normalizeAlias } from './alias';
+import { ownScheduleError } from './own-schedule';
 import { TablesService } from '../tables/tables.service';
 import {
   bookingStartWindow,
@@ -52,6 +53,7 @@ export class ExperiencesService {
   // ───────────────────────── Experiencias (plantillas) ─────────────────────
 
   async createExperience(dto: CreateExperienceDto) {
+    this.assertOwnSchedule(dto.ownSchedule, dto.durationMinutes);
     const aliases = await this.validAliases(dto.aliases, dto.name, null);
     return this.experienceModel.create({ ...dto, aliases });
   }
@@ -69,6 +71,12 @@ export class ExperiencesService {
 
   async updateExperience(id: string, dto: UpdateExperienceDto) {
     const exp = await this.findExperienceOrThrow(id);
+    if (dto.ownSchedule !== undefined || dto.durationMinutes !== undefined) {
+      this.assertOwnSchedule(
+        dto.ownSchedule ?? exp.ownSchedule,
+        dto.durationMinutes ?? exp.durationMinutes,
+      );
+    }
     if (dto.aliases !== undefined || dto.name !== undefined) {
       const aliases = await this.validAliases(
         dto.aliases ?? exp.aliases,
@@ -82,6 +90,15 @@ export class ExperiencesService {
     exp.updatedAt = new Date();
     await exp.save();
     return exp;
+  }
+
+  /** Un horario propio que no entra en el horario del salón no se guarda. */
+  private assertOwnSchedule(
+    schedule: { weekday: number; start: string }[] | undefined,
+    durationMinutes: number,
+  ): void {
+    const err = ownScheduleError(schedule, durationMinutes);
+    if (err) throw new BadRequestException(err);
   }
 
   /**

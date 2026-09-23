@@ -42,20 +42,28 @@ function at(hhmm: string): Date {
   return DateTime.fromISO(`${DAY}T${hhmm}`, { zone: TZ }).toJSDate();
 }
 
-/** Mesa ocupada de `startHH` a `endHH`, con 10' de limpieza. */
-function busy(table: string, startHH: string, endHH: string) {
-  const endAt = at(endHH);
+/** Mesa ocupada de `startHH` a `endHH` (en `dateKey`), con 10' de limpieza. */
+function busy(table: string, startHH: string, endHH: string, dateKey = DAY) {
+  const on = (hhmm: string) =>
+    DateTime.fromISO(`${dateKey}T${hhmm}`, { zone: TZ }).toJSDate();
+  const endAt = on(endHH);
   return {
     table,
     qty: 2,
-    startAt: at(startHH),
+    startAt: on(startHH),
     endAt,
     busyUntil: new Date(endAt.getTime() + 10 * 60_000),
     shared: false,
   };
 }
 
-async function build(slots: Record<string, unknown>[], durationMinutes = 120) {
+async function build(
+  slots:
+    | Record<string, unknown>[]
+    | ((dateKey: string) => Record<string, unknown>[]),
+  durationMinutes = 120,
+  extra: Record<string, unknown> = {},
+) {
   const tablesRef = await Test.createTestingModule({
     providers: [
       TablesService,
@@ -70,8 +78,12 @@ async function build(slots: Record<string, unknown>[], durationMinutes = 120) {
       {
         provide: getModelToken(DayOccupancy.name),
         useValue: {
-          findOne: () => ({
-            lean: async () => (slots.length ? { slots } : null),
+          findOne: (f: { date?: string }) => ({
+            lean: async () => {
+              const list =
+                typeof slots === 'function' ? slots(f?.date ?? '') : slots;
+              return list.length ? { slots: list } : null;
+            },
           }),
         },
       },
@@ -100,6 +112,7 @@ async function build(slots: Record<string, unknown>[], durationMinutes = 120) {
     basePrice: 42000,
     depositPct: 50,
     defaultCapacity: 40,
+    ...extra,
   };
   const experienceModel = { findById: () => ({ exec: async () => exp }) };
   const sessionModel = {
@@ -184,5 +197,75 @@ describe('AvailabilityService · inicio anticipado del turno', () => {
     expect(slots.filter((s) => s.shiftKey === 'T1').map((s) => s.startTime)).toEqual([
       '15:00',
     ]);
+  });
+});
+
+describe('AvailabilityService · horario propio (Escuelita)', () => {
+  // Escuelita: miércoles 18:00, 1:45, cupo 7.
+  const escuelita = { ownSchedule: [{ weekday: 3, start: '18:00' }], defaultCapacity: 7 };
+  const desde = DateTime.now().setZone(TZ).plus({ days: 1 }).toISODate() as string;
+  const hasta = DateTime.now().setZone(TZ).plus({ days: 14 }).toISODate() as string;
+  const rango = (service: AvailabilityService) =>
+    service.forExperience({ experienceId: EXP_ID, from: desde, to: hasta });
+
+  it('sólo se ofrece los miércoles a las 18:00, nunca en los turnos generales', async () => {
+    const slots = await rango(await build([], 105, escuelita));
+
+    expect(slots.length).toBeGreaterThanOrEqual(1);
+    for (const s of slots) {
+      expect(DateTime.fromISO(s.dateKey).weekday).toBe(3);
+      expect(s.startTime).toBe('18:00');
+      expect(s.ownSchedule).toBe(true);
+      expect(s.shiftKey).toBeUndefined();
+      expect(s.earlyStart).toBeUndefined();
+    }
+  });
+
+  it('el lugar es el cupo de la experiencia, no las mesas', async () => {
+    // Salón entero ocupado (ej. el bloqueo semanal de la escuelita): igual se
+    // ofrece con su cupo, porque ese lugar ya está apartado para ella.
+    const todoOcupado = (dateKey: string) =>
+      TABLE_ROWS.map((t) => busy(t.code, '15:00', '20:00', dateKey));
+    const slots = await rango(await build(todoOcupado, 105, escuelita));
+
+    expect(slots.length).toBeGreaterThanOrEqual(1);
+    expect(slots.every((s) => s.maxPartySize === 7)).toBe(true);
+  });
+
+  it('sin horario propio sigue usando los turnos generales', async () => {
+    const slots = await offer(await build([], 105, { ownSchedule: [] }));
+    expect(slots.map((s) => s.startTime)).toEqual(['15:00', '17:30', '17:40']);
+  });
+});
+
+describe('AvailabilityService · la reserva no se pasa de un turno al otro', () => {
+  const pedir = async (hhmm: string, durationMinutes: number, extra = {}) =>
+    (await build([], durationMinutes, extra)).slotOrThrow(EXP_ID, DAY, hhmm);
+
+  it('una de 1 h a las 15:30 entra en el Turno 1', async () => {
+    await expect(pedir('15:30', 60)).resolves.toMatchObject({ startKey: '15:30' });
+  });
+
+  it('una de 1 h a las 17:00 se pasaría a la franja 2: se rechaza', async () => {
+    await expect(pedir('17:00', 60)).rejects.toThrow(/se pasaría de un turno al otro/);
+  });
+
+  it('una de 2:30 sólo al inicio del turno', async () => {
+    await expect(pedir('15:00', 150)).resolves.toMatchObject({ startKey: '15:00' });
+    await expect(pedir('15:15', 150)).rejects.toThrow(/Turno 1 arrancando a las 15:00/);
+  });
+
+  it('con horario propio, sólo en sus días y horas', async () => {
+    const extra = { ownSchedule: [{ weekday: DateTime.fromISO(DAY).weekday, start: '18:00' }] };
+    await expect(pedir('18:00', 105, extra)).resolves.toMatchObject({ startKey: '18:00' });
+    await expect(pedir('15:00', 105, extra)).rejects.toThrow(/tiene horario propio/);
+  });
+
+  it('cada turno ofrecido trae su franja y el último inicio posible', async () => {
+    const slots = await offer(await build([], 60));
+    const t1 = slots.find((s) => s.startTime === '15:00');
+    expect(t1).toMatchObject({ windowStart: '15:00', windowEnd: '17:30', latestStart: '16:30' });
+    const t2 = slots.find((s) => s.startTime === '17:40');
+    expect(t2).toMatchObject({ windowStart: '17:30', windowEnd: '20:00', latestStart: '19:00' });
   });
 });

@@ -251,6 +251,42 @@ export function earlyStartOf(
 }
 
 /**
+ * Franja de un turno: desde su inicio más temprano posible (el anticipado, si
+ * tiene) hasta su fin. Una reserva del turno tiene que entrar ENTERA acá.
+ */
+export function shiftWindow(
+  shift: ShiftDef,
+  dayShifts: ShiftDef[],
+): { earliest: string; end: string } {
+  return { earliest: earlyStartOf(shift, dayShifts) ?? shift.start, end: shift.end };
+}
+
+/**
+ * Turno en cuya franja entra ENTERA una actividad que arranca a `startMin`
+ * (minutos locales) y dura `durationMinutes`, o null si no entra en ninguno:
+ * cruza de un turno al otro (ej. 17:00 una de 1 h, se pasa a la franja 2),
+ * cae entre turnos o fuera del día. Una experiencia que dura toda la franja
+ * (ej. 2:30 en un turno de 15:00 a 17:30) sólo entra arrancando al inicio.
+ */
+export function shiftFitting(
+  dateKey: string,
+  startMin: number,
+  durationMinutes: number,
+): ShiftDef | null {
+  const shifts = listShifts(dateKey);
+  for (const shift of shifts) {
+    const w = shiftWindow(shift, shifts);
+    if (
+      startMin >= toMinutes(w.earliest) &&
+      startMin + durationMinutes <= toMinutes(w.end)
+    ) {
+      return shift;
+    }
+  }
+  return null;
+}
+
+/**
  * Turno sugerido en el que cae (entera) una actividad, si cae en alguno. Una
  * actividad que arranca en el inicio anticipado de un turno (ver
  * earlyStartOf) cuenta como de ese turno. Es sólo una ETIQUETA para la agenda

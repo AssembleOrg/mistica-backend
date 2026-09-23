@@ -102,6 +102,22 @@ export class PriceVariantDto {
   active?: boolean;
 }
 
+/** Un horario propio: día de semana + hora de inicio. Ver Experience.ownSchedule. */
+export class OwnSlotDto {
+  @ApiProperty({ description: 'Día de semana ISO (1=lunes..7=domingo)' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(7)
+  weekday: number;
+
+  @ApiProperty({ description: "Hora de inicio 'HH:mm'", example: '18:00' })
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+    message: "start debe ser una hora 'HH:mm'",
+  })
+  start: string;
+}
+
 export class CreateExperienceDto {
   @ApiProperty({ description: 'Nombre de la experiencia' })
   @IsString()
@@ -137,6 +153,19 @@ export class CreateExperienceDto {
   @ValidateNested({ each: true })
   @Type(() => PriceVariantDto)
   priceVariants?: PriceVariantDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Horario propio (día + hora de inicio). Si tiene alguno, la experiencia se ofrece SÓLO ' +
+      'en esos horarios y no en los turnos generales (ej. Escuelita: miércoles 18:00). ' +
+      'Vacío = turnos generales.',
+    type: [OwnSlotDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OwnSlotDto)
+  ownSchedule?: OwnSlotDto[];
 
   @ApiProperty({ description: 'Duración en minutos', minimum: 1 })
   @IsInt()

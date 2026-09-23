@@ -65,6 +65,23 @@ export class PriceVariant {
 export const PriceVariantSchema = SchemaFactory.createForClass(PriceVariant);
 
 /**
+ * Un horario PROPIO de una experiencia: día de semana + hora de inicio. Ver
+ * `Experience.ownSchedule`.
+ */
+@Schema({ _id: false })
+export class OwnSlot {
+  // Día ISO (1=lunes … 7=domingo).
+  @Prop({ required: true, min: 1, max: 7 })
+  weekday: number;
+
+  // Hora local de inicio, 'HH:mm'. La duración es la de la experiencia.
+  @Prop({ required: true, trim: true })
+  start: string;
+}
+
+export const OwnSlotSchema = SchemaFactory.createForClass(OwnSlot);
+
+/**
  * Plantilla de experiencia (taller de torno, cumpleaños, buffet+cerámica, etc.).
  * NO tiene fecha: es la definición reutilizable. Los turnos concretos (con fecha,
  * hora y cupo) viven en `ExperienceSession` y copian estos valores al crearse,
@@ -118,6 +135,19 @@ export class Experience {
   // Variantes de precio (modalidades y tiers por cantidad). Ver PriceVariant.
   @Prop({ type: [PriceVariantSchema], default: [] })
   priceVariants: PriceVariant[];
+
+  /**
+   * HORARIO PROPIO: si tiene al menos uno, la experiencia se ofrece SÓLO en
+   * estos días y horas, y NO en los turnos generales del salón (ej. Escuelita:
+   * miércoles 18:00). Vacío = usa los turnos generales (el caso normal).
+   *
+   * En su horario propio la capacidad es el CUPO de la experiencia
+   * (defaultCapacity), no las mesas: el lugar físico lo aparta un bloqueo
+   * semanal de mesas (recurring_blocks). Por eso esas reservas no se asignan a
+   * mesas.
+   */
+  @Prop({ type: [OwnSlotSchema], default: [] })
+  ownSchedule: OwnSlot[];
 
   // ¿Se reserva online por acá (genera turnos + seña)? Si es false, es un
   // servicio que se COORDINA: el bot/web solo informa y capta la consulta

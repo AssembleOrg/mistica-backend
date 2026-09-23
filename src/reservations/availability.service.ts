@@ -25,10 +25,14 @@ import {
   bookingStartWindow,
   checkBookingWindow,
   earlyStartOf,
+  fmtMinutes,
   shiftAllowsExperience,
+  shiftFitting,
+  shiftWindow,
   startWindow,
   toMinutes,
 } from '../tables/shifts';
+import { hasOwnSchedule, ownStartsFor } from '../experiences/own-schedule';
 
 /** Error de clave duplicada de MongoDB. */
 const DUP_KEY = 11000;
@@ -56,6 +60,20 @@ export interface AvailableShift {
    * necesitan limpieza. Sólo se ofrece si hay lugar.
    */
   earlyStart?: boolean;
+  /**
+   * Horario PROPIO de la experiencia (Experience.ownSchedule): no es un turno
+   * general del salón. Su lugar es el cupo de la experiencia, no las mesas.
+   */
+  ownSchedule?: boolean;
+  /**
+   * Franja del turno ('HH:mm'): la reserva tiene que entrar ENTERA entre
+   * windowStart y windowEnd; latestStart es la última hora a la que puede
+   * arrancar esta experiencia sin pasarse al turno siguiente. En un horario
+   * propio los tres coinciden con su inicio/fin (no hay flexibilidad).
+   */
+  windowStart?: string;
+  windowEnd?: string;
+  latestStart?: string;
 }
 
 /**
@@ -130,16 +148,44 @@ export class AvailabilityService {
     // Candidatos (día abierto × turno) armados en orden cronológico.
     const candidates: Array<{
       slot: Omit<AvailableShift, 'maxPartySize' | 'shiftKey' | 'shiftName'>;
-      shiftKey: string;
-      shiftName: string;
+      shiftKey?: string;
+      shiftName?: string;
       earlyStart: boolean;
+      own: boolean;
+      window: { windowStart: string; windowEnd: string; latestStart: string };
     }> = [];
+    const own = hasOwnSchedule(exp.ownSchedule);
     days.forEach((d, i) => {
       if (closedFlags[i].closed) return;
       const dateKey = d.toISODate() as string;
+
+      // Horario PROPIO: la experiencia se ofrece sólo en sus días y horas, y
+      // nunca en los turnos generales (ej. Escuelita: miércoles 18:00).
+      if (own) {
+        for (const start of ownStartsFor(exp.ownSchedule, dateKey)) {
+          const slot = this.slotAt(exp, dateKey, start, tz);
+          if (!slot) continue; // fuera de la ventana del negocio
+          if (DateTime.fromJSDate(slot.startAt) <= now) continue;
+          const fin = fmtMinutes(toMinutes(start) + exp.durationMinutes);
+          candidates.push({
+            slot,
+            earlyStart: false,
+            own: true,
+            window: { windowStart: start, windowEnd: fin, latestStart: start },
+          });
+        }
+        return;
+      }
+
       const dayShifts = this.shifts.forDate(dateKey);
       for (const shift of dayShifts) {
         if (!shiftAllowsExperience(shift, String(exp._id))) continue;
+        const w = shiftWindow(shift, dayShifts);
+        const window = {
+          windowStart: w.earliest,
+          windowEnd: w.end,
+          latestStart: fmtMinutes(toMinutes(w.end) - exp.durationMinutes),
+        };
 
         // Inicios del turno: el anticipado (fin del turno anterior, si hay
         // hueco de limpieza) y el normal. La experiencia tiene que entrar
@@ -166,6 +212,8 @@ export class AvailabilityService {
             shiftKey: shift.key,
             shiftName: shift.name,
             earlyStart: st.early,
+            own: false,
+            window,
           });
         }
       }
@@ -178,10 +226,14 @@ export class AvailabilityService {
     // En el inicio anticipado las mesas usadas en el turno anterior siguen en
     // limpieza (ocupadas hasta fin + limpieza): sólo cuentan las que quedaron
     // libres, que es justamente lo que mide remainingPartySize.
+    // En un horario propio el tope es sólo el cupo: el lugar físico lo aparta
+    // un bloqueo semanal de mesas, así que las mesas no cuentan.
     const enriched = await Promise.all(
-      candidates.map(async ({ slot, shiftKey, shiftName, earlyStart }) => {
+      candidates.map(async ({ slot, shiftKey, shiftName, earlyStart, own: propio, window }) => {
         const [free, taken] = await Promise.all([
-          this.tables.remainingPartySize(slot.startAt, exp.durationMinutes),
+          propio
+            ? Promise.resolve(Number.POSITIVE_INFINITY)
+            : this.tables.remainingPartySize(slot.startAt, exp.durationMinutes),
           this.seatsTakenIn(exp, slot.dateKey, slot.startTime),
         ]);
         const maxPartySize = Math.min(
@@ -190,10 +242,11 @@ export class AvailabilityService {
         );
         return {
           ...slot,
-          shiftKey,
-          shiftName,
+          ...(shiftKey ? { shiftKey, shiftName } : {}),
           maxPartySize,
           ...(earlyStart ? { earlyStart: true } : {}),
+          ...(propio ? { ownSchedule: true } : {}),
+          ...window,
         };
       }),
     );
@@ -257,6 +310,7 @@ export class AvailabilityService {
     const exp = await this.experienceOrThrow(experienceId);
     const startTime = this.resolveStartTime(dateKey, timeOrShift);
     const slot = this.slotAt(exp, dateKey, startTime, envConfig.timezone);
+    if (slot) this.assertBookableTime(exp, dateKey, startTime);
     if (!slot) {
       const w = bookingStartWindow(exp.durationMinutes);
       throw new BadRequestException(
@@ -289,6 +343,7 @@ export class AvailabilityService {
     const startTime = this.resolveStartTime(dateKey, timeOrShift);
 
     const slot = this.slotAt(exp, dateKey, startTime, tz);
+    if (slot) this.assertBookableTime(exp, dateKey, startTime);
     if (!slot) {
       const w = bookingStartWindow(exp.durationMinutes);
       throw new BadRequestException(
@@ -348,6 +403,48 @@ export class AvailabilityService {
   }
 
   // ───────────────────────── helpers ─────────────────────────
+
+  /**
+   * Reglas de horario de una reserva:
+   *  · con horario PROPIO, sólo en sus días y horas;
+   *  · si no, tiene que entrar ENTERA en la franja de un turno: nunca se pasa
+   *    de un turno al otro (ej. a las 17:00 una de 1 h cruzaría a la franja 2).
+   *    Una experiencia que dura toda la franja sólo puede arrancar al inicio.
+   */
+  private assertBookableTime(
+    exp: ExperienceDocument,
+    dateKey: string,
+    startTime: string,
+  ): void {
+    const DIAS = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+    if (hasOwnSchedule(exp.ownSchedule)) {
+      if (ownStartsFor(exp.ownSchedule, dateKey).includes(startTime)) return;
+      const cuando = exp.ownSchedule
+        .map((s) => `${DIAS[s.weekday] ?? s.weekday} a las ${s.start}`)
+        .join(', ');
+      throw new BadRequestException(
+        `${exp.name} tiene horario propio: ${cuando}. Elegí uno de esos horarios.`,
+      );
+    }
+    if (shiftFitting(dateKey, toMinutes(startTime), exp.durationMinutes)) return;
+    const dayShifts = this.shifts.forDate(dateKey);
+    const opciones = dayShifts
+      .map((sh) => {
+        const w = shiftWindow(sh, dayShifts);
+        const latest = toMinutes(w.end) - exp.durationMinutes;
+        if (latest < toMinutes(w.earliest)) return null;
+        const hasta = fmtMinutes(latest);
+        return hasta === w.earliest
+          ? `${sh.name} arrancando a las ${w.earliest}`
+          : `${sh.name} arrancando entre las ${w.earliest} y las ${hasta}`;
+      })
+      .filter(Boolean)
+      .join('; ');
+    throw new BadRequestException(
+      `A las ${startTime} ${exp.name} (${exp.durationMinutes} min) se pasaría de un turno al otro o quedaría fuera de los turnos: tiene que entrar entera en un turno` +
+        (opciones ? ` (${opciones}).` : '.'),
+    );
+  }
 
   /**
    * Ubica la experiencia arrancando a `startTime` ('HH:mm') dentro de la
