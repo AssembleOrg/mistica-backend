@@ -2,6 +2,7 @@ import { DateTime } from 'luxon';
 import {
   bookingStartWindow,
   checkBookingWindow,
+  earlyStartOf,
   parseShifts,
   shiftAllowsExperience,
   shiftsFitting,
@@ -12,7 +13,7 @@ import {
 } from './shifts';
 
 const TZ = 'America/Argentina/Buenos_Aires';
-const DEFAULT = 'T1|Turno 1|15:00|17:30;T2|Turno 2|17:50|20:00';
+const DEFAULT = 'T1|Turno 1|15:00|17:30;T2|Turno 2|17:40|20:00';
 
 /** Instante absoluto a partir de una fecha y hora locales del negocio. */
 function at(dateKey: string, hhmm: string): Date {
@@ -23,7 +24,7 @@ describe('parseShifts', () => {
   it('parsea la definición por defecto', () => {
     expect(parseShifts(DEFAULT)).toEqual([
       { key: 'T1', name: 'Turno 1', start: '15:00', end: '17:30' },
-      { key: 'T2', name: 'Turno 2', start: '17:50', end: '20:00' },
+      { key: 'T2', name: 'Turno 2', start: '17:40', end: '20:00' },
     ]);
   });
 
@@ -133,6 +134,15 @@ describe('suggestedShiftFor · etiqueta de turno sugerido', () => {
     ).toBe('T2');
   });
 
+  it('el inicio anticipado del turno 2 (17:30) cuenta como turno 2', () => {
+    expect(
+      suggestedShiftFor(at('2026-08-01', '17:30'), 120, TZ)?.shift.key,
+    ).toBe('T2');
+    expect(
+      suggestedShiftFor(at('2026-08-01', '17:40'), 120, TZ)?.shift.key,
+    ).toBe('T2');
+  });
+
   it('un horario que cruza turnos no tiene etiqueta (pero es válido)', () => {
     expect(suggestedShiftFor(at('2026-08-01', '16:30'), 120, TZ)).toBeNull();
     expect(checkBookingWindow(at('2026-08-01', '16:30'), 120, TZ).ok).toBe(
@@ -143,7 +153,7 @@ describe('suggestedShiftFor · etiqueta de turno sugerido', () => {
 
 describe('startWindow (sugerencias)', () => {
   const t1 = { key: 'T1', name: 'Turno 1', start: '15:00', end: '17:30' };
-  const t2 = { key: 'T2', name: 'Turno 2', start: '17:50', end: '20:00' };
+  const t2 = { key: 'T2', name: 'Turno 2', start: '17:40', end: '20:00' };
 
   it('una experiencia de 2 h arranca entre 15:00 y 15:30 en el turno 1', () => {
     expect(startWindow(t1, 120)).toEqual({
@@ -152,9 +162,9 @@ describe('startWindow (sugerencias)', () => {
     });
   });
 
-  it('en el turno 2 arranca entre 17:50 y 18:00', () => {
+  it('en el turno 2 arranca entre 17:40 y 18:00', () => {
     expect(startWindow(t2, 120)).toEqual({
-      earliest: '17:50',
+      earliest: '17:40',
       latest: '18:00',
     });
   });
@@ -201,7 +211,7 @@ describe('shiftsForDate · turnos por día de la semana', () => {
 
   const base = [
     generico('T1', '15:00', '17:30'),
-    generico('T2', '17:50', '20:00'),
+    generico('T2', '17:40', '20:00'),
   ];
 
   it('sin plantillas por día, todos los días usan las genéricas', () => {
@@ -249,5 +259,27 @@ describe('shiftAllowsExperience', () => {
     const acotado = { ...t1, experienceIds: ['expA', 'expB'] };
     expect(shiftAllowsExperience(acotado, 'expA')).toBe(true);
     expect(shiftAllowsExperience(acotado, 'expC')).toBe(false);
+  });
+});
+
+describe('earlyStartOf · inicio anticipado', () => {
+  const t1 = { key: 'T1', name: 'Turno 1', start: '15:00', end: '17:30' };
+  const t2 = { key: 'T2', name: 'Turno 2', start: '17:40', end: '20:00' };
+
+  it('el turno 2 puede arrancar cuando termina el turno 1 (se saltea la limpieza)', () => {
+    expect(earlyStartOf(t2, [t1, t2])).toBe('17:30');
+  });
+
+  it('el primer turno del día no tiene inicio anticipado', () => {
+    expect(earlyStartOf(t1, [t1, t2])).toBeNull();
+  });
+
+  it('no depende del orden en que vengan las plantillas', () => {
+    expect(earlyStartOf(t2, [t2, t1])).toBe('17:30');
+  });
+
+  it('sin hueco entre turnos no hay inicio anticipado', () => {
+    const pegado = { ...t2, start: '17:30' };
+    expect(earlyStartOf(pegado, [t1, pegado])).toBeNull();
   });
 });

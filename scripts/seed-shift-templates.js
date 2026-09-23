@@ -27,7 +27,7 @@ const APPLY = process.argv.includes('--apply');
 /** Debe coincidir con el default de la env SHIFTS. */
 const TEMPLATES = [
   { key: 'T1', name: 'Turno 1', start: '15:00', end: '17:30', order: 1 },
-  { key: 'T2', name: 'Turno 2', start: '17:50', end: '20:00', order: 2 },
+  { key: 'T2', name: 'Turno 2', start: '17:40', end: '20:00', order: 2 },
 ];
 
 function loadMongoClient() {

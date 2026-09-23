@@ -24,8 +24,10 @@ import { ShiftsService } from '../tables/shifts.service';
 import {
   bookingStartWindow,
   checkBookingWindow,
+  earlyStartOf,
   shiftAllowsExperience,
   startWindow,
+  toMinutes,
 } from '../tables/shifts';
 
 /** Error de clave duplicada de MongoDB. */
@@ -48,6 +50,12 @@ export interface AvailableShift {
   maxPartySize: number;
   price: number;
   depositPct: number;
+  /**
+   * Inicio ANTICIPADO del turno: arranca cuando termina el turno anterior (ej.
+   * 17:30 en vez de 17:40), en mesas que no se usaron antes y por eso no
+   * necesitan limpieza. Sólo se ofrece si hay lugar.
+   */
+  earlyStart?: boolean;
 }
 
 /**
@@ -74,11 +82,12 @@ export class AvailabilityService {
   ) {}
 
   /**
-   * Días y horarios sugeridos donde se puede reservar una experiencia, entre
-   * dos fechas. Ofrece el inicio de cada turno sugerido del día (el cliente
-   * puede pedir otra hora: se valida con el preview). Salta los días cerrados.
-   * `includeFull` deja pasar los que ya no tienen lugar (para mostrarlos
-   * agotados en vez de esconderlos).
+   * Días y horarios donde se puede reservar una experiencia, entre dos fechas.
+   * Ofrece el inicio de cada turno del día y, si hay mesas que el turno
+   * anterior no usó, también su INICIO ANTICIPADO (al terminar el turno
+   * anterior, marcado `earlyStart`). Salta los días cerrados. `includeFull`
+   * deja pasar los inicios normales que ya no tienen lugar (para mostrarlos
+   * agotados en vez de esconderlos); el anticipado sólo aparece con lugar.
    */
   async forExperience(params: {
     experienceId: string;
@@ -118,27 +127,47 @@ export class AvailabilityService {
       days.map((d) => this.closedDates.isClosed(d.toJSDate())),
     );
 
-    // Candidatos (día abierto × turno sugerido) armados en orden cronológico.
+    // Candidatos (día abierto × turno) armados en orden cronológico.
     const candidates: Array<{
       slot: Omit<AvailableShift, 'maxPartySize' | 'shiftKey' | 'shiftName'>;
       shiftKey: string;
       shiftName: string;
+      earlyStart: boolean;
     }> = [];
     days.forEach((d, i) => {
       if (closedFlags[i].closed) return;
       const dateKey = d.toISODate() as string;
-      for (const shift of this.shifts.forDate(dateKey)) {
+      const dayShifts = this.shifts.forDate(dateKey);
+      for (const shift of dayShifts) {
         if (!shiftAllowsExperience(shift, String(exp._id))) continue;
-        // El horario sugerido es el inicio del turno; si la experiencia no
-        // entra en el turno pero sí en la ventana del día, se sugiere igual
-        // (el turno es una guía, no un límite).
-        if (!startWindow(shift, exp.durationMinutes)) continue;
 
-        const slot = this.slotAt(exp, dateKey, shift.start, tz);
-        if (!slot) continue; // fuera de la ventana del negocio
-        // No ofrecemos horarios que ya empezaron.
-        if (DateTime.fromJSDate(slot.startAt) <= now) continue;
-        candidates.push({ slot, shiftKey: shift.key, shiftName: shift.name });
+        // Inicios del turno: el anticipado (fin del turno anterior, si hay
+        // hueco de limpieza) y el normal. La experiencia tiene que entrar
+        // ENTERA en el turno arrancando a esa hora.
+        const starts: Array<{ time: string; early: boolean }> = [];
+        const early = earlyStartOf(shift, dayShifts);
+        if (
+          early &&
+          toMinutes(early) + exp.durationMinutes <= toMinutes(shift.end)
+        ) {
+          starts.push({ time: early, early: true });
+        }
+        if (startWindow(shift, exp.durationMinutes)) {
+          starts.push({ time: shift.start, early: false });
+        }
+
+        for (const st of starts) {
+          const slot = this.slotAt(exp, dateKey, st.time, tz);
+          if (!slot) continue; // fuera de la ventana del negocio
+          // No ofrecemos horarios que ya empezaron.
+          if (DateTime.fromJSDate(slot.startAt) <= now) continue;
+          candidates.push({
+            slot,
+            shiftKey: shift.key,
+            shiftName: shift.name,
+            earlyStart: st.early,
+          });
+        }
       }
     });
 
@@ -146,8 +175,11 @@ export class AvailabilityService {
     // el cupo nominal de la experiencia. Tiene que dar lo MISMO que el preview
     // del hold, o la web ofrece un grupo que después se rechaza. Todo en
     // paralelo: son lecturas independientes por (día, hora).
+    // En el inicio anticipado las mesas usadas en el turno anterior siguen en
+    // limpieza (ocupadas hasta fin + limpieza): sólo cuentan las que quedaron
+    // libres, que es justamente lo que mide remainingPartySize.
     const enriched = await Promise.all(
-      candidates.map(async ({ slot, shiftKey, shiftName }) => {
+      candidates.map(async ({ slot, shiftKey, shiftName, earlyStart }) => {
         const [free, taken] = await Promise.all([
           this.tables.remainingPartySize(slot.startAt, exp.durationMinutes),
           this.seatsTakenIn(exp, slot.dateKey, slot.startTime),
@@ -156,11 +188,21 @@ export class AvailabilityService {
           free,
           Math.max(0, exp.defaultCapacity - taken),
         );
-        return { ...slot, shiftKey, shiftName, maxPartySize };
+        return {
+          ...slot,
+          shiftKey,
+          shiftName,
+          maxPartySize,
+          ...(earlyStart ? { earlyStart: true } : {}),
+        };
       }),
     );
 
-    return enriched.filter((s) => s.maxPartySize > 0 || params.includeFull);
+    // El inicio anticipado es una oportunidad, no un turno: sólo se muestra
+    // si hay lugar (nunca como "agotado").
+    return enriched.filter(
+      (s) => s.maxPartySize > 0 || (params.includeFull && !s.earlyStart),
+    );
   }
 
   /** Anotados que ya tiene esa experiencia en ese horario (0 si no hay turno). */

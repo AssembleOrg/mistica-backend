@@ -7,7 +7,10 @@ export type ShiftTemplateDocument = ShiftTemplate & Document;
  * Turno fijo del día, editable desde el panel.
  *
  * El día está partido en bloques cerrados (ej. Turno 1 de 15:00 a 17:30 y Turno
- * 2 de 17:50 a 20:00) y el hueco entre uno y otro es el tiempo de limpieza. Los
+ * 2 de 17:40 a 20:00) y el hueco entre uno y otro es el tiempo de limpieza. Las
+ * mesas que no se usaron en el turno anterior no necesitan esa limpieza: por
+ * eso la disponibilidad ofrece además un INICIO ANTICIPADO del turno (al fin
+ * del anterior) cuando hay lugar en ellas (ver earlyStartOf en shifts.ts). Los
  * turnos NO son por experiencia: existen solos y en un mismo turno conviven
  * reservas de experiencias distintas. Lo que se comparte es el salón — las
  * mesas — no la actividad.

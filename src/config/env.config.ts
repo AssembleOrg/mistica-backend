@@ -76,11 +76,12 @@ export const envConfig = {
   // puede empezar antes de `open` ni terminar después de `close`.
   businessOpen: process.env.BUSINESS_OPEN || '15:00',
   businessClose: process.env.BUSINESS_CLOSE || '20:00',
-  // Turnos SUGERIDOS del día, en hora local del negocio. Formato:
-  // "T1|Turno 1|15:00|17:30;T2|Turno 2|17:50|20:00". Ya no son bloques
-  // rígidos: la reserva puede arrancar a cualquier hora dentro de la ventana
-  // del negocio; los turnos sólo ordenan la oferta (landing/bot los sugieren).
-  shifts: process.env.SHIFTS || 'T1|Turno 1|15:00|17:30;T2|Turno 2|17:50|20:00',
+  // Turnos del día, en hora local del negocio. Formato:
+  // "T1|Turno 1|15:00|17:30;T2|Turno 2|17:40|20:00". El hueco entre turnos es
+  // la limpieza (CLEANING_BUFFER_MINUTES): el Turno 2 arranca 10 min después
+  // de que termina el 1. Sólo es el fallback: en producción mandan las
+  // plantillas de la base (shift_templates), editables desde el panel.
+  shifts: process.env.SHIFTS || 'T1|Turno 1|15:00|17:30;T2|Turno 2|17:40|20:00',
   // ¿Un grupo chico (≤6) puede quedarse con una mesa grande entera cuando no
   // hay mesas de 2 ni posibilidad de compartida? Por defecto NO: las grandes se
   // reservan para grupos numerosos y el grupo chico se rechaza.

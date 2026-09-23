@@ -228,9 +228,33 @@ export function bookingStartWindow(
 // ───────────────────── Turnos como sugerencia ─────────────────────
 
 /**
- * Turno sugerido en el que cae (entera) una actividad, si cae en alguno.
- * Es sólo una ETIQUETA para la agenda y los mensajes: que no caiga en ninguno
- * no invalida el horario.
+ * Inicio ANTICIPADO de un turno: la hora en que termina el turno anterior del
+ * mismo día, o null si es el primero o no hay hueco entre ambos.
+ *
+ * El hueco entre dos turnos es la limpieza de las mesas usadas en el anterior
+ * (ej. Turno 1 hasta 17:30, Turno 2 desde 17:40). Las mesas que NO se usaron
+ * no necesitan limpieza, así que un grupo que entra en ellas puede arrancar el
+ * turno apenas termina el anterior (17:30). Si hay lugar de verdad lo deciden
+ * las mesas: una mesa usada queda ocupada hasta su fin + la limpieza.
+ */
+export function earlyStartOf(
+  shift: ShiftDef,
+  dayShifts: ShiftDef[],
+): string | null {
+  const sorted = [...dayShifts].sort(
+    (a, b) => toMinutes(a.start) - toMinutes(b.start),
+  );
+  const idx = sorted.findIndex((s) => s.key === shift.key);
+  if (idx <= 0) return null;
+  const prev = sorted[idx - 1];
+  return toMinutes(prev.end) < toMinutes(shift.start) ? prev.end : null;
+}
+
+/**
+ * Turno sugerido en el que cae (entera) una actividad, si cae en alguno. Una
+ * actividad que arranca en el inicio anticipado de un turno (ver
+ * earlyStartOf) cuenta como de ese turno. Es sólo una ETIQUETA para la agenda
+ * y los mensajes: que no caiga en ninguno no invalida el horario.
  */
 export function suggestedShiftFor(
   startAt: Date,
@@ -242,8 +266,10 @@ export function suggestedShiftFor(
   const startMin = startLocal.hour * 60 + startLocal.minute;
   const endMin = startMin + durationMinutes;
 
-  for (const shift of listShifts(dateKey)) {
-    if (startMin >= toMinutes(shift.start) && endMin <= toMinutes(shift.end)) {
+  const shifts = listShifts(dateKey);
+  for (const shift of shifts) {
+    const from = earlyStartOf(shift, shifts) ?? shift.start;
+    if (startMin >= toMinutes(from) && endMin <= toMinutes(shift.end)) {
       return { dateKey, shift };
     }
   }
