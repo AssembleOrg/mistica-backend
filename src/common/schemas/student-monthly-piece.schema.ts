@@ -35,9 +35,17 @@ export class StudentMonthlyPiece {
   @Prop({ type: Number, min: 0 })
   extraAmount?: number;
 
-  /** El adicional ya se cobró. */
+  /** El adicional ya se cobró (genera un pago del alumno). */
   @Prop({ type: Boolean, default: false })
   paid: boolean;
+
+  /** Pago del alumno creado al marcar cobrado. Se anula si se deshace. */
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'StudentPayment' })
+  paymentId?: Types.ObjectId;
+
+  /** Cuándo se marcó cobrado: el cobro se puede deshacer 24 hs. */
+  @Prop({ type: Date })
+  paidAt?: Date;
 
   @Prop({ trim: true })
   notes?: string;

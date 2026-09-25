@@ -36,10 +36,21 @@ export class UpsertMonthlyPieceDto {
   @Min(0)
   extraAmount?: number;
 
-  @ApiPropertyOptional({ description: 'Adicional cobrado (sólo admin)' })
+  @ApiPropertyOptional({
+    description:
+      'Adicional cobrado (sólo admin). true crea el pago del alumno; false lo deshace (hasta 24 hs)',
+  })
   @IsOptional()
   @IsBoolean()
   paid?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Cómo se cobró el adicional (efectivo, transferencia…)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  paymentMethod?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

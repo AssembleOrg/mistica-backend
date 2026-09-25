@@ -698,21 +698,73 @@ export class StudentsService {
     if (dto.bisque !== undefined) set.bisque = dto.bisque;
     if (dto.delivered !== undefined) set.delivered = dto.delivered;
     if (dto.notes !== undefined) set.notes = dto.notes.trim();
+    const unset: Record<string, 1> = {};
     // Plata: sólo admin. Un profesor que mande estos campos los ignora.
     if (isAdmin) {
+      const current = await this.monthlyPieceModel
+        .findOne({ studentId: student._id, month })
+        .lean();
       if (dto.extraCharge !== undefined) set.extraCharge = dto.extraCharge;
       if (dto.extraAmount !== undefined) set.extraAmount = dto.extraAmount;
-      if (dto.paid !== undefined) set.paid = dto.paid;
+
+      // Cobrar el adicional = registrar un pago del alumno (queda en su
+      // historial). Se puede deshacer 24 hs: se anula ese pago.
+      if (dto.paid === true && !current?.paid) {
+        const amount = dto.extraAmount ?? current?.extraAmount ?? 0;
+        const extra = dto.extraCharge ?? current?.extraCharge ?? false;
+        if (!extra || amount <= 0) {
+          throw new BadRequestException(
+            'Para cobrar, marcá el adicional y cargá el monto.',
+          );
+        }
+        const payment = await this.addPayment(
+          id,
+          {
+            concept: `Adicional pieza ${monthLabelEs(month)}`,
+            amount,
+            status: 'PAID',
+            method: dto.paymentMethod,
+            notes: current?.pieceName
+              ? `Pieza: ${current.pieceName}`
+              : undefined,
+          },
+          actor?.id,
+        );
+        set.paid = true;
+        set.paidAt = new Date();
+        set.paymentId = payment._id;
+      } else if (dto.paid === false && current?.paid) {
+        const paidAt = current.paidAt ? new Date(current.paidAt).getTime() : 0;
+        if (paidAt && Date.now() - paidAt > UNDO_PAID_MS) {
+          throw new BadRequestException(
+            'Pasaron más de 24 hs del cobro: anulalo desde los pagos del alumno.',
+          );
+        }
+        if (current.paymentId) {
+          try {
+            await this.removePayment(String(current.paymentId));
+          } catch (e) {
+            if (!(e instanceof NotFoundException)) throw e;
+          }
+        }
+        set.paid = false;
+        unset.paidAt = 1;
+        unset.paymentId = 1;
+      }
     }
     if (actor?.id && Types.ObjectId.isValid(actor.id)) {
       set.updatedById = new Types.ObjectId(actor.id);
     }
+    const update: Record<string, unknown> = {
+      $set: set,
+      $setOnInsert: { studentId: student._id, month },
+    };
+    if (Object.keys(unset).length) update.$unset = unset;
     const row = await this.monthlyPieceModel
-      .findOneAndUpdate(
-        { studentId: student._id, month },
-        { $set: set, $setOnInsert: { studentId: student._id, month } },
-        { new: true, upsert: true },
-      )
+      .findOneAndUpdate({ studentId: student._id, month }, update, {
+        new: true,
+        upsert: true,
+      })
       .lean();
     return this.monthlyPieceView(row, isAdmin);
   }
@@ -742,6 +794,13 @@ export class StudentsService {
             extraCharge: r.extraCharge ?? false,
             extraAmount: r.extraAmount,
             paid: r.paid ?? false,
+            paidAt: r.paidAt,
+            paymentId: r.paymentId ? String(r.paymentId) : undefined,
+            // Hasta cuándo se puede deshacer el cobro desde el panel.
+            undoUntil:
+              r.paid && r.paidAt
+                ? new Date(new Date(r.paidAt).getTime() + UNDO_PAID_MS)
+                : undefined,
           }
         : {}),
     };
@@ -801,6 +860,29 @@ export class StudentsService {
   ) {
     return this.assertCanReadGroup(groupId, actor);
   }
+}
+
+/** Ventana para deshacer el cobro de un adicional desde el panel. */
+const UNDO_PAID_MS = 24 * 60 * 60 * 1000;
+
+const MESES_ES = [
+  'enero',
+  'febrero',
+  'marzo',
+  'abril',
+  'mayo',
+  'junio',
+  'julio',
+  'agosto',
+  'septiembre',
+  'octubre',
+  'noviembre',
+  'diciembre',
+];
+
+function monthLabelEs(ym: string): string {
+  const m = MESES_ES[Number(ym.slice(5, 7)) - 1] ?? ym;
+  return `${m} ${ym.slice(0, 4)}`;
 }
 
 function assertMonth(month: string) {
