@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   HttpException,
@@ -12,6 +13,7 @@ import { UserRole } from '../common/enums/user-role.enum';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { envConfig } from '../config/env.config';
+import { BotTryDto } from '../common/dto/bot-settings.dto';
 
 /**
  * Proxy admin → control server del bot de WhatsApp. El secreto vive en el
@@ -35,12 +37,20 @@ export class BotControlController {
     return url;
   }
 
-  private async call(path: string, method: 'GET' | 'POST'): Promise<unknown> {
+  private async call(
+    path: string,
+    method: 'GET' | 'POST',
+    body?: unknown,
+  ): Promise<unknown> {
     const base = this.base();
     try {
       const res = await fetch(`${base}${path}`, {
         method,
-        headers: { 'X-Bot-Secret': envConfig.botControl.secret },
+        headers: {
+          'X-Bot-Secret': envConfig.botControl.secret,
+          ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
       const text = await res.text();
       const data = text ? JSON.parse(text) : {};
@@ -73,5 +83,19 @@ export class BotControlController {
   @ApiOperation({ summary: 'Cerrar sesión del bot (fuerza nuevo QR)' })
   async logout() {
     return this.call('/logout', 'POST');
+  }
+
+  /**
+   * Probador: "¿qué respondería el bot a…?". Corre el agente en seco (sin
+   * WhatsApp, sin crear reservas ni consultas) y devuelve la respuesta y qué
+   * herramientas usó.
+   */
+  @Post('try')
+  @ApiOperation({ summary: 'Probar una respuesta del bot (en seco)' })
+  async tryMessage(@Body() dto: BotTryDto) {
+    return this.call('/try', 'POST', {
+      message: dto.message,
+      history: dto.history ?? [],
+    });
   }
 }

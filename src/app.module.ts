@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { NotificationsModule } from './notifications/notifications.module';
 import { BotControlModule } from './bot-control/bot-control.module';
+import { BotSettingsModule } from './bot-settings/bot-settings.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
@@ -74,6 +75,7 @@ import { InAppNotificationsModule } from './in-app-notifications/in-app-notifica
     ConversationsModule,
     NotificationsModule,
     BotControlModule,
+    BotSettingsModule,
     SettingsModule,
     InAppNotificationsModule,
   ],

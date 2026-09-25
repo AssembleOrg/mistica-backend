@@ -28,3 +28,5 @@ export * from './conversation.schema';
 export * from './conversation-message.schema';
 export * from './student-regularity-event.schema';
 export * from './in-app-notification.schema';
+export * from './bot-settings.schema';
+export * from './bot-faq.schema';
