@@ -28,6 +28,11 @@ import {
   StudentRegularityEvent,
   StudentRegularityEventDocument,
 } from '../common/schemas/student-regularity-event.schema';
+import {
+  StudentMonthlyPiece,
+  StudentMonthlyPieceDocument,
+} from '../common/schemas/student-monthly-piece.schema';
+import { UpsertMonthlyPieceDto } from '../common/dto/student-monthly-piece.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InAppNotificationsService } from '../in-app-notifications/in-app-notifications.service';
 import {
@@ -62,16 +67,15 @@ export class StudentsService {
     private readonly professorModel: Model<ProfessorDocument>,
     @InjectModel(StudentRegularityEvent.name)
     private readonly regularityEventModel: Model<StudentRegularityEventDocument>,
+    @InjectModel(StudentMonthlyPiece.name)
+    private readonly monthlyPieceModel: Model<StudentMonthlyPieceDocument>,
     private readonly notifications: NotificationsService,
     private readonly inAppNotifications: InAppNotificationsService,
   ) {}
 
   // ── Alumnos ──────────────────────────────────────────────────────────────
 
-  async list(
-    actor?: { id?: string; role?: string },
-    includeInactive = false,
-  ) {
+  async list(actor?: { id?: string; role?: string }, includeInactive = false) {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (!includeInactive) filter.isActive = true;
     if (actor?.role === UserRole.ADMIN) {
@@ -125,11 +129,13 @@ export class StudentsService {
     return student;
   }
 
-
   private async clientFor(id?: string) {
     if (!id) return undefined;
-    if (!Types.ObjectId.isValid(id)) throw new BadRequestException('clientId inválido');
-    const client = await this.clientModel.findOne({ _id: id, deletedAt: { $exists: false } }).exec();
+    if (!Types.ObjectId.isValid(id))
+      throw new BadRequestException('clientId inválido');
+    const client = await this.clientModel
+      .findOne({ _id: id, deletedAt: { $exists: false } })
+      .exec();
     if (!client) throw new NotFoundException('Cliente no encontrado');
     return client;
   }
@@ -247,9 +253,13 @@ export class StudentsService {
       dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       method: dto.method,
       notes: dto.notes,
-      createdById: userId && Types.ObjectId.isValid(userId) ? userId : undefined,
+      createdById:
+        userId && Types.ObjectId.isValid(userId) ? userId : undefined,
     });
-    await this.recordRegularity(student._id as Types.ObjectId, 'PAYMENT_CREATED');
+    await this.recordRegularity(
+      student._id as Types.ObjectId,
+      'PAYMENT_CREATED',
+    );
     return payment;
   }
 
@@ -336,10 +346,7 @@ export class StudentsService {
       const existingRecord = previous?.records.find(
         (candidate) => String(candidate.studentId) === r.studentId,
       );
-      if (
-        r.status === 'MAKEUP' &&
-        (!r.makeupForGroupId || !r.makeupForDate)
-      ) {
+      if (r.status === 'MAKEUP' && (!r.makeupForGroupId || !r.makeupForDate)) {
         throw new BadRequestException(
           'Cada recuperación debe indicar el grupo y la fecha de la clase original.',
         );
@@ -376,7 +383,9 @@ export class StudentsService {
         $set: {
           records,
           takenById:
-            actor?.id && Types.ObjectId.isValid(actor.id) ? actor.id : undefined,
+            actor?.id && Types.ObjectId.isValid(actor.id)
+              ? actor.id
+              : undefined,
           updatedAt: new Date(),
         },
         $setOnInsert: { createdAt: new Date() },
@@ -393,7 +402,11 @@ export class StudentsService {
         ),
     );
     for (const old of previous?.records ?? []) {
-      if (old.status !== 'MAKEUP' || !old.makeupForGroupId || !old.makeupForDate)
+      if (
+        old.status !== 'MAKEUP' ||
+        !old.makeupForGroupId ||
+        !old.makeupForDate
+      )
         continue;
       const key = `${String(old.studentId)}:${String(old.makeupForGroupId)}:${old.makeupForDate}`;
       if (!newLinks.has(key)) {
@@ -523,7 +536,12 @@ export class StudentsService {
   ) {
     const now = new Date();
     const overdue = await this.paymentModel
-      .find({ studentId, status: 'PENDING', deletedAt: { $exists: false }, dueDate: { $lt: now } })
+      .find({
+        studentId,
+        status: 'PENDING',
+        deletedAt: { $exists: false },
+        dueDate: { $lt: now },
+      })
       .select('amount')
       .lean();
     const next = {
@@ -540,7 +558,8 @@ export class StudentsService {
       previous.status === next.status &&
       previous.overdueCount === next.overdueCount &&
       previous.overdueAmount === next.overdueAmount
-    ) return;
+    )
+      return;
     await this.regularityEventModel.create({ studentId, ...next, source });
   }
 
@@ -551,15 +570,35 @@ export class StudentsService {
     const inThreeDays = new Date(now);
     inThreeDays.setDate(inThreeDays.getDate() + 3);
     const [dueSoon, overdue] = await Promise.all([
-      this.paymentModel.find({ status: 'PENDING', deletedAt: { $exists: false }, dueDate: { $gte: now, $lte: inThreeDays }, dueReminderSentAt: { $exists: false } }),
-      this.paymentModel.find({ status: 'PENDING', deletedAt: { $exists: false }, dueDate: { $lt: now }, overdueReminderSentAt: { $exists: false } }),
+      this.paymentModel.find({
+        status: 'PENDING',
+        deletedAt: { $exists: false },
+        dueDate: { $gte: now, $lte: inThreeDays },
+        dueReminderSentAt: { $exists: false },
+      }),
+      this.paymentModel.find({
+        status: 'PENDING',
+        deletedAt: { $exists: false },
+        dueDate: { $lt: now },
+        overdueReminderSentAt: { $exists: false },
+      }),
     ]);
     const pending = [...dueSoon, ...overdue];
     if (!pending.length) return;
-    const students = await this.studentModel.find({ _id: { $in: pending.map((p) => p.studentId) } }).select('name').lean();
-    const names = new Map(students.map((student) => [String(student._id), student.name]));
-    const lines = pending.map((payment) => `• ${names.get(String(payment.studentId)) ?? 'Alumno'}: ${payment.concept}`);
-    const studentIds = [...new Set(pending.map((payment) => String(payment.studentId)))];
+    const students = await this.studentModel
+      .find({ _id: { $in: pending.map((p) => p.studentId) } })
+      .select('name')
+      .lean();
+    const names = new Map(
+      students.map((student) => [String(student._id), student.name]),
+    );
+    const lines = pending.map(
+      (payment) =>
+        `• ${names.get(String(payment.studentId)) ?? 'Alumno'}: ${payment.concept}`,
+    );
+    const studentIds = [
+      ...new Set(pending.map((payment) => String(payment.studentId))),
+    ];
     for (const id of studentIds) {
       await this.recordRegularity(new Types.ObjectId(id), 'DAILY_CHECK');
     }
@@ -574,12 +613,143 @@ export class StudentsService {
       `Recordatorio administrativo de cuotas:\n${lines.join('\n')}`,
     );
     await Promise.all([
-      ...dueSoon.map((payment) => this.paymentModel.updateOne({ _id: payment._id }, { $set: { dueReminderSentAt: new Date() } })),
-      ...overdue.map((payment) => this.paymentModel.updateOne({ _id: payment._id }, { $set: { overdueReminderSentAt: new Date() } })),
+      ...dueSoon.map((payment) =>
+        this.paymentModel.updateOne(
+          { _id: payment._id },
+          { $set: { dueReminderSentAt: new Date() } },
+        ),
+      ),
+      ...overdue.map((payment) =>
+        this.paymentModel.updateOne(
+          { _id: payment._id },
+          { $set: { overdueReminderSentAt: new Date() } },
+        ),
+      ),
     ]);
   }
 
-  private async professorOf(actor?: { id?: string }): Promise<ProfessorDocument | null> {
+  // ── Pieza del mes ────────────────────────────────────────────────────────
+  // Cada alumno elige UNA pieza por mes (fresca o bizcochada). Reemplaza la
+  // planilla "coladas del mes". Lo práctico (pieza, bizcocho, entregada) lo
+  // carga cualquiera con acceso al alumno; el adicional y su cobro, sólo admin.
+
+  /** Planilla del mes: todos los alumnos visibles para el actor, con su pieza. */
+  async monthlyPiecesOfMonth(
+    month: string,
+    actor?: { id?: string; role?: string },
+  ) {
+    assertMonth(month);
+    const students = await this.list(actor, false);
+    const ids = students.map((s) => s._id as Types.ObjectId);
+    const [pieces, groups] = await Promise.all([
+      this.monthlyPieceModel.find({ month, studentId: { $in: ids } }).lean(),
+      this.groupModel
+        .find({ studentIds: { $in: ids }, deletedAt: { $exists: false } })
+        .select('name schedule studentIds')
+        .lean(),
+    ]);
+    const hex = (v: unknown) => (v as Types.ObjectId).toHexString();
+    const byStudent = new Map(pieces.map((p) => [hex(p.studentId), p]));
+    const groupsOf = new Map<string, { name: string; schedule: unknown[] }[]>();
+    for (const g of groups) {
+      for (const sid of g.studentIds) {
+        const k = hex(sid);
+        const arr = groupsOf.get(k) ?? [];
+        arr.push({ name: g.name, schedule: g.schedule });
+        groupsOf.set(k, arr);
+      }
+    }
+    const isAdmin = actor?.role === UserRole.ADMIN;
+    return students.map((s) => ({
+      student: { _id: hex(s._id), name: s.name },
+      groups: groupsOf.get(hex(s._id)) ?? [],
+      piece: this.monthlyPieceView(byStudent.get(hex(s._id)), isAdmin),
+    }));
+  }
+
+  /** Historial de piezas del mes de un alumno (más reciente primero). */
+  async monthlyPiecesOfStudent(
+    id: string,
+    actor?: { id?: string; role?: string },
+  ) {
+    const student = await this.findOrThrow(id);
+    await this.assertCanReadPractical(student._id as Types.ObjectId, actor);
+    const rows = await this.monthlyPieceModel
+      .find({ studentId: student._id })
+      .sort({ month: -1 })
+      .limit(24)
+      .lean();
+    const isAdmin = actor?.role === UserRole.ADMIN;
+    return rows.map((r) => this.monthlyPieceView(r, isAdmin));
+  }
+
+  async upsertMonthlyPiece(
+    id: string,
+    month: string,
+    dto: UpsertMonthlyPieceDto,
+    actor?: { id?: string; role?: string },
+  ) {
+    assertMonth(month);
+    const student = await this.findOrThrow(id);
+    await this.assertCanReadPractical(student._id as Types.ObjectId, actor);
+    const isAdmin = actor?.role === UserRole.ADMIN;
+    const set: Record<string, unknown> = {};
+    if (dto.pieceName !== undefined) set.pieceName = dto.pieceName.trim();
+    if (dto.bisque !== undefined) set.bisque = dto.bisque;
+    if (dto.delivered !== undefined) set.delivered = dto.delivered;
+    if (dto.notes !== undefined) set.notes = dto.notes.trim();
+    // Plata: sólo admin. Un profesor que mande estos campos los ignora.
+    if (isAdmin) {
+      if (dto.extraCharge !== undefined) set.extraCharge = dto.extraCharge;
+      if (dto.extraAmount !== undefined) set.extraAmount = dto.extraAmount;
+      if (dto.paid !== undefined) set.paid = dto.paid;
+    }
+    if (actor?.id && Types.ObjectId.isValid(actor.id)) {
+      set.updatedById = new Types.ObjectId(actor.id);
+    }
+    const row = await this.monthlyPieceModel
+      .findOneAndUpdate(
+        { studentId: student._id, month },
+        { $set: set, $setOnInsert: { studentId: student._id, month } },
+        { new: true, upsert: true },
+      )
+      .lean();
+    return this.monthlyPieceView(row, isAdmin);
+  }
+
+  async removeMonthlyPiece(id: string, month: string) {
+    assertMonth(month);
+    const student = await this.findOrThrow(id);
+    await this.monthlyPieceModel.deleteOne({ studentId: student._id, month });
+    return { success: true };
+  }
+
+  private monthlyPieceView(
+    r: (StudentMonthlyPiece & { _id: unknown }) | null | undefined,
+    isAdmin: boolean,
+  ) {
+    if (!r) return null;
+    return {
+      _id: (r._id as Types.ObjectId).toHexString(),
+      month: r.month,
+      pieceName: r.pieceName ?? '',
+      bisque: r.bisque ?? false,
+      delivered: r.delivered ?? false,
+      notes: r.notes,
+      // El adicional y su cobro son datos administrativos.
+      ...(isAdmin
+        ? {
+            extraCharge: r.extraCharge ?? false,
+            extraAmount: r.extraAmount,
+            paid: r.paid ?? false,
+          }
+        : {}),
+    };
+  }
+
+  private async professorOf(actor?: {
+    id?: string;
+  }): Promise<ProfessorDocument | null> {
     if (!actor?.id || !Types.ObjectId.isValid(actor.id)) return null;
     return this.professorModel
       .findOne({ userId: actor.id, deletedAt: { $exists: false } })
@@ -593,14 +763,19 @@ export class StudentsService {
     if (actor?.role === UserRole.ADMIN) return;
     const professor = await this.professorOf(actor);
     if (!professor) {
-      throw new ForbiddenException('Tu cuenta no está vinculada a un profesor.');
+      throw new ForbiddenException(
+        'Tu cuenta no está vinculada a un profesor.',
+      );
     }
     const belongs = await this.groupModel.exists({
       professorId: professor._id,
       studentIds: studentId,
       deletedAt: { $exists: false },
     });
-    if (!belongs) throw new ForbiddenException('Sólo podés consultar alumnos de tus grupos.');
+    if (!belongs)
+      throw new ForbiddenException(
+        'Sólo podés consultar alumnos de tus grupos.',
+      );
   }
 
   private async assertCanReadGroup(
@@ -609,12 +784,15 @@ export class StudentsService {
   ) {
     if (actor?.role === UserRole.ADMIN) return;
     const professor = await this.professorOf(actor);
-    const owns = professor && (await this.groupModel.exists({
-      _id: groupId,
-      professorId: professor._id,
-      deletedAt: { $exists: false },
-    }));
-    if (!owns) throw new ForbiddenException('Sólo podés consultar tus propios grupos.');
+    const owns =
+      professor &&
+      (await this.groupModel.exists({
+        _id: groupId,
+        professorId: professor._id,
+        deletedAt: { $exists: false },
+      }));
+    if (!owns)
+      throw new ForbiddenException('Sólo podés consultar tus propios grupos.');
   }
 
   private async assertCanManageGroup(
@@ -622,5 +800,11 @@ export class StudentsService {
     actor?: { id?: string; role?: string },
   ) {
     return this.assertCanReadGroup(groupId, actor);
+  }
+}
+
+function assertMonth(month: string) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw new BadRequestException('El mes va en formato YYYY-MM.');
   }
 }

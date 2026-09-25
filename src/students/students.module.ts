@@ -12,15 +12,16 @@ import {
 } from '../common/schemas/attendance.schema';
 import { Group, GroupSchema } from '../common/schemas/group.schema';
 import { Piece, PieceSchema } from '../common/schemas/piece.schema';
-import {
-  Professor,
-  ProfessorSchema,
-} from '../common/schemas/professor.schema';
+import { Professor, ProfessorSchema } from '../common/schemas/professor.schema';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 import {
   StudentRegularityEvent,
   StudentRegularityEventSchema,
 } from '../common/schemas/student-regularity-event.schema';
+import {
+  StudentMonthlyPiece,
+  StudentMonthlyPieceSchema,
+} from '../common/schemas/student-monthly-piece.schema';
 import { StudentsController } from './students.controller';
 import { StudentsService } from './students.service';
 
@@ -34,7 +35,11 @@ import { StudentsService } from './students.service';
       { name: Group.name, schema: GroupSchema },
       { name: Piece.name, schema: PieceSchema },
       { name: Professor.name, schema: ProfessorSchema },
-      { name: StudentRegularityEvent.name, schema: StudentRegularityEventSchema },
+      {
+        name: StudentRegularityEvent.name,
+        schema: StudentRegularityEventSchema,
+      },
+      { name: StudentMonthlyPiece.name, schema: StudentMonthlyPieceSchema },
     ]),
   ],
   controllers: [StudentsController],

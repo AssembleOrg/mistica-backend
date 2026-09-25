@@ -30,3 +30,4 @@ export * from './student-regularity-event.schema';
 export * from './in-app-notification.schema';
 export * from './bot-settings.schema';
 export * from './bot-faq.schema';
+export * from './student-monthly-piece.schema';

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -18,6 +19,7 @@ import {
   UpdateStudentDto,
   UpdateStudentPaymentDto,
 } from '../common/dto/student.dto';
+import { UpsertMonthlyPieceDto } from '../common/dto/student-monthly-piece.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AllowedViews } from '../common/decorators';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
@@ -45,7 +47,10 @@ export class StudentsController {
 
   @Get()
   @ApiOperation({ summary: 'Listar alumnos' })
-  list(@Query('includeInactive') includeInactive: string | undefined, @Req() req: AuthRequest) {
+  list(
+    @Query('includeInactive') includeInactive: string | undefined,
+    @Req() req: AuthRequest,
+  ) {
     return this.service.list(req.user, includeInactive === 'true');
   }
 
@@ -56,6 +61,40 @@ export class StudentsController {
   })
   paymentAlerts(@Query('days') days?: string) {
     return this.service.paymentAlerts(days ? Number(days) : 7);
+  }
+
+  // ── Pieza del mes ──
+
+  @Get('monthly-pieces')
+  @ApiOperation({
+    summary: 'Planilla de piezas del mes (un alumno por fila) — ?month=YYYY-MM',
+  })
+  monthlyPieces(@Query('month') month: string, @Req() req: AuthRequest) {
+    return this.service.monthlyPiecesOfMonth(month ?? '', req.user);
+  }
+
+  @Get(':id/monthly-pieces')
+  @ApiOperation({ summary: 'Historial de piezas del mes de un alumno' })
+  monthlyPiecesOf(@Param('id') id: string, @Req() req: AuthRequest) {
+    return this.service.monthlyPiecesOfStudent(id, req.user);
+  }
+
+  @Put(':id/monthly-pieces/:month')
+  @ApiOperation({ summary: 'Cargar / editar la pieza del mes de un alumno' })
+  upsertMonthlyPiece(
+    @Param('id') id: string,
+    @Param('month') month: string,
+    @Body() dto: UpsertMonthlyPieceDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.service.upsertMonthlyPiece(id, month, dto, req.user);
+  }
+
+  @Delete(':id/monthly-pieces/:month')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Borrar la pieza del mes de un alumno' })
+  removeMonthlyPiece(@Param('id') id: string, @Param('month') month: string) {
+    return this.service.removeMonthlyPiece(id, month);
   }
 
   @Get(':id/practical')
@@ -143,6 +182,10 @@ export class StudentsController {
     @Query('limit') limit?: string,
     @Req() req?: AuthRequest,
   ) {
-    return this.service.attendanceOfGroup(groupId, limit ? Number(limit) : 30, req?.user);
+    return this.service.attendanceOfGroup(
+      groupId,
+      limit ? Number(limit) : 30,
+      req?.user,
+    );
   }
 }
