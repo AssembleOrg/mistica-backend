@@ -17,6 +17,7 @@ import {
   AdminUpdateReservationDto,
   CreateHoldDto,
   ListReservationsQueryDto,
+  ScheduleSaleDto,
   TransferProofDto,
 } from '../common/dto/reservation.dto';
 import { AddSalePaymentsDto } from '../common/dto/sale.dto';
@@ -26,6 +27,7 @@ import {
   ReservationPaymentMethod,
   ReservationSource,
   ReservationStatus,
+  SaleStatus,
   SessionStatus,
 } from '../common/enums';
 import {
@@ -772,6 +774,8 @@ export class ReservationsService {
   async adminCreateReservation(
     dto: AdminCreateReservationDto,
     userId?: string,
+    /** Reserva de una venta ya hecha en el POS: la plata sale de la venta. */
+    fromSale?: { saleId: string; total: number; paid: number },
   ) {
     const qty = dto.quantity;
     const sessionId = await this.resolveSessionId(dto);
@@ -788,10 +792,16 @@ export class ReservationsService {
       session.startAt,
       dto.isBirthday,
     );
-    const total = unitPrice * billableQty;
+    const total = fromSale ? fromSale.total : unitPrice * billableQty;
     // El admin puede cobrar el total o una seña (dto.amount). El saldo es el resto.
-    const amount = dto.amount ?? total;
-    const balanceDue = Math.max(0, total - amount);
+    if (!fromSale && dto.amount != null && dto.amount > total + 0.01) {
+      await this.releaseSeats(session._id as Types.ObjectId, qty);
+      throw new BadRequestException(
+        `Lo cobrado ($${dto.amount}) supera el total de la reserva ($${total}).`,
+      );
+    }
+    const amount = fromSale ? fromSale.paid : (dto.amount ?? total);
+    const balanceDue = Number(Math.max(0, total - amount).toFixed(2));
     const isCourtesy = dto.paymentMethod === ReservationPaymentMethod.COURTESY;
 
     let reservation: ReservationDocument;
@@ -820,6 +830,7 @@ export class ReservationsService {
         notes: dto.notes,
         createdById: userId,
         confirmedAt: new Date(),
+        ...(fromSale && { saleId: new Types.ObjectId(fromSale.saleId) }),
       });
     } catch (err) {
       await this.releaseSeats(session._id as Types.ObjectId, qty);
@@ -840,7 +851,8 @@ export class ReservationsService {
 
     // Registrar la VENTA (experiencia como servicio + pago de seña/total). Para
     // control. Cortesía no genera venta. Si la caja está cerrada, queda diferida.
-    if (!isCourtesy && amount > 0) {
+    // Agendada desde una venta, la venta ya existe.
+    if (!fromSale && !isCourtesy && amount > 0) {
       await this.createSaleForReservation(
         reservation,
         this.mapToSalePaymentMethod(dto.paymentMethod),
@@ -848,6 +860,53 @@ export class ReservationsService {
     }
 
     return this.publicView(reservation);
+  }
+
+  /**
+   * Agenda una venta hecha en el local (POS): crea la reserva CONFIRMED en el
+   * turno elegido, vinculada a esa venta. No cobra nada: el total y lo pagado
+   * salen de la venta, y el saldo (si fue una seña) se cobra después desde
+   * "Cobrar saldo" como cualquier reserva.
+   */
+  async scheduleSale(saleId: string, dto: ScheduleSaleDto, userId?: string) {
+    if (!Types.ObjectId.isValid(saleId)) {
+      throw new BadRequestException('saleId inválido');
+    }
+    const sale = await this.salesService.findOne(saleId);
+    if (sale.status === SaleStatus.CANCELLED) {
+      throw new BadRequestException('La venta está cancelada.');
+    }
+    const already = await this.reservationModel
+      .findOne({
+        saleId: new Types.ObjectId(saleId),
+        status: { $ne: ReservationStatus.CANCELLED },
+      })
+      .select('code')
+      .lean();
+    if (already) {
+      throw new BadRequestException(
+        `Esta venta ya está agendada (reserva ${already.code}).`,
+      );
+    }
+    const balance = sale.balanceDue ?? 0;
+    const total = sale.total;
+    return this.adminCreateReservation(
+      {
+        experienceId: dto.experienceId,
+        date: dto.date,
+        startTime: dto.startTime,
+        quantity: dto.quantity,
+        customerName: sale.customerName || sale.name || 'Cliente',
+        customerEmail: sale.customerEmail || undefined,
+        customerPhone: sale.customerPhone || undefined,
+        clientId: sale.clientId || undefined,
+        paymentMethod: this.mapFromSalePaymentMethod(sale.payments?.[0]?.method),
+        isBirthday: dto.isBirthday,
+        notes: dto.notes ?? `Venta ${sale.saleNumber}`,
+      },
+      userId,
+      { saleId, total, paid: Number(Math.max(0, total - balance).toFixed(2)) },
+    );
   }
 
   /**
@@ -1222,6 +1281,19 @@ export class ReservationsService {
     );
   }
 
+  private mapFromSalePaymentMethod(m?: PaymentMethod): ReservationPaymentMethod {
+    switch (m) {
+      case PaymentMethod.MERCADOPAGO:
+        return ReservationPaymentMethod.MERCADOPAGO;
+      case PaymentMethod.TRANSFER:
+        return ReservationPaymentMethod.TRANSFER;
+      case PaymentMethod.CARD:
+        return ReservationPaymentMethod.CARD;
+      default:
+        return ReservationPaymentMethod.CASH;
+    }
+  }
+
   private mapToSalePaymentMethod(m: ReservationPaymentMethod): PaymentMethod {
     switch (m) {
       case ReservationPaymentMethod.MERCADOPAGO:
@@ -1302,7 +1374,10 @@ export class ReservationsService {
           },
         ],
         payments: [{ method, amount: reservation.depositAmount }],
-        isPartial: true,
+        // Con saldo, la venta nace PARTIAL. Saldada, venta normal: si la línea
+        // quedó por encima de lo cobrado (lugares bonificados de cumpleaños),
+        // la diferencia va como ajuste en vez de quedar como saldo fantasma.
+        isPartial: (reservation.balanceDue ?? 0) > 0.01,
         seller: 'Reservas',
         notes: `Reserva ${reservation.code} · ${reservation.experienceName}`,
       };
@@ -1632,19 +1707,70 @@ export class ReservationsService {
     return this.publicView(r);
   }
 
-  /** Cobra el saldo pendiente sobre la venta vinculada (flujo POS). */
+  /**
+   * Cobra el saldo pendiente, todo o una parte, sobre la venta vinculada
+   * (flujo POS). Lo que no se cobra queda como saldo para otro cobro.
+   *
+   * Si la reserva todavía no tiene venta (se cargó sin cobrar nada, o la venta
+   * quedó diferida con la caja cerrada), este cobro la crea.
+   */
   async adminCollectBalance(id: string, dto: AddSalePaymentsDto) {
     const r = await this.findByIdOrThrow(id);
-    if (!r.saleId) {
+    const balance = r.balanceDue ?? 0;
+    if (balance <= 0.01) {
+      throw new BadRequestException('La reserva no tiene saldo pendiente.');
+    }
+    const paid = dto.payments.reduce((acc, p) => acc + (p.amount || 0), 0);
+    if (paid > balance + 0.01) {
       throw new BadRequestException(
-        'La reserva no tiene una venta asociada para cobrar el saldo.',
+        `Lo cobrado ($${paid}) supera el saldo pendiente ($${balance}).`,
       );
     }
-    await this.salesService.addPayments(String(r.saleId), {
-      ...dto,
-      markCompleted: dto.markCompleted ?? true,
-    });
-    r.balanceDue = 0;
+    if (!(await this.cashbox.findOpenSession())) {
+      throw new BadRequestException('Abrí la caja para cobrar el saldo.');
+    }
+
+    const newBalance = Number(Math.max(0, balance - paid).toFixed(2));
+    let pending = dto.payments;
+
+    const hadDeposit = (r.depositAmount ?? 0) > 0;
+    // Venta diferida con seña ya cobrada: se registra ahora, antes del cobro.
+    if (!r.saleId && hadDeposit) {
+      await this.createSaleForReservation(
+        r,
+        this.mapToSalePaymentMethod(r.paymentMethod),
+      );
+    }
+    // Sin nada cobrado todavía: el primer pago de este cobro abre la venta.
+    if (!r.saleId && !hadDeposit) {
+      const [first, ...rest] = dto.payments;
+      r.depositAmount = first.amount;
+      r.balanceDue = Number(Math.max(0, balance - first.amount).toFixed(2));
+      await this.createSaleForReservation(r, first.method);
+      if (!r.saleId) {
+        // No se registró: la reserva vuelve a quedar sin cobrar.
+        r.depositAmount = 0;
+        r.balanceDue = balance;
+        r.salePending = false;
+        await r.save();
+      }
+      pending = rest;
+    }
+    if (!r.saleId) {
+      throw new BadRequestException(
+        'No se pudo registrar la venta de la reserva. Probá de nuevo.',
+      );
+    }
+
+    if (pending.length > 0) {
+      await this.salesService.addPayments(String(r.saleId), {
+        payments: pending,
+        // Saldada la reserva, se cierra la venta (una diferencia contra la
+        // línea, p. ej. lugares bonificados, queda como ajuste).
+        markCompleted: dto.markCompleted ?? newBalance <= 0.01,
+      });
+    }
+    r.balanceDue = newBalance;
     await r.save();
     return this.publicView(r);
   }

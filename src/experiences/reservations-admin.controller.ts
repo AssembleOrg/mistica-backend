@@ -18,6 +18,7 @@ import {
   AdminUpdateReservationDto,
   ListReservationsQueryDto,
   ResolveReviewDto,
+  ScheduleSaleDto,
 } from '../common/dto/reservation.dto';
 import { AddSalePaymentsDto } from '../common/dto/sale.dto';
 import { UserRole } from '../common/enums/user-role.enum';
@@ -48,6 +49,21 @@ export class ReservationsAdminController {
     @Req() req: AuthRequest,
   ) {
     return this.reservationsService.adminCreateReservation(dto, req.user?.id);
+  }
+
+  @Post('from-sale/:saleId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary:
+      'Agendar una venta del local (POS): reserva CONFIRMED vinculada a la venta, sin cobrar de nuevo',
+  })
+  async scheduleSale(
+    @Param('saleId') saleId: string,
+    @Body() dto: ScheduleSaleDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.reservationsService.scheduleSale(saleId, dto, req.user?.id);
   }
 
   @Get()

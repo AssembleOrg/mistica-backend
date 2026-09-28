@@ -263,6 +263,42 @@ export class TransferProofDto {
 }
 
 /**
+ * Agenda una venta hecha en el local (POS): la persona ya pagó en la venta,
+ * todo o una seña, y acá se elige qué actividad, qué día y a qué hora viene.
+ * Los datos del cliente y la plata salen de la venta.
+ */
+export class ScheduleSaleDto {
+  @ApiProperty({ description: 'Experiencia (actividad) a agendar' })
+  @IsMongoId()
+  experienceId: string;
+
+  @ApiProperty({ description: 'Día, YYYY-MM-DD (hora de Argentina)' })
+  @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })
+  date: string;
+
+  @ApiProperty({ description: "Hora local de inicio, 'HH:mm'" })
+  @Matches(HHMM_RE, { message: 'startTime debe ser HH:mm' })
+  startTime: string;
+
+  @ApiProperty({ description: 'Cantidad de personas', minimum: 1 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  quantity: number;
+
+  @ApiPropertyOptional({ description: 'Es un cumpleaños' })
+  @IsOptional()
+  @IsBoolean()
+  isBirthday?: boolean;
+
+  @ApiPropertyOptional({ description: 'Notas internas' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}
+
+/**
  * Reserva creada desde el panel admin. Nace CONFIRMED (descuenta cupo igual,
  * atómico). Si el método no es COURTESY, impacta caja con un ingreso.
  */
