@@ -19,17 +19,21 @@ import {
   UpdateStaffTaskDto,
 } from '../common/dto/staff.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
 import { AllowedViews } from '../common/decorators';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 import { StaffService } from './staff.service';
 
 interface AuthRequest extends Request {
-  user?: { id: string };
+  user?: { id: string; role?: string };
 }
 
 /**
- * Tareas del personal y lista de compras interna. Cualquier cuenta
- * autenticada con la vista habilitada opera; la carga rápida es la prioridad.
+ * Tareas del personal y lista de compras interna. Las tareas las crea, edita y
+ * borra el admin; cada integrante ve sólo las que tiene asignadas, les suma su
+ * progreso y las marca hechas. La lista de compras la opera cualquiera.
  */
 @ApiTags('Equipo')
 @Controller('staff')
@@ -43,11 +47,16 @@ export class StaffController {
 
   @Get('tasks')
   @ApiOperation({ summary: 'Listar tareas del personal' })
-  listTasks(@Query('status') status?: 'PENDING' | 'DONE') {
-    return this.service.listTasks(status);
+  listTasks(
+    @Query('status') status: 'PENDING' | 'DONE' | undefined,
+    @Req() req: AuthRequest,
+  ) {
+    return this.service.listTasks(status, req.user);
   }
 
   @Post('tasks')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Crear tarea (opcionalmente asignada)' })
   createTask(@Body() dto: CreateStaffTaskDto, @Req() req: AuthRequest) {
     return this.service.createTask(dto, req.user?.id);
@@ -55,8 +64,12 @@ export class StaffController {
 
   @Patch('tasks/:id')
   @ApiOperation({ summary: 'Editar tarea / marcarla hecha' })
-  updateTask(@Param('id') id: string, @Body() dto: UpdateStaffTaskDto) {
-    return this.service.updateTask(id, dto);
+  updateTask(
+    @Param('id') id: string,
+    @Body() dto: UpdateStaffTaskDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.service.updateTask(id, dto, req.user);
   }
 
   @Post('tasks/:id/comments')
@@ -66,10 +79,12 @@ export class StaffController {
     @Body() dto: AddStaffTaskCommentDto,
     @Req() req: AuthRequest,
   ) {
-    return this.service.addTaskComment(id, dto.body, req.user?.id);
+    return this.service.addTaskComment(id, dto.body, req.user);
   }
 
   @Delete('tasks/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Eliminar tarea' })
   removeTask(@Param('id') id: string) {
     return this.service.removeTask(id);

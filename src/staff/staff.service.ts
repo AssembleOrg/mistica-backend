@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -23,11 +24,22 @@ import {
 } from '../common/dto/staff.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InAppNotificationsService } from '../in-app-notifications/in-app-notifications.service';
+import { UserRole } from '../common/enums/user-role.enum';
+
+type Actor = { id?: string; role?: string };
+
+const isAdmin = (actor?: Actor) => actor?.role === UserRole.ADMIN;
+
+const actorObjectId = (actor?: Actor) =>
+  actor?.id && Types.ObjectId.isValid(actor.id)
+    ? new Types.ObjectId(actor.id)
+    : null;
 
 /**
  * Herramientas internas del equipo: TAREAS asignables a integrantes del
- * personal y LISTA DE COMPRAS del establecimiento. Cualquier cuenta con la
- * vista habilitada puede operar (cargar rápido es la prioridad).
+ * personal y LISTA DE COMPRAS del establecimiento. Las tareas las gestiona el
+ * admin; cada integrante ve las suyas y suma su progreso. La lista de compras
+ * la opera cualquiera con la vista habilitada.
  */
 @Injectable()
 export class StaffService {
@@ -44,9 +56,15 @@ export class StaffService {
 
   // ── Tareas ───────────────────────────────────────────────────────────────
 
-  async listTasks(status?: 'PENDING' | 'DONE') {
+  async listTasks(status?: 'PENDING' | 'DONE', actor?: Actor) {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (status) filter.status = status;
+    // Cada integrante ve sólo sus tareas; el admin, todas.
+    if (!isAdmin(actor)) {
+      const me = actorObjectId(actor);
+      if (!me) return [];
+      filter.$or = [{ 'assignees.userId': me }, { assigneeUserId: me }];
+    }
     return this.taskModel
       .find(filter)
       .sort({ status: 1, dueDate: 1, createdAt: -1 })
@@ -75,8 +93,20 @@ export class StaffService {
     return task;
   }
 
-  async updateTask(id: string, dto: UpdateStaffTaskDto) {
+  async updateTask(id: string, dto: UpdateStaffTaskDto, actor?: Actor) {
     const task = await this.findTask(id);
+    // Quien no es admin sólo marca hecha / reabre una tarea suya.
+    if (!isAdmin(actor)) {
+      this.assertOwnTask(task, actor);
+      const touched = Object.entries(dto)
+        .filter(([, v]) => v !== undefined)
+        .map(([k]) => k);
+      if (touched.some((k) => k !== 'status')) {
+        throw new ForbiddenException(
+          'Sólo el admin puede editar la tarea. Vos podés marcarla hecha y sumar tu progreso.',
+        );
+      }
+    }
     let newAssigneeIds: string[] = [];
     if (dto.assigneeUserIds !== undefined || dto.assigneeUserId !== undefined) {
       const assignees = await this.resolveAssignees(dto);
@@ -107,8 +137,10 @@ export class StaffService {
     return { success: true };
   }
 
-  async addTaskComment(id: string, body: string, userId?: string) {
+  async addTaskComment(id: string, body: string, actor?: Actor) {
     const task = await this.findTask(id);
+    if (!isAdmin(actor)) this.assertOwnTask(task, actor);
+    const userId = actor?.id;
     const cleanBody = body.trim();
     if (!cleanBody) throw new BadRequestException('El comentario está vacío');
     const author = userId && Types.ObjectId.isValid(userId)
@@ -174,6 +206,13 @@ export class StaffService {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
+
+  private assertOwnTask(task: StaffTaskDocument, actor?: Actor) {
+    const mine = this.taskAssignees(task).some(
+      (a) => String(a.userId) === actor?.id,
+    );
+    if (!mine) throw new ForbiddenException('Esta tarea no está asignada a vos.');
+  }
 
   private taskAssignees(task: StaffTaskDocument) {
     if (task.assignees?.length) return task.assignees;
