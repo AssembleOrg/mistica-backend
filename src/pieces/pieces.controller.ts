@@ -21,7 +21,13 @@ import {
   UpdatePieceDto,
   ListPiecesQueryDto,
 } from '../common/dto';
-import { SetPieceStatusesDto } from '../common/dto/piece.dto';
+import {
+  SavePieceExtraDto,
+  SavePieceTypeDto,
+  SetPieceStatusesDto,
+} from '../common/dto/piece.dto';
+import { PieceTypesService } from './piece-types.service';
+import { PieceExtrasService } from './piece-extras.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -41,7 +47,11 @@ interface AuthRequest extends Request {
 @ApiBearerAuth()
 @AllowedViews('reservas:piezas')
 export class PiecesController {
-  constructor(private readonly piecesService: PiecesService) {}
+  constructor(
+    private readonly piecesService: PiecesService,
+    private readonly pieceTypes: PieceTypesService,
+    private readonly pieceExtras: PieceExtrasService,
+  ) {}
 
   // Uso INTERNO del bot: piezas del cliente por su propio teléfono. Mismo
   // secreto compartido bot↔backend. Va ANTES de las rutas admin.
@@ -77,6 +87,67 @@ export class PiecesController {
   @ApiOperation({ summary: 'Intentar reemplazar estados (flujo fijo)' })
   setStatuses(@Body() dto: SetPieceStatusesDto) {
     return this.piecesService.setStatusConfig(dto.statuses);
+  }
+
+  // Catálogo de piezas para el selector de "Pieza elegida".
+  @Get('types')
+  @ApiOperation({ summary: 'Catálogo de piezas (taza, bowl, plato…)' })
+  listTypes() {
+    return this.pieceTypes.list();
+  }
+
+  @Post('types')
+  @ApiOperation({ summary: 'Agregar una pieza al catálogo' })
+  createType(@Body() dto: SavePieceTypeDto) {
+    return this.pieceTypes.create(dto.name);
+  }
+
+  @Patch('types/:id')
+  @ApiOperation({ summary: 'Renombrar una pieza del catálogo' })
+  updateType(@Param('id') id: string, @Body() dto: SavePieceTypeDto) {
+    return this.pieceTypes.update(id, dto.name);
+  }
+
+  @Delete('types/:id')
+  @ApiOperation({
+    summary: 'Quitar una pieza del catálogo (las fichas ya cargadas no cambian)',
+  })
+  removeType(@Param('id') id: string) {
+    return this.pieceTypes.remove(id);
+  }
+
+  // Adicionales de pieza (Incluida, Estándar, Premium…): los ve quien carga
+  // fichas; los precios los toca sólo el admin porque impactan en la reserva.
+  @Get('extras')
+  @ApiOperation({ summary: 'Catálogo de adicionales de pieza' })
+  listExtras() {
+    return this.pieceExtras.list();
+  }
+
+  @Post('extras')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Agregar un adicional de pieza' })
+  createExtra(@Body() dto: SavePieceExtraDto) {
+    return this.pieceExtras.create(dto.name, dto.amount);
+  }
+
+  @Patch('extras/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Editar título o monto de un adicional' })
+  updateExtra(@Param('id') id: string, @Body() dto: SavePieceExtraDto) {
+    return this.pieceExtras.update(id, dto.name, dto.amount);
+  }
+
+  @Delete('extras/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Quitar un adicional (lo ya cargado en reservas no cambia)',
+  })
+  removeExtra(@Param('id') id: string) {
+    return this.pieceExtras.remove(id);
   }
 
   @Post()

@@ -75,6 +75,13 @@ export class Piece {
   @Prop({ trim: true })
   studentName?: string;
 
+  // Adicional elegido al registrar la ficha (copia del catálogo al momento).
+  @Prop({ trim: true })
+  extraName?: string;
+
+  @Prop({ min: 0 })
+  extraAmount?: number;
+
   // Registro fotográfico: URLs de fotos de la pieza (evolución del trabajo).
   @Prop({ type: [String], default: [] })
   photos: string[];

@@ -1230,6 +1230,43 @@ export class SalesService {
     return this.mapToSaleResponse(sale);
   }
 
+  /**
+   * Suma líneas libres (sin producto ni stock) a una venta ya registrada, como
+   * saldo a cobrar: p. ej. el adicional de una pieza de una reserva. Sube
+   * subtotal, total y saldo; si la venta estaba saldada vuelve a PARTIAL, y el
+   * saldo se cobra con `addPayments` como cualquier seña.
+   */
+  async addExtraItems(
+    id: string,
+    items: Array<{ productName: string; unitPrice: number }>,
+  ): Promise<Sale> {
+    const sale = await this.saleModel.findById(id).exec();
+    if (!sale || sale.deletedAt) {
+      throw new VentaNoEncontradaException(id);
+    }
+    if (sale.status === SaleStatus.CANCELLED) {
+      throw new VentaCanceladaException(sale.saleNumber);
+    }
+    const lines = items
+      .filter((i) => i.unitPrice > 0)
+      .map((i) => ({
+        productName: i.productName,
+        quantity: 1,
+        unitPrice: i.unitPrice,
+        subtotal: i.unitPrice,
+        bonifiedQty: 0,
+      }));
+    if (lines.length === 0) return this.mapToSaleResponse(sale);
+    const extra = lines.reduce((acc, l) => acc + l.subtotal, 0);
+    sale.items = [...sale.items, ...lines] as any;
+    sale.subtotal = Number((sale.subtotal + extra).toFixed(2));
+    sale.total = Number((sale.total + extra).toFixed(2));
+    sale.balanceDue = Number(((sale.balanceDue ?? 0) + extra).toFixed(2));
+    sale.status = SaleStatus.PARTIAL;
+    await sale.save();
+    return this.mapToSaleResponse(sale);
+  }
+
   async update(id: string, updateSaleDto: UpdateSaleDto): Promise<Sale> {
     try {
       const existingSale = await this.findOne(id);

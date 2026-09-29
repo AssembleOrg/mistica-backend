@@ -863,6 +863,48 @@ export class ReservationsService {
   }
 
   /**
+   * Suma adicionales a una reserva ya hecha (p. ej. el de una pieza al
+   * registrar su ficha): suben el total y el saldo, y si la reserva ya tiene
+   * venta se agregan como líneas, así el saldo se cobra desde "Cobrar saldo".
+   */
+  async addExtras(
+    reservationId: string,
+    extras: Array<{ label: string; amount: number; pieceId?: string }>,
+  ) {
+    const valid = extras.filter((x) => x.amount > 0);
+    const r = await this.findByIdOrThrow(reservationId);
+    if (valid.length === 0) return this.publicView(r);
+    if (
+      r.status === ReservationStatus.CANCELLED ||
+      r.status === ReservationStatus.EXPIRED
+    ) {
+      throw new BadRequestException(
+        'La reserva está cancelada: no se le pueden sumar adicionales.',
+      );
+    }
+    const sum = valid.reduce((acc, x) => acc + x.amount, 0);
+    if (r.saleId) {
+      await this.salesService.addExtraItems(
+        String(r.saleId),
+        valid.map((x) => ({ productName: x.label, unitPrice: x.amount })),
+      );
+    }
+    r.extras = [
+      ...(r.extras ?? []),
+      ...valid.map((x) => ({
+        label: x.label,
+        amount: x.amount,
+        pieceId: x.pieceId ? new Types.ObjectId(x.pieceId) : undefined,
+        createdAt: new Date(),
+      })),
+    ];
+    r.totalAmount = Number(((r.totalAmount ?? 0) + sum).toFixed(2));
+    r.balanceDue = Number(((r.balanceDue ?? 0) + sum).toFixed(2));
+    await r.save();
+    return this.publicView(r);
+  }
+
+  /**
    * Agenda una venta hecha en el local (POS): crea la reserva CONFIRMED en el
    * turno elegido, vinculada a esa venta. No cobra nada: el total y lo pagado
    * salen de la venta, y el saldo (si fue una seña) se cobra después desde
@@ -1370,8 +1412,18 @@ export class ReservationsService {
           {
             productId: String(productId),
             quantity: reservation.quantity,
-            unitPrice: reservation.unitPrice,
+            // Cortesía: la experiencia no se cobra (sólo sus adicionales).
+            unitPrice:
+              reservation.paymentMethod === ReservationPaymentMethod.COURTESY
+                ? 0
+                : reservation.unitPrice,
           },
+          // Adicionales sumados a la reserva (p. ej. de sus piezas).
+          ...(reservation.extras ?? []).map((x) => ({
+            productName: x.label,
+            quantity: 1,
+            unitPrice: x.amount,
+          })),
         ],
         payments: [{ method, amount: reservation.depositAmount }],
         // Con saldo, la venta nace PARTIAL. Saldada, venta normal: si la línea
@@ -1925,6 +1977,7 @@ export class ReservationsService {
       tableCodes: r.tableCodes ?? [],
       sharedTable: r.sharedTable ?? false,
       notes: r.notes,
+      extras: (r.extras ?? []).map((x) => ({ label: x.label, amount: x.amount })),
       createdAt: r.createdAt,
     };
   }

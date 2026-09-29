@@ -7,6 +7,7 @@ import {
   IsInt,
   IsMongoId,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
@@ -37,6 +38,14 @@ export class ReservationPieceEntryDto {
   @IsNotEmpty()
   @MaxLength(300)
   colorsUsed: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Adicional de la pieza (catálogo /pieces/extras). Su monto se suma al total y al saldo de la reserva.',
+  })
+  @IsOptional()
+  @IsMongoId()
+  extraId?: string;
 }
 
 export class CreateReservationPiecesDto {
@@ -326,4 +335,28 @@ export class ListPiecesQueryDto {
   @IsInt()
   @Min(1)
   limit?: number;
+}
+
+/** Alta / edición de una pieza del catálogo. */
+export class SavePieceTypeDto {
+  @ApiProperty({ description: 'Nombre de la pieza (ej. taza, bowl)' })
+  @IsString()
+  @IsNotEmpty({ message: 'El nombre es obligatorio' })
+  @MaxLength(120)
+  name: string;
+}
+
+/** Alta / edición de un adicional de pieza del catálogo. */
+export class SavePieceExtraDto {
+  @ApiProperty({ description: 'Título (ej. Premium)' })
+  @IsString()
+  @IsNotEmpty({ message: 'El título es obligatorio' })
+  @MaxLength(80)
+  name: string;
+
+  @ApiProperty({ description: 'Monto que se suma a la reserva', minimum: 0 })
+  @Type(() => Number)
+  @IsNumber({}, { message: 'El monto debe ser un número' })
+  @Min(0)
+  amount: number;
 }

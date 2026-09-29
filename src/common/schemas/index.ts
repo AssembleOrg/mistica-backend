@@ -17,6 +17,8 @@ export * from './reservation-payment.schema';
 export * from './lead.schema';
 export * from './closed-date.schema';
 export * from './piece.schema';
+export * from './piece-type.schema';
+export * from './piece-extra.schema';
 export * from './space-block.schema';
 export * from './app-setting.schema';
 export * from './table.schema';

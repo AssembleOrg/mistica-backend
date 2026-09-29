@@ -11,6 +11,8 @@ import { PieceDocument, ReservationDocument } from '../common/schemas';
 import { Student, StudentDocument } from '../common/schemas/student.schema';
 import { Group, GroupDocument } from '../common/schemas/group.schema';
 import { ProfessorsService } from '../professors/professors.service';
+import { ReservationsService } from '../reservations/reservations.service';
+import { PieceExtrasService } from './piece-extras.service';
 import {
   PieceStatus,
   PieceStatusConfig,
@@ -53,6 +55,8 @@ export class PiecesService implements OnModuleInit {
     private readonly groupModel: Model<GroupDocument>,
     private readonly notifications: NotificationsService,
     private readonly professors: ProfessorsService,
+    private readonly reservations: ReservationsService,
+    private readonly pieceExtras: PieceExtrasService,
   ) {}
 
   async onModuleInit() {
@@ -182,6 +186,19 @@ export class PiecesService implements OnModuleInit {
       .select('code customerName customerPhone experienceName quantity startAt')
       .lean();
     if (!reservation) throw new BadRequestException('Reserva no encontrada');
+
+    // Adicionales: el monto sale del catálogo, no del cliente.
+    const extraIds = dto.entries
+      .map((e) => e.extraId)
+      .filter((id): id is string => !!id);
+    const catalog = await this.pieceExtras.byIds(extraIds);
+    const missing = extraIds.find((id) => !catalog.has(id));
+    if (missing) {
+      throw new BadRequestException(
+        'Uno de los adicionales elegidos ya no existe. Volvé a elegirlo.',
+      );
+    }
+
     const professor = await this.professors.ofUser(actor?.id);
     const documents = dto.entries.map((entry) => ({
       reservationId: reservation._id,
@@ -197,9 +214,34 @@ export class PiecesService implements OnModuleInit {
       signature: entry.signature.trim(),
       pieceType: entry.pieceType.trim(),
       colorsUsed: entry.colorsUsed.trim(),
+      ...(entry.extraId && {
+        extraName: catalog.get(entry.extraId)!.name,
+        extraAmount: catalog.get(entry.extraId)!.amount,
+      }),
       photos: [],
     }));
-    return this.pieceModel.insertMany(documents);
+    const pieces = await this.pieceModel.insertMany(documents);
+
+    // Los adicionales suman al total y al saldo de la reserva. Si no se
+    // pueden sumar, no quedan fichas a medias: se deshace la carga.
+    const extras = pieces
+      .filter((p) => p.extraName && (p.extraAmount ?? 0) > 0)
+      .map((p) => ({
+        label: `Adicional pieza ${p.extraName} (${p.pieceType})`,
+        amount: p.extraAmount!,
+        pieceId: String(p._id),
+      }));
+    if (extras.length > 0) {
+      try {
+        await this.reservations.addExtras(String(reservation._id), extras);
+      } catch (err) {
+        await this.pieceModel.deleteMany({
+          _id: { $in: pieces.map((p) => p._id) },
+        });
+        throw err;
+      }
+    }
+    return pieces;
   }
 
   /**

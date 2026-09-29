@@ -180,6 +180,26 @@ export class Reservation {
   @Prop({ type: Boolean, default: false })
   salePending?: boolean;
 
+  // Adicionales sumados después de reservar (p. ej. el adicional de una pieza
+  // al registrar su ficha). Ya están incluidos en totalAmount y balanceDue.
+  @Prop({
+    type: [
+      {
+        label: { type: String, required: true, trim: true },
+        amount: { type: Number, required: true, min: 0 },
+        pieceId: { type: SchemaTypes.ObjectId, ref: 'Piece' },
+        createdAt: { type: Date, default: () => new Date() },
+      },
+    ],
+    default: [],
+  })
+  extras?: Array<{
+    label: string;
+    amount: number;
+    pieceId?: Types.ObjectId;
+    createdAt?: Date;
+  }>;
+
   // Cuándo se envió el recordatorio del turno (para no mandarlo dos veces).
   @Prop({ type: Date })
   reminderSentAt?: Date;
