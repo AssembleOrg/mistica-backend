@@ -1797,7 +1797,11 @@ export class ReservationsService {
     if (!r.saleId && !hadDeposit) {
       const [first, ...rest] = dto.payments;
       r.depositAmount = first.amount;
-      r.balanceDue = Number(Math.max(0, balance - first.amount).toFixed(2));
+      // Con markCompleted (panel viejo) la venta nace saldada: lo que falta va
+      // como ajuste, igual que al cerrar una venta con saldo.
+      r.balanceDue = dto.markCompleted
+        ? 0
+        : Number(Math.max(0, balance - first.amount).toFixed(2));
       await this.createSaleForReservation(r, first.method);
       if (!r.saleId) {
         // No se registró: la reserva vuelve a quedar sin cobrar.
@@ -1822,7 +1826,9 @@ export class ReservationsService {
         markCompleted: dto.markCompleted ?? newBalance <= 0.01,
       });
     }
-    r.balanceDue = newBalance;
+    // markCompleted explícito (panel viejo): la venta se cerró y lo que faltó
+    // quedó como descuento, así que la reserva queda saldada.
+    r.balanceDue = dto.markCompleted ? 0 : newBalance;
     await r.save();
     return this.publicView(r);
   }
