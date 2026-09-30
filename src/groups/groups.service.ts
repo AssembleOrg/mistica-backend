@@ -6,7 +6,11 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Group, GroupDocument } from '../common/schemas/group.schema';
+import {
+  Group,
+  GroupDocument,
+  takesMonthlyPiece,
+} from '../common/schemas/group.schema';
 import {
   Professor,
   ProfessorDocument,
@@ -14,6 +18,22 @@ import {
 import { Student, StudentDocument } from '../common/schemas/student.schema';
 import { Client, ClientDocument } from '../common/schemas/client.schema';
 import { CreateGroupDto, UpdateGroupDto } from '../common/dto/group.dto';
+
+type GroupRow = { name: string; sortOrder?: number; hasMonthlyPiece?: boolean };
+
+/** Orden del admin (sortOrder); los que no tienen, al final por nombre. */
+function byListOrder(a: GroupRow, b: GroupRow) {
+  const oa = a.sortOrder ?? Number.MAX_SAFE_INTEGER;
+  const ob = b.sortOrder ?? Number.MAX_SAFE_INTEGER;
+  return oa - ob || a.name.localeCompare(b.name, 'es');
+}
+
+/** Ordena y deja explícito si el grupo lleva pieza del mes. */
+function forList<T extends GroupRow>(rows: T[]) {
+  return [...rows]
+    .sort(byListOrder)
+    .map((g) => ({ ...g, hasMonthlyPiece: takesMonthlyPiece(g) }));
+}
 import { UserRole } from '../common/enums/user-role.enum';
 import { DateTime } from 'luxon';
 import { envConfig } from '../config/env.config';
@@ -64,7 +84,20 @@ export class GroupsService {
       if (!prof) return [];
       filter.professorId = prof._id;
     }
-    return this.groupModel.find(filter).sort({ name: 1 }).lean();
+    return forList(await this.groupModel.find(filter).lean());
+  }
+
+  /** Guarda el orden del listado (el admin lo acomoda arrastrando). */
+  async reorder(ids: string[]) {
+    await this.groupModel.bulkWrite(
+      ids.map((id, i) => ({
+        updateOne: {
+          filter: { _id: new Types.ObjectId(id) },
+          update: { $set: { sortOrder: i } },
+        },
+      })),
+    );
+    return { success: true };
   }
 
   async create(dto: CreateGroupDto, actor?: Actor) {
@@ -75,7 +108,17 @@ export class GroupsService {
       schedule: dto.schedule ?? [],
       notes: dto.notes,
       isActive: dto.isActive ?? true,
+      ...(dto.hasMonthlyPiece !== undefined && {
+        hasMonthlyPiece: dto.hasMonthlyPiece,
+      }),
     };
+    // Un grupo nuevo va al final del orden del admin.
+    const last = await this.groupModel
+      .findOne({ deletedAt: { $exists: false }, sortOrder: { $exists: true } })
+      .sort({ sortOrder: -1 })
+      .select('sortOrder')
+      .lean();
+    if (last?.sortOrder != null) data.sortOrder = last.sortOrder + 1;
 
     if (this.isAdmin(actor)) {
       if (dto.professorId) {
@@ -135,6 +178,8 @@ export class GroupsService {
     }
     if (dto.notes !== undefined) group.notes = dto.notes;
     if (dto.isActive !== undefined) group.isActive = dto.isActive;
+    if (dto.hasMonthlyPiece !== undefined)
+      group.hasMonthlyPiece = dto.hasMonthlyPiece;
     group.updatedAt = new Date();
     await group.save();
     return group;
@@ -161,7 +206,7 @@ export class GroupsService {
       if (!prof) return [];
       filter.professorId = prof._id;
     }
-    return this.groupModel.find(filter).sort({ name: 1 }).lean();
+    return forList(await this.groupModel.find(filter).lean());
   }
 
   /**

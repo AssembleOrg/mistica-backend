@@ -22,6 +22,10 @@ async function build(opts: {
   const groupModel = {
     create: jest.fn().mockImplementation((data) => Promise.resolve(data)),
     findById: jest.fn().mockReturnValue(exec(opts.group ?? null)),
+    // Último sortOrder (para ubicar un grupo nuevo al final): ninguno.
+    findOne: jest.fn().mockReturnValue({
+      sort: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }),
+    }),
   };
   const studentModel = {
     findOne: jest.fn().mockReturnValue(exec(opts.studentOfClient ?? null)),

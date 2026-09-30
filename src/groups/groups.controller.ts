@@ -11,8 +11,15 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CreateGroupDto, UpdateGroupDto } from '../common/dto/group.dto';
+import {
+  CreateGroupDto,
+  ReorderGroupsDto,
+  UpdateGroupDto,
+} from '../common/dto/group.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
 import { GroupsService, Actor } from './groups.service';
 import { AllowedViews } from '../common/decorators';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
@@ -61,6 +68,15 @@ export class GroupsController {
   @ApiOperation({ summary: 'Crear grupo (profesor: queda a su nombre)' })
   create(@Body() dto: CreateGroupDto, @Req() req: AuthRequest) {
     return this.service.create(dto, req.user);
+  }
+
+  // Antes de ':id' para que "order" no se tome como id.
+  @Patch('order')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Guardar el orden del listado de grupos (admin)' })
+  reorder(@Body() dto: ReorderGroupsDto) {
+    return this.service.reorder(dto.ids);
   }
 
   @Patch(':id')

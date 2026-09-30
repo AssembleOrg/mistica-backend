@@ -91,6 +91,23 @@ export class CreateGroupDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Sus alumnos llevan pieza del mes (sin valor: todos menos la Escuelita)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  hasMonthlyPiece?: boolean;
 }
 
 export class UpdateGroupDto extends PartialType(CreateGroupDto) {}
+
+/** Orden del listado de grupos: los ids en el orden en que se ven. */
+export class ReorderGroupsDto {
+  @ApiProperty({ type: [String] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsMongoId({ each: true })
+  ids: string[];
+}

@@ -17,7 +17,11 @@ import {
   Attendance,
   AttendanceDocument,
 } from '../common/schemas/attendance.schema';
-import { Group, GroupDocument } from '../common/schemas/group.schema';
+import {
+  Group,
+  GroupDocument,
+  takesMonthlyPiece,
+} from '../common/schemas/group.schema';
 import { Piece, PieceDocument } from '../common/schemas/piece.schema';
 import {
   Professor,
@@ -645,7 +649,7 @@ export class StudentsService {
       this.monthlyPieceModel.find({ month, studentId: { $in: ids } }).lean(),
       this.groupModel
         .find({ studentIds: { $in: ids }, deletedAt: { $exists: false } })
-        .select('name schedule studentIds')
+        .select('name schedule studentIds hasMonthlyPiece')
         .lean(),
     ]);
     const hex = (v: unknown) => (v as Types.ObjectId).toHexString();
@@ -659,12 +663,24 @@ export class StudentsService {
         groupsOf.set(k, arr);
       }
     }
+    // Quien cursa sólo en grupos sin pieza del mes (la Escuelita) no va en la
+    // planilla; si además está en el taller, sí.
+    const takes = new Map<string, boolean>();
+    for (const g of groups) {
+      const t = takesMonthlyPiece(g);
+      for (const sid of g.studentIds) {
+        const k = hex(sid);
+        takes.set(k, (takes.get(k) ?? false) || t);
+      }
+    }
     const isAdmin = actor?.role === UserRole.ADMIN;
-    return students.map((s) => ({
-      student: { _id: hex(s._id), name: s.name },
-      groups: groupsOf.get(hex(s._id)) ?? [],
-      piece: this.monthlyPieceView(byStudent.get(hex(s._id)), isAdmin),
-    }));
+    return students
+      .filter((s) => takes.get(hex(s._id)) !== false)
+      .map((s) => ({
+        student: { _id: hex(s._id), name: s.name },
+        groups: groupsOf.get(hex(s._id)) ?? [],
+        piece: this.monthlyPieceView(byStudent.get(hex(s._id)), isAdmin),
+      }));
   }
 
   /** Historial de piezas del mes de un alumno (más reciente primero). */

@@ -55,6 +55,16 @@ export class Group {
   @Prop({ trim: true })
   notes?: string;
 
+  // Posición en el listado (la acomoda el admin arrastrando). Sin valor, al
+  // final por nombre.
+  @Prop({ type: Number })
+  sortOrder?: number;
+
+  // ¿Sus alumnos llevan pieza del mes? Sin valor se deduce del nombre: la
+  // Escuelita no lleva, el taller sí (ver takesMonthlyPiece).
+  @Prop({ type: Boolean })
+  hasMonthlyPiece?: boolean;
+
   @Prop({ type: Boolean, default: true })
   isActive: boolean;
 
@@ -72,3 +82,12 @@ export const GroupSchema = SchemaFactory.createForClass(Group);
 
 GroupSchema.index({ deletedAt: 1, isActive: 1 });
 GroupSchema.index({ professorId: 1 });
+
+/** ¿Los alumnos del grupo llevan pieza del mes? (Escuelita no, por defecto). */
+export function takesMonthlyPiece(g: {
+  hasMonthlyPiece?: boolean;
+  name?: string;
+}): boolean {
+  if (typeof g.hasMonthlyPiece === 'boolean') return g.hasMonthlyPiece;
+  return !/escuelita/i.test(g.name ?? '');
+}
