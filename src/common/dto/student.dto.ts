@@ -7,12 +7,14 @@ import {
   IsEmail,
   IsEnum,
   IsIn,
+  IsInt,
   IsMongoId,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -59,6 +61,23 @@ export class CreateStudentDto {
   @IsOptional()
   @IsDateString()
   joinedAt?: string;
+
+  @ApiPropertyOptional({
+    description: 'Día del mes límite para pagar la cuota (1-31, default 10)',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  paymentDay?: number;
+
+  @ApiPropertyOptional({ description: 'Importe de la cuota mensual (ARS)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  monthlyFee?: number;
 
   @ApiPropertyOptional({ description: 'Notas administrativas' })
   @IsOptional()

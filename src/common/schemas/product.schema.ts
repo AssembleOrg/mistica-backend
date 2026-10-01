@@ -52,6 +52,11 @@ export class Product {
   @Prop({ required: true, enum: ProductKind, default: ProductKind.STANDARD })
   kind: ProductKind;
 
+  // Cuota mensual de alumno (p. ej. "mes cerámica", "escuelita"): venderla a
+  // un cliente que es alumno marca paga su cuota del mes.
+  @Prop({ type: Boolean, default: false })
+  studentFee?: boolean;
+
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
 

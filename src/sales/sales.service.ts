@@ -21,7 +21,16 @@ import { SaleDocument, ProductDocument, ClientDocument, PrepaidDocument } from '
 import { InvoiceType, PaymentMethod, PaymentMethodFilter, PrepaidStatus, ProductKind, SaleStatus, TaxCondition } from '../common/enums';
 import { PrepaidsService } from '../prepaids/prepaids.service';
 import { CashboxService } from '../cashbox/cashbox.service';
+import { StudentsService } from '../students/students.service';
 import { buildDateFilter } from '../common/utils';
+
+/** Medio de pago en palabras, para el historial de pagos del alumno. */
+const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  [PaymentMethod.CASH]: 'Efectivo',
+  [PaymentMethod.CARD]: 'Tarjeta',
+  [PaymentMethod.TRANSFER]: 'Transferencia',
+  [PaymentMethod.MERCADOPAGO]: 'Mercado Pago',
+};
 
 @Injectable()
 export class SalesService {
@@ -32,6 +41,7 @@ export class SalesService {
     @InjectModel('Prepaid') private readonly prepaidModel: Model<PrepaidDocument>,
     private readonly prepaidsService: PrepaidsService,
     private readonly cashboxService: CashboxService,
+    private readonly studentsService: StudentsService,
   ) {}
 
   private mapToSaleResponse(sale: SaleDocument, relatedSales?: RelatedSaleSummary[]): Sale {
@@ -837,6 +847,35 @@ export class SalesService {
           notes: `Seña creada con venta ${saleNumber}`,
         }));
         await this.prepaidModel.create(prepaidDocs);
+      }
+
+      // Cuotas de alumno ("mes cerámica"): si el cliente es alumno, cada unidad
+      // cobrada paga su cuota del mes. Nunca tumba la venta (ver el servicio).
+      if (createSaleDto.clientId && itemsWithProduct.length > 0) {
+        const feeProducts = await this.productModel
+          .find({
+            _id: { $in: itemsWithProduct.map((i) => i.productId) },
+            studentFee: true,
+          })
+          .select('_id')
+          .lean();
+        const feeIds = new Set(feeProducts.map((p) => String(p._id)));
+        const units = itemsWithProduct
+          .filter((i) => feeIds.has(i.productId!.toString()))
+          .flatMap((i) =>
+            Array<number>(Math.max(0, i.quantity - (i.bonifiedQty ?? 0))).fill(
+              i.unitPrice,
+            ),
+          );
+        if (units.length > 0) {
+          await this.studentsService.payFeesFromSale({
+            clientId: String(createSaleDto.clientId),
+            saleId: sale._id.toString(),
+            saleNumber,
+            method: PAYMENT_METHOD_LABEL[payments[0]?.method ?? PaymentMethod.CASH],
+            units,
+          });
+        }
       }
 
       // Saldar las ventas viejas cuyo saldo se cobró acá y vincularlas (mutuo).

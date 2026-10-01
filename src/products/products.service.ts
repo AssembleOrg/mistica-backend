@@ -40,6 +40,7 @@ export class ProductsService {
       profitMargin: productObj.profitMargin,
       specialProduct: productObj.specialProduct,
       kind: productObj.kind,
+      studentFee: productObj.studentFee ?? false,
       createdAt: productObj.createdAt,
       updatedAt: productObj.updatedAt,
       deletedAt: productObj.deletedAt,

@@ -15,6 +15,7 @@ export interface Product {
   profitMargin: number | null;
   specialProduct: boolean;
   kind: ProductKind;
+  studentFee?: boolean;
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date;

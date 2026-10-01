@@ -75,6 +75,14 @@ export class CreateProductDto {
   @IsOptional()
   @IsEnum(ProductKind)
   kind?: ProductKind;
+
+  @ApiPropertyOptional({
+    description:
+      'Cuota mensual de alumno: venderla a un cliente alumno marca paga su cuota',
+  })
+  @IsOptional()
+  @IsBoolean()
+  studentFee?: boolean;
 }
 
 export class UpdateProductDto {
@@ -140,6 +148,14 @@ export class UpdateProductDto {
   @IsOptional()
   @IsEnum(ProductKind)
   kind?: ProductKind;
+
+  @ApiPropertyOptional({
+    description:
+      'Cuota mensual de alumno: venderla a un cliente alumno marca paga su cuota',
+  })
+  @IsOptional()
+  @IsBoolean()
+  studentFee?: boolean;
 }
 
 /**

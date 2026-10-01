@@ -42,6 +42,16 @@ export class Student {
   @Prop({ type: Date, default: Date.now })
   joinedAt: Date;
 
+  // Día del mes hasta el que tiene para pagar la cuota (sin valor: el 10).
+  // Pasado ese día sin pago del mes, salta la alerta.
+  @Prop({ min: 1, max: 31 })
+  paymentDay?: number;
+
+  // Importe de la cuota mensual (opcional: la cuota se crea igual, y al
+  // pagarla desde una venta toma el monto cobrado).
+  @Prop({ min: 0 })
+  monthlyFee?: number;
+
   // Notas ADMINISTRATIVAS (situaciones que requieren seguimiento, acuerdos de
   // pago, etc.). Las ve el perfil administrativo.
   @Prop({ trim: true })

@@ -8,6 +8,7 @@ import { Client, ClientSchema } from '../common/schemas/client.schema';
 import { Prepaid, PrepaidSchema } from '../common/schemas/prepaid.schema';
 import { PrepaidsModule } from '../prepaids/prepaids.module';
 import { CashboxModule } from '../cashbox/cashbox.module';
+import { StudentsModule } from '../students/students.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { CashboxModule } from '../cashbox/cashbox.module';
     ]),
     PrepaidsModule,
     CashboxModule,
+    StudentsModule,
   ],
   controllers: [SalesController],
   providers: [SalesService],

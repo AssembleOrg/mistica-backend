@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  Logger,
+  OnApplicationBootstrap,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -7,6 +9,8 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Cron } from '@nestjs/schedule';
+import { DateTime } from 'luxon';
+import { envConfig } from '../config/env.config';
 import { Student, StudentDocument } from '../common/schemas/student.schema';
 import { Client, ClientDocument } from '../common/schemas/client.schema';
 import {
@@ -53,7 +57,8 @@ import {
  * · PRÁCTICO: grupos, asistencia y piezas (perfil profesor) — sin plata.
  */
 @Injectable()
-export class StudentsService {
+export class StudentsService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(StudentsService.name);
   constructor(
     @InjectModel(Student.name)
     private readonly studentModel: Model<StudentDocument>,
@@ -570,6 +575,11 @@ export class StudentsService {
   /** Recalcula vencimientos y avisa una vez al equipo: a 3 días y al vencer. */
   @Cron('5 9 * * *', { timeZone: 'America/Argentina/Buenos_Aires' })
   async dailyPaymentFollowUp() {
+    // Primero la cuota del mes de cada alumno, así su vencimiento ya entra en
+    // los avisos de hoy.
+    await this.ensureMonthlyFees().catch((err) =>
+      this.logger.error(`No se pudieron generar las cuotas del mes: ${String(err)}`),
+    );
     const now = new Date();
     const inThreeDays = new Date(now);
     inThreeDays.setDate(inThreeDays.getDate() + 3);
@@ -630,6 +640,163 @@ export class StudentsService {
         ),
       ),
     ]);
+  }
+
+  // ── Cuota mensual ────────────────────────────────────────────────────────
+  // Cada alumno que cursa tiene una cuota por mes que vence su día límite de
+  // pago (default el 10). El sistema la crea PENDIENTE; pasado ese día sin
+  // pagarla salta la alerta. Venderle en caja un producto marcado como cuota
+  // de alumno ("mes cerámica") la marca paga.
+
+  async onApplicationBootstrap() {
+    // Al desplegar, las cuotas del mes en curso quedan creadas sin esperar al
+    // cron de la mañana. No bloquea el arranque.
+    void this.ensureMonthlyFees().catch((err) =>
+      this.logger.error(`Cuotas del mes al iniciar: ${String(err)}`),
+    );
+  }
+
+  /**
+   * Crea la cuota PENDIENTE del mes para cada alumno activo que cursa en algún
+   * grupo activo y todavía no la tiene. Idempotente: corre todos los días.
+   */
+  async ensureMonthlyFees(now: Date = new Date()) {
+    const period = periodOf(now);
+    const groups = await this.groupModel
+      .find({ deletedAt: { $exists: false }, isActive: true })
+      .select('studentIds')
+      .lean();
+    const attending = new Set(
+      groups.flatMap((g) => (g.studentIds ?? []).map((id) => String(id))),
+    );
+    if (attending.size === 0) return 0;
+    const students = await this.studentModel
+      .find({
+        _id: { $in: [...attending] },
+        isActive: true,
+        deletedAt: { $exists: false },
+      })
+      .select('name paymentDay monthlyFee')
+      .lean();
+    const monthStart = DateTime.fromISO(`${period}-01`, {
+      zone: envConfig.timezone,
+    });
+    const [withPeriod, paidByHand] = await Promise.all([
+      this.paymentModel
+        .find({ period, deletedAt: { $exists: false } })
+        .select('studentId')
+        .lean(),
+      // Cuotas cargadas a mano antes de existir el período: si este mes ya
+      // registraron una cuota paga, no se le crea otra.
+      this.paymentModel
+        .find({
+          status: 'PAID',
+          period: { $exists: false },
+          deletedAt: { $exists: false },
+          concept: /cuota/i,
+          paidAt: {
+            $gte: monthStart.toJSDate(),
+            $lt: monthStart.plus({ months: 1 }).toJSDate(),
+          },
+        })
+        .select('studentId')
+        .lean(),
+    ]);
+    const covered = new Set(
+      [...withPeriod, ...paidByHand].map((p) => String(p.studentId)),
+    );
+    const docs = students
+      .filter((st) => !covered.has(String(st._id)))
+      .map((st) => ({
+        studentId: st._id,
+        concept: `Cuota ${monthLabelEs(period)}`,
+        amount: st.monthlyFee ?? 0,
+        status: 'PENDING' as const,
+        dueDate: dueDateOf(period, st.paymentDay),
+        period,
+      }));
+    if (docs.length) {
+      await this.paymentModel.insertMany(docs);
+      this.logger.log(`Cuotas de ${period} creadas: ${docs.length}`);
+    }
+    return docs.length;
+  }
+
+  /**
+   * Una venta en caja con productos de cuota (p. ej. "mes cerámica") a un
+   * cliente que es alumno: cada unidad paga su cuota pendiente más vieja; si
+   * no debe nada, adelanta el mes siguiente sin cuota. Nunca lanza: un error
+   * acá no tiene que tumbar la venta.
+   */
+  async payFeesFromSale(input: {
+    clientId: string;
+    saleId: string;
+    saleNumber: string;
+    method?: string;
+    units: number[];
+  }): Promise<number> {
+    try {
+      if (!input.units.length || !Types.ObjectId.isValid(input.clientId)) return 0;
+      const student = await this.studentModel
+        .findOne({ clientId: input.clientId, deletedAt: { $exists: false } })
+        .select('_id paymentDay')
+        .lean();
+      if (!student) return 0;
+      const now = new Date();
+      const note = `Cobrada en caja · venta ${input.saleNumber}`;
+      for (const amount of input.units) {
+        const pending = await this.paymentModel
+          .findOne({
+            studentId: student._id,
+            status: 'PENDING',
+            period: { $exists: true },
+            deletedAt: { $exists: false },
+          })
+          .sort({ period: 1 })
+          .exec();
+        if (pending) {
+          pending.status = 'PAID';
+          pending.paidAt = now;
+          pending.amount = amount;
+          pending.method = input.method;
+          pending.notes = note;
+          pending.saleId = new Types.ObjectId(input.saleId);
+          await pending.save();
+          continue;
+        }
+        // Sin cuotas pendientes: paga el primer mes (desde el actual) que
+        // todavía no tiene cuota.
+        let period = periodOf(now);
+        while (
+          await this.paymentModel.exists({
+            studentId: student._id,
+            period,
+            deletedAt: { $exists: false },
+          })
+        ) {
+          period = nextPeriod(period);
+        }
+        await this.paymentModel.create({
+          studentId: student._id,
+          concept: `Cuota ${monthLabelEs(period)}`,
+          amount,
+          status: 'PAID',
+          paidAt: now,
+          dueDate: dueDateOf(period, student.paymentDay),
+          period,
+          method: input.method,
+          notes: note,
+          saleId: new Types.ObjectId(input.saleId),
+        });
+      }
+      await this.recordRegularity(student._id as Types.ObjectId, 'PAYMENT_UPDATED');
+      return input.units.length;
+    } catch (err) {
+      this.logger.error(
+        `Venta ${input.saleNumber}: no se pudo registrar la cuota del alumno: ${String(err)}`,
+      );
+      return 0;
+    }
   }
 
   // ── Pieza del mes ────────────────────────────────────────────────────────
@@ -895,6 +1062,22 @@ const MESES_ES = [
   'noviembre',
   'diciembre',
 ];
+
+/** 'YYYY-MM' del mes en curso (hora de Argentina). */
+function periodOf(date: Date): string {
+  return DateTime.fromJSDate(date, { zone: envConfig.timezone }).toFormat('yyyy-MM');
+}
+
+function nextPeriod(ym: string): string {
+  return DateTime.fromISO(`${ym}-01`).plus({ months: 1 }).toFormat('yyyy-MM');
+}
+
+/** Fin del día límite de pago del mes (default el 10; ajusta meses cortos). */
+function dueDateOf(ym: string, paymentDay?: number): Date {
+  const first = DateTime.fromISO(`${ym}-01`, { zone: envConfig.timezone });
+  const day = Math.min(paymentDay ?? 10, first.daysInMonth ?? 28);
+  return first.set({ day }).endOf('day').toJSDate();
+}
 
 function monthLabelEs(ym: string): string {
   const m = MESES_ES[Number(ym.slice(5, 7)) - 1] ?? ym;

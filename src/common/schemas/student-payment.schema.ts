@@ -38,6 +38,15 @@ export class StudentPayment {
   @Prop({ trim: true })
   notes?: string;
 
+  // Cuota mensual: mes al que corresponde ('YYYY-MM'). La crea el sistema con
+  // el día límite del alumno; los pagos sueltos no lo tienen.
+  @Prop({ trim: true })
+  period?: string;
+
+  // Venta del POS con la que se pagó (cuota cobrada en caja).
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Sale' })
+  saleId?: Types.ObjectId;
+
   @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   createdById?: Types.ObjectId;
 
