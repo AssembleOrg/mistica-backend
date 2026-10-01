@@ -102,6 +102,17 @@ export class SalesController {
     };
   }
 
+  // Antes de ':id'. La caja pregunta si el cliente es alumno para ofrecer
+  // registrar la cuota del mes con la venta.
+  @Get('student-fee/:clientId')
+  @ApiOperation({ summary: 'Si el cliente es alumno, su próxima cuota a pagar' })
+  async studentFeeOfClient(@Param('clientId') clientId: string) {
+    return {
+      success: true,
+      data: await this.salesService.studentFeeOfClient(clientId),
+    };
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener venta por ID' })
   @ApiParam({ name: 'id', description: 'ID de la venta' })

@@ -185,6 +185,16 @@ describe('Cuotas mensuales de alumnos', () => {
     ]);
   });
 
+  it('la caja ve si el cliente es alumno y qué cuota se le va a pagar', async () => {
+    const clientId = new Types.ObjectId();
+    const { service } = build({ students: [student({ clientId, name: 'Melisa', paymentDay: 16 })] });
+    await service.ensureMonthlyFees(OCT_1);
+    const info = await service.feeStatusOfClient(String(clientId));
+    expect(info).toMatchObject({ name: 'Melisa', paymentDay: 16 });
+    expect(info!.pending.map((p) => p.concept)).toEqual(['Cuota octubre 2026']);
+    expect(await service.feeStatusOfClient(String(new Types.ObjectId()))).toBeNull();
+  });
+
   it('si el cliente no es alumno, la venta no toca nada', async () => {
     const { service, paymentModel } = build({ students: [student()] });
     const paid = await service.payFeesFromSale({

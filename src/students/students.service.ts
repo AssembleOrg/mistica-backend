@@ -723,6 +723,41 @@ export class StudentsService implements OnApplicationBootstrap {
   }
 
   /**
+   * ¿El cliente de una venta es alumno? Con su próxima cuota a pagar, para
+   * que la caja muestre qué se le va a marcar paga.
+   */
+  async feeStatusOfClient(clientId: string) {
+    if (!Types.ObjectId.isValid(clientId)) return null;
+    const student = await this.studentModel
+      .findOne({ clientId, deletedAt: { $exists: false } })
+      .select('name paymentDay monthlyFee isActive')
+      .lean();
+    if (!student) return null;
+    const pending = await this.paymentModel
+      .find({
+        studentId: student._id,
+        status: 'PENDING',
+        period: { $exists: true },
+        deletedAt: { $exists: false },
+      })
+      .sort({ period: 1 })
+      .select('concept period dueDate amount')
+      .lean();
+    return {
+      studentId: String(student._id),
+      name: student.name,
+      paymentDay: student.paymentDay ?? 10,
+      monthlyFee: student.monthlyFee,
+      pending: pending.map((p) => ({
+        concept: p.concept,
+        period: p.period,
+        dueDate: p.dueDate,
+        amount: p.amount,
+      })),
+    };
+  }
+
+  /**
    * Una venta en caja con productos de cuota (p. ej. "mes cerámica") a un
    * cliente que es alumno: cada unidad paga su cuota pendiente más vieja; si
    * no debe nada, adelanta el mes siguiente sin cuota. Nunca lanza: un error

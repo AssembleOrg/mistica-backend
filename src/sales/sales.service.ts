@@ -859,7 +859,11 @@ export class SalesService {
           })
           .select('_id')
           .lean();
-        const feeIds = new Set(feeProducts.map((p) => String(p._id)));
+        const feeIds = new Set([
+          ...feeProducts.map((p) => String(p._id)),
+          // Elegidos en la venta ("esta línea es su cuota").
+          ...(createSaleDto.studentFeeProductIds ?? []),
+        ]);
         const units = itemsWithProduct
           .filter((i) => feeIds.has(i.productId!.toString()))
           .flatMap((i) =>
@@ -901,6 +905,11 @@ export class SalesService {
       console.error('Error creating sale:', error);
       throw new BadRequestException('Error durante la creación de la venta');
     }
+  }
+
+  /** Si el cliente es alumno, su próxima cuota (para la caja). */
+  studentFeeOfClient(clientId: string) {
+    return this.studentsService.feeStatusOfClient(clientId);
   }
 
   async findAll(paginationDto?: SalesPaginatedFilterDto): Promise<PaginatedResponse<Sale>> {

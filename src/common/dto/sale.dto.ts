@@ -242,6 +242,16 @@ export class CreateSaleDto {
   @IsOptional()
   @IsBoolean({ message: 'El campo consumedPrepaid debe ser un booleano' })
   consumedPrepaid?: boolean;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Productos del carrito que son la cuota del alumno (el cliente): cada unidad paga su cuota del mes. Se suman a los marcados como cuota en el catálogo.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsMongoId({ each: true })
+  studentFeeProductIds?: string[];
 }
 
 export class UpdateSaleDto {
