@@ -42,10 +42,10 @@ export class CreateStaffTaskDto {
 }
 
 export class UpdateStaffTaskDto extends PartialType(CreateStaffTaskDto) {
-  @ApiPropertyOptional({ enum: ['PENDING', 'DONE'] })
+  @ApiPropertyOptional({ enum: ['PENDING', 'IN_PROGRESS', 'DONE'] })
   @IsOptional()
-  @IsIn(['PENDING', 'DONE'])
-  status?: 'PENDING' | 'DONE';
+  @IsIn(['PENDING', 'IN_PROGRESS', 'DONE'])
+  status?: 'PENDING' | 'IN_PROGRESS' | 'DONE';
 }
 
 export class AddStaffTaskCommentDto {

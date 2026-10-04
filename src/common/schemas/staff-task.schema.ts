@@ -29,8 +29,16 @@ export class StaffTask {
   @Prop({ trim: true })
   assigneeName?: string;
 
-  @Prop({ required: true, enum: ['PENDING', 'DONE'], default: 'PENDING' })
-  status: 'PENDING' | 'DONE';
+  @Prop({
+    required: true,
+    enum: ['PENDING', 'IN_PROGRESS', 'DONE'],
+    default: 'PENDING',
+  })
+  status: 'PENDING' | 'IN_PROGRESS' | 'DONE';
+
+  /** Cuándo se puso "En proceso". */
+  @Prop({ type: Date })
+  startedAt?: Date;
 
   @Prop({ type: Date })
   dueDate?: Date;

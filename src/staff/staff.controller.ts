@@ -48,7 +48,7 @@ export class StaffController {
   @Get('tasks')
   @ApiOperation({ summary: 'Listar tareas del personal' })
   listTasks(
-    @Query('status') status: 'PENDING' | 'DONE' | undefined,
+    @Query('status') status: 'PENDING' | 'IN_PROGRESS' | 'DONE' | undefined,
     @Req() req: AuthRequest,
   ) {
     return this.service.listTasks(status, req.user);

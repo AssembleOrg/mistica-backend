@@ -56,7 +56,10 @@ export class StaffService {
 
   // ── Tareas ───────────────────────────────────────────────────────────────
 
-  async listTasks(status?: 'PENDING' | 'DONE', actor?: Actor) {
+  async listTasks(
+    status?: 'PENDING' | 'IN_PROGRESS' | 'DONE',
+    actor?: Actor,
+  ) {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (status) filter.status = status;
     // Cada integrante ve sólo sus tareas; el admin, todas.
@@ -120,9 +123,12 @@ export class StaffService {
     if (dto.description !== undefined) task.description = dto.description;
     if (dto.dueDate !== undefined)
       task.dueDate = dto.dueDate ? new Date(dto.dueDate) : undefined;
-    if (dto.status !== undefined) {
+    if (dto.status !== undefined && dto.status !== task.status) {
       task.status = dto.status;
       task.completedAt = dto.status === 'DONE' ? new Date() : undefined;
+      // Al completarla se conserva cuándo se empezó; al volver a pendiente, no.
+      if (dto.status === 'IN_PROGRESS') task.startedAt = new Date();
+      if (dto.status === 'PENDING') task.startedAt = undefined;
     }
     task.updatedAt = new Date();
     await task.save();
@@ -267,7 +273,7 @@ export class StaffService {
     const endOfToday = new Date(now);
     endOfToday.setHours(23, 59, 59, 999);
     const tasks = await this.taskModel.find({
-      status: 'PENDING',
+      status: { $in: ['PENDING', 'IN_PROGRESS'] },
       deletedAt: { $exists: false },
       dueDate: { $lte: endOfToday },
       dueReminderSentAt: { $exists: false },
