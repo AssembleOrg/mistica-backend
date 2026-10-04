@@ -22,6 +22,7 @@ import {
   StudentMonthlyPiece,
   StudentMonthlyPieceSchema,
 } from '../common/schemas/student-monthly-piece.schema';
+import { User, UserSchema } from '../common/schemas/user.schema';
 import { StudentsController } from './students.controller';
 import { StudentsService } from './students.service';
 
@@ -33,6 +34,7 @@ import { StudentsService } from './students.service';
       { name: StudentPayment.name, schema: StudentPaymentSchema },
       { name: Attendance.name, schema: AttendanceSchema },
       { name: Group.name, schema: GroupSchema },
+      { name: User.name, schema: UserSchema },
       { name: Piece.name, schema: PieceSchema },
       { name: Professor.name, schema: ProfessorSchema },
       {

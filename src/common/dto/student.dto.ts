@@ -183,6 +183,13 @@ export class AttendanceRecordDto {
   @IsString()
   @MaxLength(300)
   notes?: string;
+
+  @ApiPropertyOptional({
+    description: 'Clase de prueba gratuita (una sola por alumno)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  trial?: boolean;
 }
 
 export class SaveAttendanceDto {

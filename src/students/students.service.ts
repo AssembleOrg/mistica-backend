@@ -41,6 +41,7 @@ import {
   StudentMonthlyPieceDocument,
 } from '../common/schemas/student-monthly-piece.schema';
 import { UpsertMonthlyPieceDto } from '../common/dto/student-monthly-piece.dto';
+import { User, UserDocument } from '../common/schemas/user.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InAppNotificationsService } from '../in-app-notifications/in-app-notifications.service';
 import {
@@ -78,6 +79,8 @@ export class StudentsService implements OnApplicationBootstrap {
     private readonly regularityEventModel: Model<StudentRegularityEventDocument>,
     @InjectModel(StudentMonthlyPiece.name)
     private readonly monthlyPieceModel: Model<StudentMonthlyPieceDocument>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
     private readonly notifications: NotificationsService,
     private readonly inAppNotifications: InAppNotificationsService,
   ) {}
@@ -351,10 +354,16 @@ export class StudentsService implements OnApplicationBootstrap {
     const previous = await this.attendanceModel
       .findOne({ groupId: targetGroupId, dateKey: dto.date })
       .lean();
+    await this.assertTrialsAvailable(dto);
     const records = dto.records.map((r) => {
       const existingRecord = previous?.records.find(
         (candidate) => String(candidate.studentId) === r.studentId,
       );
+      if (r.trial && r.status === 'MAKEUP') {
+        throw new BadRequestException(
+          'Una clase de prueba no puede ser una recuperación.',
+        );
+      }
       if (r.status === 'MAKEUP' && (!r.makeupForGroupId || !r.makeupForDate)) {
         throw new BadRequestException(
           'Cada recuperación debe indicar el grupo y la fecha de la clase original.',
@@ -377,6 +386,7 @@ export class StudentsService implements OnApplicationBootstrap {
         studentId: new Types.ObjectId(r.studentId),
         status: r.status,
         notes: r.notes,
+        trial: r.trial || undefined,
         makeupForGroupId: keepsMakeupRef
           ? new Types.ObjectId(r.makeupForGroupId)
           : undefined,
@@ -401,6 +411,8 @@ export class StudentsService implements OnApplicationBootstrap {
       },
       { upsert: true, new: true },
     );
+
+    await this.syncTrials(previous?.records ?? [], records, targetGroupId, dto.date);
 
     const newLinks = new Set(
       records
@@ -444,6 +456,77 @@ export class StudentsService implements OnApplicationBootstrap {
       }
     }
     return saved;
+  }
+
+  /**
+   * Clase de prueba: una sola por alumno. Si ya vino a una (en otra clase),
+   * no se puede marcar otra como gratuita.
+   */
+  private async assertTrialsAvailable(dto: SaveAttendanceDto) {
+    const ids = dto.records.filter((r) => r.trial).map((r) => r.studentId);
+    if (!ids.length) return;
+    const enrolled = await this.groupModel
+      .findOne({
+        studentIds: { $in: ids.map((id) => new Types.ObjectId(id)) },
+        deletedAt: { $exists: false },
+      })
+      .select('name studentIds')
+      .lean();
+    if (enrolled) {
+      const sid = ids.find((id) =>
+        enrolled.studentIds.some((x) => String(x) === id),
+      );
+      const s = await this.studentModel.findById(sid).select('name').lean();
+      throw new BadRequestException(
+        `${s?.name ?? 'El alumno'} ya está inscripto en ${enrolled.name}: la clase de prueba es para quien todavía no se anotó.`,
+      );
+    }
+    const students = await this.studentModel
+      .find({ _id: { $in: ids }, trialDate: { $exists: true } })
+      .select('name trialGroupId trialDate')
+      .lean();
+    for (const s of students) {
+      const sameClass =
+        String(s.trialGroupId) === dto.groupId && s.trialDate === dto.date;
+      if (!sameClass) {
+        const [y, m, d] = (s.trialDate ?? '').split('-');
+        throw new BadRequestException(
+          `${s.name} ya usó su clase de prueba gratuita (el ${d}/${m}/${y}).`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Deja en cada alumno qué clase de prueba usó: la usa si vino (PRESENT);
+   * si no vino o se la sacó de esta clase, la vuelve a tener disponible.
+   */
+  private async syncTrials(
+    before: Array<{ studentId: Types.ObjectId; status: string; trial?: boolean }>,
+    after: Array<{ studentId: Types.ObjectId; status: string; trial?: boolean }>,
+    groupId: Types.ObjectId,
+    dateKey: string,
+  ) {
+    const used = after
+      .filter((r) => r.trial && r.status === 'PRESENT')
+      .map((r) => r.studentId);
+    const usedSet = new Set(used.map(String));
+    const released = [...before, ...after]
+      .filter((r) => r.trial && !usedSet.has(String(r.studentId)))
+      .map((r) => r.studentId);
+    if (used.length) {
+      await this.studentModel.updateMany(
+        { _id: { $in: used } },
+        { $set: { trialGroupId: groupId, trialDate: dateKey } },
+      );
+    }
+    if (released.length) {
+      // Sólo si la prueba registrada era ésta (no pisar otra clase).
+      await this.studentModel.updateMany(
+        { _id: { $in: released }, trialGroupId: groupId, trialDate: dateKey },
+        { $unset: { trialGroupId: 1, trialDate: 1 } },
+      );
+    }
   }
 
   async attendanceOfGroup(
@@ -911,17 +994,37 @@ export class StudentsService implements OnApplicationBootstrap {
     const student = await this.findOrThrow(id);
     await this.assertCanReadPractical(student._id as Types.ObjectId, actor);
     const isAdmin = actor?.role === UserRole.ADMIN;
+    const current = await this.monthlyPieceModel
+      .findOne({ studentId: student._id, month })
+      .lean();
     const set: Record<string, unknown> = {};
-    if (dto.pieceName !== undefined) set.pieceName = dto.pieceName.trim();
-    if (dto.bisque !== undefined) set.bisque = dto.bisque;
-    if (dto.delivered !== undefined) set.delivered = dto.delivered;
-    if (dto.notes !== undefined) set.notes = dto.notes.trim();
     const unset: Record<string, 1> = {};
+    if (dto.pieceName !== undefined) {
+      set.pieceName = dto.pieceName.trim();
+      if (set.pieceName && !current?.requestedAt) set.requestedAt = new Date();
+    }
+    // Fresca y bizcocho se excluyen: prender una apaga la otra.
+    if (dto.bisque !== undefined) {
+      set.bisque = dto.bisque;
+      if (dto.bisque) set.fresh = false;
+    }
+    if (dto.fresh !== undefined) {
+      set.fresh = dto.fresh;
+      if (dto.fresh) set.bisque = false;
+    }
+    if (dto.dueDate !== undefined) {
+      if (dto.dueDate) set.dueDate = dto.dueDate;
+      else unset.dueDate = 1;
+    }
+    if (dto.delivered !== undefined) set.delivered = dto.delivered;
+    if (dto.ready !== undefined) {
+      set.ready = dto.ready;
+      if (dto.ready) set.readyAt = new Date();
+      else unset.readyAt = 1;
+    }
+    if (dto.notes !== undefined) set.notes = dto.notes.trim();
     // Plata: sólo admin. Un profesor que mande estos campos los ignora.
     if (isAdmin) {
-      const current = await this.monthlyPieceModel
-        .findOne({ studentId: student._id, month })
-        .lean();
       if (dto.extraCharge !== undefined) set.extraCharge = dto.extraCharge;
       if (dto.extraAmount !== undefined) set.extraAmount = dto.extraAmount;
 
@@ -975,7 +1078,12 @@ export class StudentsService implements OnApplicationBootstrap {
     }
     const update: Record<string, unknown> = {
       $set: set,
-      $setOnInsert: { studentId: student._id, month },
+      // Fila nueva: `fresh` explícito, así no se deduce como en las viejas.
+      $setOnInsert: {
+        studentId: student._id,
+        month,
+        ...(set.fresh === undefined ? { fresh: false } : {}),
+      },
     };
     if (Object.keys(unset).length) update.$unset = unset;
     const row = await this.monthlyPieceModel
@@ -984,7 +1092,120 @@ export class StudentsService implements OnApplicationBootstrap {
         upsert: true,
       })
       .lean();
+    if (row && !row.notifiedAt && row.pieceName && (row.fresh || row.bisque)) {
+      await this.notifyProduction(student.name, row, 'new');
+    } else if (
+      row?.notifiedAt &&
+      !row.delivered &&
+      !row.ready &&
+      dto.dueDate &&
+      dto.dueDate !== current?.dueDate &&
+      // Sólo si se carga por primera vez o se adelanta: atrasarla no apura.
+      (!current?.dueDate || dto.dueDate < current.dueDate)
+    ) {
+      await this.notifyProduction(student.name, row, 'date');
+    }
     return this.monthlyPieceView(row, isAdmin);
+  }
+
+  /** Producción marca una pieza como lista (la terminó) o la desmarca. */
+  async setPieceReady(pieceId: string, ready: boolean) {
+    if (!Types.ObjectId.isValid(pieceId))
+      throw new BadRequestException('id inválido');
+    const row = await this.monthlyPieceModel
+      .findByIdAndUpdate(
+        pieceId,
+        ready
+          ? { $set: { ready: true, readyAt: new Date() } }
+          : { $set: { ready: false }, $unset: { readyAt: 1 } },
+        { new: true },
+      )
+      .lean();
+    if (!row) throw new NotFoundException('Pieza no encontrada');
+    return this.monthlyPieceView(row, false);
+  }
+
+  /**
+   * Aviso a Producción (cuentas con la vista 'produccion') cuando la pieza
+   * queda pedida: con nombre y fresca o bizcocho. Una sola vez por pieza.
+   */
+  private async notifyProduction(
+    studentName: string,
+    row: StudentMonthlyPiece & { _id: unknown },
+    kind: 'new' | 'date',
+  ) {
+    if (kind === 'new') {
+      await this.monthlyPieceModel.updateOne(
+        { _id: row._id },
+        { $set: { notifiedAt: new Date() } },
+      );
+    }
+    const users = await this.userModel
+      .find({ allowedViews: 'produccion', deletedAt: { $exists: false } })
+      .select('_id')
+      .lean();
+    if (!users.length) return;
+    const para = row.dueDate
+      ? ` · para el ${DateTime.fromISO(row.dueDate).setLocale('es').toFormat('cccc d/M')}`
+      : '';
+    try {
+      await this.inAppNotifications.create({
+        type: 'INFO',
+        title:
+          kind === 'new'
+            ? `Pieza pedida: ${row.pieceName}`
+            : `Cambió la fecha: ${row.pieceName}`,
+        body:
+          kind === 'new'
+            ? `${studentName} · ${row.bisque ? 'Bizcocho' : 'Fresca'}${para}`
+            : `${studentName} · ahora${para}`,
+        targetUserIds: users.map((u) => String(u._id)),
+      });
+    } catch (e) {
+      this.logger.warn(`No se pudo avisar a Producción: ${String(e)}`);
+    }
+  }
+
+  /**
+   * Lista de Producción: piezas pedidas (todas las de los alumnos), en el
+   * orden en que se pidieron. Por defecto, sólo las que faltan entregar.
+   */
+  async productionList(includeDelivered = false) {
+    const filter: Record<string, unknown> = { pieceName: { $nin: ['', null] } };
+    if (!includeDelivered) filter.delivered = { $ne: true };
+    const rows = await this.monthlyPieceModel
+      .find(filter)
+      .sort({ ready: 1, requestedAt: 1, createdAt: 1 })
+      .limit(500)
+      .lean();
+    const ids = rows.map((r) => r.studentId);
+    const [students, groups] = await Promise.all([
+      this.studentModel
+        .find({ _id: { $in: ids }, deletedAt: { $exists: false } })
+        .select('name')
+        .lean(),
+      this.groupModel
+        .find({ studentIds: { $in: ids }, deletedAt: { $exists: false } })
+        .select('name schedule studentIds')
+        .lean(),
+    ]);
+    const hex = (v: unknown) => (v as Types.ObjectId).toHexString();
+    const nameOf = new Map(students.map((s) => [hex(s._id), s.name]));
+    const groupsOf = new Map<string, { name: string; schedule: unknown[] }[]>();
+    for (const g of groups) {
+      for (const sid of g.studentIds) {
+        const arr = groupsOf.get(hex(sid)) ?? [];
+        arr.push({ name: g.name, schedule: g.schedule });
+        groupsOf.set(hex(sid), arr);
+      }
+    }
+    return rows
+      .filter((r) => nameOf.has(hex(r.studentId)))
+      .map((r) => ({
+        student: { _id: hex(r.studentId), name: nameOf.get(hex(r.studentId)) },
+        groups: groupsOf.get(hex(r.studentId)) ?? [],
+        piece: this.monthlyPieceView(r, false),
+      }));
   }
 
   async removeMonthlyPiece(id: string, month: string) {
@@ -1004,6 +1225,11 @@ export class StudentsService implements OnApplicationBootstrap {
       month: r.month,
       pieceName: r.pieceName ?? '',
       bisque: r.bisque ?? false,
+      fresh: r.fresh ?? (!!r.pieceName && !r.bisque),
+      requestedAt: r.requestedAt ?? (r as { createdAt?: Date }).createdAt,
+      dueDate: r.dueDate,
+      ready: r.ready ?? false,
+      readyAt: r.readyAt,
       delivered: r.delivered ?? false,
       notes: r.notes,
       // El adicional y su cobro son datos administrativos.

@@ -21,9 +21,35 @@ export class StudentMonthlyPiece {
   @Prop({ trim: true, default: '' })
   pieceName: string;
 
-  /** true = la pide en bizcocho; false = fresca. */
+  /** La pide en bizcocho. Excluyente con `fresh`; las dos apagadas = sin elegir. */
   @Prop({ type: Boolean, default: false })
   bisque: boolean;
+
+  /**
+   * La pide fresca. Sin default: en las filas viejas falta y se deduce de
+   * `bisque` (antes "bizcocho apagado = fresca").
+   */
+  @Prop({ type: Boolean })
+  fresh?: boolean;
+
+  /** Cuándo la pidió (se fija al cargar la pieza). Ordena la lista de producción. */
+  @Prop({ type: Date })
+  requestedAt?: Date;
+
+  /** Para qué clase la quiere ('YYYY-MM-DD'): no siempre es la próxima. */
+  @Prop({ trim: true })
+  dueDate?: string;
+
+  /** Producción la terminó (lista para entregar). Distinto de `delivered`. */
+  @Prop({ type: Boolean, default: false })
+  ready: boolean;
+
+  @Prop({ type: Date })
+  readyAt?: Date;
+
+  /** Ya se avisó a Producción. */
+  @Prop({ type: Date })
+  notifiedAt?: Date;
 
   @Prop({ type: Boolean, default: false })
   delivered: boolean;

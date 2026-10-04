@@ -1,10 +1,11 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -22,7 +23,24 @@ export class UpsertMonthlyPieceDto {
   @IsBoolean()
   bisque?: boolean;
 
+  @ApiPropertyOptional({ description: 'true = fresca (excluyente con bisque)' })
+  @IsOptional()
+  @IsBoolean()
+  fresh?: boolean;
+
+  @ApiPropertyOptional({
+    description: "Para qué clase la quiere ('YYYY-MM-DD'); '' la borra",
+  })
+  @IsOptional()
+  @Matches(/^(\d{4}-\d{2}-\d{2})?$/, { message: 'dueDate va en formato YYYY-MM-DD' })
+  dueDate?: string;
+
   @ApiPropertyOptional() @IsOptional() @IsBoolean() delivered?: boolean;
+
+  @ApiPropertyOptional({ description: 'Producción la terminó' })
+  @IsOptional()
+  @IsBoolean()
+  ready?: boolean;
 
   @ApiPropertyOptional({ description: 'Corresponde adicional (sólo admin)' })
   @IsOptional()
@@ -57,4 +75,9 @@ export class UpsertMonthlyPieceDto {
   @IsString()
   @MaxLength(300)
   notes?: string;
+}
+
+/** Producción marca la pieza lista (o la desmarca). */
+export class SetPieceReadyDto {
+  @ApiProperty() @IsBoolean() ready: boolean;
 }

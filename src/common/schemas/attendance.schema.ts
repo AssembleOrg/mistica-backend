@@ -40,6 +40,10 @@ export class AttendanceRecord {
 
   @Prop({ trim: true })
   notes?: string;
+
+  // Clase de prueba gratuita: no se cobra. Una sola por alumno.
+  @Prop({ type: Boolean })
+  trial?: boolean;
 }
 
 export const AttendanceRecordSchema =

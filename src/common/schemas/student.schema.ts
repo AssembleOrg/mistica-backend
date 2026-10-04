@@ -61,6 +61,14 @@ export class Student {
   @Prop({ trim: true })
   practicalNotes?: string;
 
+  // Clase de prueba gratuita que ya usó (vino): grupo y día. Sin valor = la
+  // tiene disponible. Se fija/limpia al guardar la asistencia.
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Group' })
+  trialGroupId?: Types.ObjectId;
+
+  @Prop({ trim: true })
+  trialDate?: string;
+
   // true mientras cursa; false = dio de baja (se conserva el historial).
   @Prop({ type: Boolean, default: true })
   isActive: boolean;

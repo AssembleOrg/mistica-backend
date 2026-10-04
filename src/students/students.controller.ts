@@ -19,7 +19,10 @@ import {
   UpdateStudentDto,
   UpdateStudentPaymentDto,
 } from '../common/dto/student.dto';
-import { UpsertMonthlyPieceDto } from '../common/dto/student-monthly-piece.dto';
+import {
+  SetPieceReadyDto,
+  UpsertMonthlyPieceDto,
+} from '../common/dto/student-monthly-piece.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AllowedViews } from '../common/decorators';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
@@ -71,6 +74,25 @@ export class StudentsController {
   })
   monthlyPieces(@Query('month') month: string, @Req() req: AuthRequest) {
     return this.service.monthlyPiecesOfMonth(month ?? '', req.user);
+  }
+
+  @Get('monthly-pieces/production')
+  @AllowedViews('alumnos', 'produccion')
+  @ApiOperation({
+    summary: 'Lista de Producción: piezas pedidas por fecha de pedido',
+  })
+  production(@Query('all') all?: string) {
+    return this.service.productionList(all === 'true');
+  }
+
+  @Patch('monthly-pieces/:pieceId/ready')
+  @AllowedViews('alumnos', 'produccion')
+  @ApiOperation({ summary: 'Producción: marcar la pieza lista (terminada)' })
+  setPieceReady(
+    @Param('pieceId') pieceId: string,
+    @Body() dto: SetPieceReadyDto,
+  ) {
+    return this.service.setPieceReady(pieceId, dto.ready);
   }
 
   @Get(':id/monthly-pieces')
