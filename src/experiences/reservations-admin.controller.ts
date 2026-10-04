@@ -20,7 +20,7 @@ import {
   ResolveReviewDto,
   ScheduleSaleDto,
 } from '../common/dto/reservation.dto';
-import { AddSalePaymentsDto } from '../common/dto/sale.dto';
+import { AddSalePaymentsDto, CreateSaleDto } from '../common/dto/sale.dto';
 import { UserRole } from '../common/enums/user-role.enum';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -119,5 +119,21 @@ export class ReservationsAdminController {
     @Body() dto: AddSalePaymentsDto,
   ) {
     return this.reservationsService.adminCollectBalance(id, dto);
+  }
+
+  @Get(':id/checkout')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Qué se cobra al pasar la reserva por Nueva venta' })
+  async checkoutPlan(@Param('id') id: string) {
+    return this.reservationsService.checkoutPlan(id);
+  }
+
+  @Post(':id/checkout')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Cobrar la reserva con una venta del POS (la deja saldada)' })
+  async checkout(@Param('id') id: string, @Body() dto: CreateSaleDto) {
+    return this.reservationsService.checkout(id, dto);
   }
 }

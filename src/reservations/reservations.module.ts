@@ -12,6 +12,8 @@ import {
   ReservationSchema,
   ReservationPayment,
   ReservationPaymentSchema,
+  Sale,
+  SaleSchema,
 } from '../common/schemas';
 import { MercadopagoModule } from '../mercadopago/mercadopago.module';
 import { SalesModule } from '../sales/sales.module';
@@ -31,6 +33,7 @@ import { ReservationsCron } from './reservations.cron';
       { name: Experience.name, schema: ExperienceSchema },
       { name: ReservationPayment.name, schema: ReservationPaymentSchema },
       { name: Product.name, schema: ProductSchema },
+      { name: Sale.name, schema: SaleSchema },
     ]),
     MercadopagoModule,
     CashboxModule,

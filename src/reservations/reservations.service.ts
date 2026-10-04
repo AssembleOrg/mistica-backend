@@ -35,6 +35,7 @@ import {
   ExperienceSessionDocument,
 } from '../common/schemas/experience-session.schema';
 import { Product, ProductDocument } from '../common/schemas/product.schema';
+import { Sale, SaleDocument } from '../common/schemas/sale.schema';
 import {
   Experience,
   ExperienceDocument,
@@ -103,6 +104,8 @@ export class ReservationsService {
     private readonly productModel: Model<ProductDocument>,
     @InjectModel(Experience.name)
     private readonly experienceModel: Model<ExperienceDocument>,
+    @InjectModel(Sale.name)
+    private readonly saleModel: Model<SaleDocument>,
     private readonly mercadopago: MercadopagoService,
     private readonly cashbox: CashboxService,
     private readonly salesService: SalesService,
@@ -883,6 +886,7 @@ export class ReservationsService {
       );
     }
     const sum = valid.reduce((acc, x) => acc + x.amount, 0);
+    await this.linkLegacySale(r);
     if (r.saleId) {
       await this.salesService.addExtraItems(
         String(r.saleId),
@@ -1434,8 +1438,8 @@ export class ReservationsService {
         notes: `Reserva ${reservation.code} · ${reservation.experienceName}`,
       };
       const sale = await this.salesService.create(dto);
-      const saleId = (sale as unknown as { _id: Types.ObjectId })._id;
-      reservation.saleId = saleId;
+      // create() devuelve la vista de la venta: trae `id`, no `_id`.
+      reservation.saleId = new Types.ObjectId(sale.id);
       reservation.salePending = false;
       await reservation.save();
       this.logger.log(`Reserva ${reservation.code}: venta registrada`);
@@ -1784,6 +1788,7 @@ export class ReservationsService {
 
     const newBalance = Number(Math.max(0, balance - paid).toFixed(2));
     let pending = dto.payments;
+    await this.linkLegacySale(r);
 
     const hadDeposit = (r.depositAmount ?? 0) > 0;
     // Venta diferida con seña ya cobrada: se registra ahora, antes del cobro.
@@ -1831,6 +1836,156 @@ export class ReservationsService {
     r.balanceDue = dto.markCompleted ? 0 : newBalance;
     await r.save();
     return this.publicView(r);
+  }
+
+  /**
+   * Reservas con seña cuya venta se creó sin guardar el vínculo (bug de
+   * `saleId` corregido): se la busca por la nota "Reserva <código> · …" que
+   * lleva desde su alta y se la vincula.
+   */
+  private async linkLegacySale(r: ReservationDocument): Promise<void> {
+    if (r.saleId || !((r.depositAmount ?? 0) > 0)) return;
+    const sale = await this.saleModel
+      .findOne({
+        seller: 'Reservas',
+        notes: new RegExp(`^Reserva ${escapeRegex(r.code)} `),
+        deletedAt: { $exists: false },
+      })
+      .select('_id')
+      .lean();
+    if (!sale) return;
+    r.saleId = sale._id as Types.ObjectId;
+    r.salePending = false;
+    await r.save();
+  }
+
+  /**
+   * Qué se cobra al pasar la reserva por Ventas → Nueva venta:
+   * - Con venta (seña): su saldo, como abono a cuenta de esa venta; lo que la
+   *   reserva deba de más (adicionales que no llegaron a la venta), como línea.
+   * - Sin venta: la experiencia y sus adicionales como líneas; si suman más
+   *   que el saldo (cumpleaños, precio especial), la diferencia va de descuento.
+   */
+  async checkoutPlan(id: string) {
+    const r = await this.findByIdOrThrow(id);
+    if (r.status !== ReservationStatus.CONFIRMED) {
+      throw new BadRequestException('Sólo se cobran reservas confirmadas.');
+    }
+    const balance = Number((r.balanceDue ?? 0).toFixed(2));
+    if (balance <= 0.01) {
+      throw new BadRequestException('La reserva no tiene saldo pendiente.');
+    }
+    await this.linkLegacySale(r);
+
+    let settle: { saleId: string; saleNumber: string; amount: number } | null =
+      null;
+    const items: Array<{
+      productId?: string;
+      productName: string;
+      quantity: number;
+      unitPrice: number;
+    }> = [];
+    let discount = 0;
+
+    if (r.saleId) {
+      const sale = await this.saleModel.findById(r.saleId).lean();
+      const saleBalance =
+        sale &&
+        !sale.deletedAt &&
+        (sale.status === SaleStatus.PENDING || sale.status === SaleStatus.PARTIAL)
+          ? (sale.balanceDue ?? 0)
+          : 0;
+      const amount = Number(Math.min(saleBalance, balance).toFixed(2));
+      if (sale && amount > 0.01) {
+        settle = { saleId: String(sale._id), saleNumber: sale.saleNumber, amount };
+      }
+      const rest = Number((balance - (settle?.amount ?? 0)).toFixed(2));
+      if (rest > 0.01) {
+        items.push({
+          productName: `Adicionales reserva ${r.code}`,
+          quantity: 1,
+          unitPrice: rest,
+        });
+      }
+    } else {
+      const productId = await this.ensureExperienceProduct(
+        r.experienceId,
+        r.experienceName,
+        r.unitPrice,
+      );
+      const courtesy = r.paymentMethod === ReservationPaymentMethod.COURTESY;
+      items.push({
+        productId: String(productId),
+        productName: r.experienceName,
+        quantity: r.quantity,
+        unitPrice: courtesy ? 0 : r.unitPrice,
+      });
+      for (const x of r.extras ?? []) {
+        items.push({ productName: x.label, quantity: 1, unitPrice: x.amount });
+      }
+      const sum = items.reduce((acc, i) => acc + i.quantity * i.unitPrice, 0);
+      discount = Number(Math.max(0, sum - balance).toFixed(2));
+    }
+
+    return {
+      reservation: {
+        _id: String(r._id),
+        code: r.code,
+        experienceName: r.experienceName,
+        startAt: r.startAt,
+        quantity: r.quantity,
+        unitPrice: r.unitPrice,
+        totalAmount: r.totalAmount,
+        depositAmount: r.depositAmount,
+        balanceDue: balance,
+        extras: (r.extras ?? []).map((x) => ({ label: x.label, amount: x.amount })),
+        customerName: r.customerName,
+        customerEmail: r.customerEmail,
+        customerPhone: r.customerPhone,
+        clientId: r.clientId ? String(r.clientId) : undefined,
+      },
+      settle,
+      items,
+      discount,
+    };
+  }
+
+  /**
+   * Cobra la reserva con una venta del POS (puede sumar otros productos). La
+   * venta no puede ser parcial: al crearse, la reserva queda saldada.
+   */
+  async checkout(id: string, dto: CreateSaleDto) {
+    if (dto.isPartial) {
+      throw new BadRequestException(
+        'El cobro de una reserva no puede ser un pago parcial.',
+      );
+    }
+    const plan = await this.checkoutPlan(id);
+    const r = await this.findByIdOrThrow(id);
+    if (plan.settle) {
+      const s = (dto.settlements ?? []).find(
+        (x) => x.saleId === plan.settle!.saleId,
+      );
+      if (!s || Math.abs(s.amount - plan.settle.amount) > 0.01) {
+        throw new BadRequestException(
+          `La venta tiene que cobrar el saldo de la reserva ($${plan.settle.amount}).`,
+        );
+      }
+    }
+    const note = `Cobro reserva ${r.code} · ${r.experienceName}`;
+    const sale = await this.salesService.create({
+      ...dto,
+      notes: dto.notes ? `${note}
+${dto.notes}` : note,
+    });
+    if (!r.saleId) {
+      r.saleId = new Types.ObjectId(sale.id);
+      r.depositAmount = plan.reservation.balanceDue;
+      r.salePending = false;
+    }
+    r.balanceDue = 0;
+    await r.save();
+    return sale;
   }
 
   /**

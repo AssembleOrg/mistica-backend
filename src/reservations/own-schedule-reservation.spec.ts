@@ -61,6 +61,7 @@ function build(seatsTaken = 0) {
     {} as never, // paymentModel
     {} as never, // productModel
     experienceModel as never,
+    {} as never, // saleModel
     {} as never, // mercadopago
     {} as never, // cashbox
     {} as never, // salesService
