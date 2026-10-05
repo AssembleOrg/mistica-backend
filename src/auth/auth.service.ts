@@ -7,6 +7,12 @@ import { CreateUserDto, LoginUserDto } from '../common/dto';
 import { UserRole } from '../common/enums';
 import { User, UserDocument } from '../common/schemas';
 import { Logger } from '@nestjs/common';
+import {
+  SSE_TOKEN_AUDIENCE,
+  SSE_TOKEN_TTL_SECONDS,
+  SSE_TOKEN_TYPE,
+  SseTokenPayload,
+} from './sse-token';
 
 @Injectable()
 export class AuthService {
@@ -90,6 +96,20 @@ export class AuthService {
       .lean();
     if (!user) throw new UnauthorizedException('Sesión inválida');
     return { ...sessionUser, name: user.name };
+  }
+
+  /**
+   * Token de un solo uso práctico (90 s) para abrir un stream SSE directo
+   * contra el backend. Sólo lleva el id: rol y vistas se leen de la base al
+   * conectar, igual que con la cookie. Ver `sse-token.ts`.
+   */
+  issueStreamToken(userId: string): { token: string; expiresIn: number } {
+    const payload: SseTokenPayload = { sub: userId, typ: SSE_TOKEN_TYPE };
+    const token = this.jwtService.sign(payload, {
+      audience: SSE_TOKEN_AUDIENCE,
+      expiresIn: SSE_TOKEN_TTL_SECONDS,
+    });
+    return { token, expiresIn: SSE_TOKEN_TTL_SECONDS };
   }
 
   async register(createUserDto: CreateUserDto) {

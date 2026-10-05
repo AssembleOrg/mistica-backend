@@ -13,7 +13,8 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { map, Observable } from 'rxjs';
-import { Public, AllowedViews } from '../common/decorators';
+import { Public, AllowedViews, AllowSseToken } from '../common/decorators';
+import { SseMessage, withSseHeartbeat } from '../common/utils/sse';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import {
   AdminReplyDto,
@@ -109,17 +110,22 @@ export class ConversationsController {
 
   // ───────────────────────── Panel ─────────────────────────
 
+  // Cookie (vía proxy del panel) o `?token=` de POST /realtime/stream-token
+  // (EventSource directo al backend). Los guards y la vista `reservas` son los
+  // del controller.
   @Get('stream')
   @Sse()
-  @UseGuards(JwtAuthGuard, AllowedViewsGuard)
+  @AllowSseToken()
   @AllowedViews('reservas')
   @ApiBearerAuth()
   @ApiOperation({
     summary:
       'Eventos en vivo de las charlas (SSE): charla nueva, mensaje, cierre',
   })
-  stream(): Observable<{ data: unknown }> {
-    return this.service.stream().pipe(map((event) => ({ data: event })));
+  stream(): Observable<SseMessage> {
+    return withSseHeartbeat(
+      this.service.stream().pipe(map((event) => ({ data: event }))),
+    );
   }
 
   @Get()

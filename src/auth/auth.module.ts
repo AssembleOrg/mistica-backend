@@ -7,6 +7,8 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
+import { SseTokenStrategy } from './strategies/sse-token.strategy';
+import { RealtimeController } from './realtime.controller';
 import { User, UserSchema } from '../common/schemas';
 import { Logger } from '@nestjs/common';
 
@@ -29,8 +31,8 @@ import { Logger } from '@nestjs/common';
       inject: [ConfigService],
     }),
   ],
-  controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, LocalStrategy, Logger],
+  controllers: [AuthController, RealtimeController],
+  providers: [AuthService, JwtStrategy, SseTokenStrategy, LocalStrategy, Logger],
   exports: [AuthService],
 })
 export class AuthModule {} 

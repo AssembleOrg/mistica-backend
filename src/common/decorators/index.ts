@@ -24,3 +24,8 @@ export const Throttle = (limit: number, windowSec: number) => {
   const opts: ThrottleOptions = { limit, windowSec };
   return SetMetadata(THROTTLE_KEY, opts);
 };
+
+// El endpoint (un stream SSE) acepta, además de la cookie de sesión, el token
+// corto de `POST /realtime/stream-token` en `?token=`. Lo lee JwtAuthGuard.
+export const ALLOW_SSE_TOKEN_KEY = 'allowSseToken';
+export const AllowSseToken = () => SetMetadata(ALLOW_SSE_TOKEN_KEY, true);

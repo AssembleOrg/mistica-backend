@@ -2,6 +2,8 @@ import { Controller, Get, Param, Patch, Query, Req, Sse, UseGuards } from '@nest
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { map, Observable } from 'rxjs';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { AllowSseToken } from '../common/decorators';
+import { SseMessage, withSseHeartbeat } from '../common/utils/sse';
 import { InAppNotificationsService } from './in-app-notifications.service';
 
 @ApiTags('Notificaciones del panel')
@@ -21,8 +23,13 @@ export class InAppNotificationsController {
     return this.service.markRead(id, { userId: req.user.id, role: req.user.role });
   }
 
+  // Cookie (vía proxy del panel) o `?token=` de POST /realtime/stream-token
+  // (EventSource directo al backend).
   @Sse('stream')
-  stream(@Req() req: { user: { id: string; role: string } }): Observable<{ data: unknown }> {
-    return this.service.stream({ userId: req.user.id, role: req.user.role }).pipe(map((event) => ({ data: event })));
+  @AllowSseToken()
+  stream(@Req() req: { user: { id: string; role: string } }): Observable<SseMessage> {
+    return withSseHeartbeat(
+      this.service.stream({ userId: req.user.id, role: req.user.role }).pipe(map((event) => ({ data: event }))),
+    );
   }
 }
