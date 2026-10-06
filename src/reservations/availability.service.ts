@@ -32,7 +32,7 @@ import {
   startWindow,
   toMinutes,
 } from '../tables/shifts';
-import { hasOwnSchedule, ownStartsFor } from '../experiences/own-schedule';
+import { hasOwnSchedule, ownSlotLabel, ownStartsFor } from '../experiences/own-schedule';
 
 /** Error de clave duplicada de MongoDB. */
 const DUP_KEY = 11000;
@@ -416,12 +416,9 @@ export class AvailabilityService {
     dateKey: string,
     startTime: string,
   ): void {
-    const DIAS = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
     if (hasOwnSchedule(exp.ownSchedule)) {
       if (ownStartsFor(exp.ownSchedule, dateKey).includes(startTime)) return;
-      const cuando = exp.ownSchedule
-        .map((s) => `${DIAS[s.weekday] ?? s.weekday} a las ${s.start}`)
-        .join(', ');
+      const cuando = exp.ownSchedule.map((s) => ownSlotLabel(s)).join(', ');
       throw new BadRequestException(
         `${exp.name} tiene horario propio: ${cuando}. Elegí uno de esos horarios.`,
       );

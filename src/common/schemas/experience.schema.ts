@@ -65,18 +65,23 @@ export class PriceVariant {
 export const PriceVariantSchema = SchemaFactory.createForClass(PriceVariant);
 
 /**
- * Un horario PROPIO de una experiencia: día de semana + hora de inicio. Ver
- * `Experience.ownSchedule`.
+ * Un horario PROPIO de una experiencia: día de semana + hora de inicio, todas
+ * las semanas; o, con `date`, una sola vez (un evento: el Día de la Madre).
+ * Ver `Experience.ownSchedule`.
  */
 @Schema({ _id: false })
 export class OwnSlot {
-  // Día ISO (1=lunes … 7=domingo).
+  // Día ISO (1=lunes … 7=domingo). Con `date`, el de esa fecha.
   @Prop({ required: true, min: 1, max: 7 })
   weekday: number;
 
   // Hora local de inicio, 'HH:mm'. La duración es la de la experiencia.
   @Prop({ required: true, trim: true })
   start: string;
+
+  // Fecha única 'YYYY-MM-DD': el horario vale sólo ese día.
+  @Prop({ trim: true })
+  date?: string;
 }
 
 export const OwnSlotSchema = SchemaFactory.createForClass(OwnSlot);

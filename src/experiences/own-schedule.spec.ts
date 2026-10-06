@@ -2,7 +2,9 @@ import { DateTime } from 'luxon';
 import {
   hasOwnSchedule,
   isOwnSlot,
+  normalizeOwnSchedule,
   ownScheduleError,
+  ownSlotLabel,
   ownStartsFor,
 } from './own-schedule';
 
@@ -25,6 +27,18 @@ describe('horario propio de una experiencia', () => {
     // 2026-09-30 es miércoles; 2026-10-01, jueves.
     expect(ownStartsFor(ESCUELITA, '2026-09-30')).toEqual(['18:00']);
     expect(ownStartsFor(ESCUELITA, '2026-10-01')).toEqual([]);
+  });
+
+  it('una fecha única (un evento) vale sólo ese día, no todas las semanas', () => {
+    // Día de la Madre: sábado 17/10/2026 a las 15:00.
+    const evento = normalizeOwnSchedule([{ weekday: 1, start: '15:00', date: '2026-10-17' }])!;
+    expect(evento[0].weekday).toBe(6);
+    expect(ownStartsFor(evento, '2026-10-17')).toEqual(['15:00']);
+    expect(ownStartsFor(evento, '2026-10-24')).toEqual([]);
+    expect(isOwnSlot(evento, at('2026-10-17', '15:00'), TZ)).toBe(true);
+    expect(isOwnSlot(evento, at('2026-10-24', '15:00'), TZ)).toBe(false);
+    expect(ownSlotLabel(evento[0])).toBe('el sábado 17/10 a las 15:00');
+    expect(ownSlotLabel({ weekday: 3, start: '18:00' })).toBe('los miércoles a las 18:00');
   });
 
   it('varias horas el mismo día salen ordenadas y sin repetir', () => {

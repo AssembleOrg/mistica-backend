@@ -13,13 +13,21 @@ export interface OwnSlotLike {
   weekday: number;
   /** Hora local de inicio 'HH:mm'. */
   start: string;
+  /** Fecha única 'YYYY-MM-DD' (un evento): vale sólo ese día. */
+  date?: string;
 }
 
 const DIAS = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+const DIAS_PLURAL = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados', 'domingos'];
 
 /** ¿La experiencia tiene horario propio? */
 export function hasOwnSchedule(schedule?: OwnSlotLike[] | null): boolean {
   return !!schedule && schedule.length > 0;
+}
+
+/** ¿El horario propio aplica a esa fecha ('YYYY-MM-DD', día ISO)? */
+function appliesOn(s: OwnSlotLike, dateKey: string, weekday: number): boolean {
+  return s.date ? s.date === dateKey : s.weekday === weekday;
 }
 
 /** Horas de inicio propias que aplican a una fecha de negocio ('YYYY-MM-DD'). */
@@ -30,9 +38,33 @@ export function ownStartsFor(
   if (!hasOwnSchedule(schedule)) return [];
   const wd = DateTime.fromISO(dateKey).weekday;
   const starts = new Set(
-    (schedule as OwnSlotLike[]).filter((s) => s.weekday === wd).map((s) => s.start),
+    (schedule as OwnSlotLike[])
+      .filter((s) => appliesOn(s, dateKey, wd))
+      .map((s) => s.start),
   );
   return [...starts].sort((a, b) => toMinutes(a) - toMinutes(b));
+}
+
+/** "los miércoles a las 18:00" o, si es una fecha única, "el sábado 17/10 a las 15:00". */
+export function ownSlotLabel(s: OwnSlotLike): string {
+  if (s.date) {
+    const d = DateTime.fromISO(s.date);
+    return `el ${DIAS[d.weekday] ?? ''} ${d.day}/${d.month} a las ${s.start}`;
+  }
+  return `los ${DIAS_PLURAL[s.weekday] ?? s.weekday} a las ${s.start}`;
+}
+
+/**
+ * Las fechas únicas toman el día de semana de su fecha (así nadie tiene que
+ * cargarlo a mano y no pueden quedar desparejos).
+ */
+export function normalizeOwnSchedule<T extends OwnSlotLike>(
+  schedule: T[] | null | undefined,
+): T[] | undefined {
+  if (!schedule) return undefined;
+  return schedule.map((s) =>
+    s.date ? { ...s, weekday: DateTime.fromISO(s.date).weekday } : s,
+  );
 }
 
 /** ¿`startAt` cae justo en un horario propio de la experiencia? */
@@ -44,8 +76,9 @@ export function isOwnSlot(
   if (!hasOwnSchedule(schedule)) return false;
   const local = DateTime.fromJSDate(startAt).setZone(tz);
   const hhmm = local.toFormat('HH:mm');
+  const dateKey = local.toISODate() as string;
   return (schedule as OwnSlotLike[]).some(
-    (s) => s.weekday === local.weekday && s.start === hhmm,
+    (s) => appliesOn(s, dateKey, local.weekday) && s.start === hhmm,
   );
 }
 
@@ -64,7 +97,7 @@ export function ownScheduleError(
     const start = toMinutes(s.start);
     if (start < openMin || start + durationMinutes > closeMin) {
       return (
-        `El horario propio del ${DIAS[s.weekday] ?? s.weekday} a las ${s.start} no entra ` +
+        `El horario propio de ${ownSlotLabel(s)} no entra ` +
         `en el horario del salón (${fmtMinutes(openMin)} a ${fmtMinutes(closeMin)}) ` +
         `con una duración de ${durationMinutes} min.`
       );

@@ -116,6 +116,14 @@ export class OwnSlotDto {
     message: "start debe ser una hora 'HH:mm'",
   })
   start: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Fecha única 'YYYY-MM-DD' (un evento): el horario vale sólo ese día. Sin fecha, todas las semanas.",
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: "date debe ser una fecha 'YYYY-MM-DD'" })
+  date?: string;
 }
 
 export class CreateExperienceDto {

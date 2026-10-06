@@ -29,7 +29,7 @@ import {
 } from '../common/schemas/experience-session.schema';
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { aliasKeys, cleanAliases, normalizeAlias } from './alias';
-import { ownScheduleError } from './own-schedule';
+import { normalizeOwnSchedule, ownScheduleError } from './own-schedule';
 import { TablesService } from '../tables/tables.service';
 import {
   bookingStartWindow,
@@ -55,7 +55,11 @@ export class ExperiencesService {
   async createExperience(dto: CreateExperienceDto) {
     this.assertOwnSchedule(dto.ownSchedule, dto.durationMinutes);
     const aliases = await this.validAliases(dto.aliases, dto.name, null);
-    return this.experienceModel.create({ ...dto, aliases });
+    return this.experienceModel.create({
+      ...dto,
+      ownSchedule: normalizeOwnSchedule(dto.ownSchedule),
+      aliases,
+    });
   }
 
   async listExperiences(includeInactive = false) {
@@ -71,6 +75,9 @@ export class ExperiencesService {
 
   async updateExperience(id: string, dto: UpdateExperienceDto) {
     const exp = await this.findExperienceOrThrow(id);
+    if (dto.ownSchedule !== undefined) {
+      dto = { ...dto, ownSchedule: normalizeOwnSchedule(dto.ownSchedule) };
+    }
     if (dto.ownSchedule !== undefined || dto.durationMinutes !== undefined) {
       this.assertOwnSchedule(
         dto.ownSchedule ?? exp.ownSchedule,
