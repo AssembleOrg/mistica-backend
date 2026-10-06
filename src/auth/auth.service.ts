@@ -73,6 +73,7 @@ export class AuthService {
           name: user.name,
           role: user.role,
           allowedViews: user.allowedViews ?? [],
+          sharedAccount: !!user.sharedAccount,
         },
       };
     } catch (error) {
@@ -92,10 +93,14 @@ export class AuthService {
   async me(sessionUser: { id: string; email: string; role: string }) {
     const user = await this.userModel
       .findOne({ _id: sessionUser.id, deletedAt: { $exists: false } })
-      .select('name')
+      .select('name sharedAccount')
       .lean();
     if (!user) throw new UnauthorizedException('Sesión inválida');
-    return { ...sessionUser, name: user.name };
+    return {
+      ...sessionUser,
+      name: user.name,
+      sharedAccount: !!user.sharedAccount,
+    };
   }
 
   /**

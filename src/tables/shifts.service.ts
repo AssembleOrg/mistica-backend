@@ -149,6 +149,13 @@ export class ShiftsService implements OnModuleInit {
   ): Promise<void> {
     if (dto.active === false) return; // una plantilla apagada no molesta a nadie
 
+    // Fuera del horario del salón no se ofrecería nunca: mejor avisarlo acá.
+    if (dto.start < envConfig.businessOpen || dto.end > envConfig.businessClose) {
+      throw new BadRequestException(
+        `El turno queda fuera del horario del salón (${envConfig.businessOpen} a ${envConfig.businessClose}). Cambiá primero el horario del salón.`,
+      );
+    }
+
     const siblings = (
       await this.model
         .find({ active: true, deletedAt: { $exists: false } })

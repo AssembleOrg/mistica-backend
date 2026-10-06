@@ -61,6 +61,16 @@ export class UsersController {
     return this.usersService.findWithoutPagination();
   }
 
+  // Cualquier cuenta: las compartidas eligen de acá quién hace cada gestión.
+  @Get('team')
+  @Roles(UserRole.ADMIN, UserRole.USER)
+  @ApiOperation({
+    summary: 'Personas del equipo (nombre de las cuentas personales)',
+  })
+  async team(): Promise<Array<{ id: string; name: string }>> {
+    return this.usersService.team();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener usuario por ID' })
   @ApiResponse({ status: 200, description: 'Usuario encontrado exitosamente' })

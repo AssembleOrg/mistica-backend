@@ -104,6 +104,35 @@ export class Reservation {
   @Prop({ type: Boolean, default: false })
   isBirthday: boolean;
 
+  // Lo que cocina tiene que saber y no entra en las restricciones (nombre y
+  // edad del cumpleañero, sabor de la torta, horario de la torta…).
+  @Prop({ trim: true })
+  kitchenNotes?: string;
+
+  // Tortas a preparar para la reserva: la simbólica de regalo (cumples de 10
+  // o más, o como estrategia de venta) y las que se venden aparte. Las que
+  // tienen precio además se sumaron como adicional (extras) al total.
+  @Prop({
+    type: [
+      {
+        label: { type: String, required: true, trim: true },
+        qty: { type: Number, required: true, min: 1, default: 1 },
+        amount: { type: Number, min: 0, default: 0 },
+        notes: { type: String, trim: true },
+        createdAt: { type: Date, default: () => new Date() },
+      },
+    ],
+    default: [],
+  })
+  cakes?: Array<{
+    _id?: Types.ObjectId;
+    label: string;
+    qty: number;
+    amount?: number;
+    notes?: string;
+    createdAt?: Date;
+  }>;
+
   // ── Mesas ──
   // Turno del día en el que cae la reserva ('T1', 'T2'). Junto con la fecha de
   // negocio identifica el bloque de ocupación de las mesas.
@@ -198,6 +227,42 @@ export class Reservation {
     amount: number;
     pieceId?: Types.ObjectId;
     createdAt?: Date;
+  }>;
+
+  // Comprobantes de transferencia que mandó el cliente por WhatsApp para esta
+  // reserva (reservó en el local o por el panel y pagó después). Quedan POR
+  // VERIFICAR: el equipo los mira y, si están bien, cobra con ellos el saldo.
+  @Prop({
+    type: [
+      {
+        imageKey: { type: String, trim: true },
+        amountDetected: { type: Number, min: 0 },
+        recipientOk: { type: Boolean },
+        operationNumber: { type: String, trim: true },
+        receiptDate: { type: String, trim: true },
+        status: {
+          type: String,
+          enum: ['PENDING', 'ACCEPTED', 'DISMISSED'],
+          default: 'PENDING',
+        },
+        acceptedAmount: { type: Number, min: 0 },
+        createdAt: { type: Date, default: () => new Date() },
+        resolvedAt: { type: Date },
+      },
+    ],
+    default: [],
+  })
+  transferReceipts?: Array<{
+    _id?: Types.ObjectId;
+    imageKey?: string;
+    amountDetected?: number;
+    recipientOk?: boolean;
+    operationNumber?: string;
+    receiptDate?: string;
+    status: 'PENDING' | 'ACCEPTED' | 'DISMISSED';
+    acceptedAmount?: number;
+    createdAt?: Date;
+    resolvedAt?: Date;
   }>;
 
   // Cuándo se envió el recordatorio del turno (para no mandarlo dos veces).

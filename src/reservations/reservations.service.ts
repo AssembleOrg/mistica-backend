@@ -12,6 +12,8 @@ import { Model, Types } from 'mongoose';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { envConfig } from '../config/env.config';
 import {
+  ResolveTransferReceiptDto,
+  AddReservationCakeDto,
   AdminCreateReservationDto,
   AdminRescheduleReservationDto,
   AdminUpdateReservationDto,
@@ -830,6 +832,7 @@ export class ReservationsService {
         dietaryTags: dto.dietaryTags ?? [],
         dietaryNotes: dto.dietaryNotes,
         isBirthday: dto.isBirthday ?? false,
+        kitchenNotes: dto.kitchenNotes?.trim() || undefined,
         notes: dto.notes,
         createdById: userId,
         confirmedAt: new Date(),
@@ -986,6 +989,17 @@ export class ReservationsService {
       dietaryTags: r.dietaryTags ?? [],
       dietaryNotes: r.dietaryNotes,
       isBirthday: r.isBirthday ?? false,
+      kitchenNotes: r.kitchenNotes,
+      // Cocina ve qué torta preparar, no su precio.
+      cakes: (r.cakes ?? []).map(
+        (c: { _id?: unknown; label: string; qty: number; amount?: number; notes?: string }) => ({
+          _id: c._id ? String(c._id) : undefined,
+          label: c.label,
+          qty: c.qty,
+          free: !(c.amount && c.amount > 0),
+          notes: c.notes,
+        }),
+      ),
       shiftKey: r.shiftKey,
       tableCodes: r.tableCodes ?? [],
       sharedTable: r.sharedTable ?? false,
@@ -1653,6 +1667,103 @@ export class ReservationsService {
     if (dto.customerEmail !== undefined) r.customerEmail = dto.customerEmail;
     if (dto.customerPhone !== undefined) r.customerPhone = dto.customerPhone;
     if (dto.notes !== undefined) r.notes = dto.notes;
+    if (dto.dietaryTags !== undefined) r.dietaryTags = dto.dietaryTags;
+    if (dto.dietaryNotes !== undefined) r.dietaryNotes = dto.dietaryNotes;
+    if (dto.isBirthday !== undefined) r.isBirthday = dto.isBirthday;
+    if (dto.kitchenNotes !== undefined) r.kitchenNotes = dto.kitchenNotes;
+    r.updatedAt = new Date();
+    await r.save();
+    return this.publicView(r);
+  }
+
+  /**
+   * Suma una torta para cocina. Con precio, también va como adicional al
+   * total y al saldo (y así aparece en el ticket al cobrar).
+   */
+  async addCake(id: string, dto: AddReservationCakeDto) {
+    const r = await this.findByIdOrThrow(id);
+    if (
+      r.status === ReservationStatus.CANCELLED ||
+      r.status === ReservationStatus.EXPIRED
+    ) {
+      throw new BadRequestException('La reserva está cancelada.');
+    }
+    const qty = dto.qty ?? 1;
+    const amount = Number((dto.amount ?? 0).toFixed(2));
+    const label = dto.label.trim();
+    if (amount > 0) {
+      await this.addExtras(id, [
+        {
+          label: qty > 1 ? `${label} x${qty}` : label,
+          amount: Number((amount * qty).toFixed(2)),
+        },
+      ]);
+    }
+    const fresh = await this.findByIdOrThrow(id);
+    fresh.cakes = [
+      ...(fresh.cakes ?? []),
+      { label, qty, amount, notes: dto.notes?.trim() || undefined, createdAt: new Date() },
+    ];
+    fresh.updatedAt = new Date();
+    await fresh.save();
+    return this.publicView(fresh);
+  }
+
+  /**
+   * Comprobante que mandó el cliente por WhatsApp (ver attachReceiptToBooking):
+   * aceptarlo cobra ese monto por transferencia sobre el saldo (necesita la
+   * caja abierta, como cualquier cobro); descartarlo sólo lo marca.
+   */
+  async resolveTransferReceipt(
+    id: string,
+    receiptId: string,
+    dto: ResolveTransferReceiptDto,
+  ) {
+    const r = await this.findByIdOrThrow(id);
+    const receipt = (r.transferReceipts ?? []).find(
+      (x) => String(x._id) === receiptId,
+    );
+    if (!receipt) throw new NotFoundException('Comprobante no encontrado.');
+    if (receipt.status !== 'PENDING') {
+      throw new BadRequestException('Ese comprobante ya se revisó.');
+    }
+    let accepted: number | undefined;
+    if (dto.action === 'accept') {
+      const amount = Number((dto.amount ?? receipt.amountDetected ?? 0).toFixed(2));
+      if (!(amount > 0)) {
+        throw new BadRequestException('Indicá el monto a cobrar.');
+      }
+      await this.adminCollectBalance(id, {
+        payments: [{ method: PaymentMethod.TRANSFER, amount }],
+      } as AddSalePaymentsDto);
+      accepted = amount;
+    }
+    const fresh = await this.findByIdOrThrow(id);
+    const target = (fresh.transferReceipts ?? []).find(
+      (x) => String(x._id) === receiptId,
+    );
+    if (target) {
+      target.status = dto.action === 'accept' ? 'ACCEPTED' : 'DISMISSED';
+      target.resolvedAt = new Date();
+      if (accepted !== undefined) target.acceptedAmount = accepted;
+      fresh.markModified('transferReceipts');
+      fresh.updatedAt = new Date();
+      await fresh.save();
+    }
+    return this.publicView(fresh);
+  }
+
+  /**
+   * Saca una torta de la lista de cocina. Si tenía precio, lo sumado al
+   * total no se descuenta solo (puede estar ya en la venta).
+   */
+  async removeCake(id: string, cakeId: string) {
+    const r = await this.findByIdOrThrow(id);
+    const before = r.cakes?.length ?? 0;
+    r.cakes = (r.cakes ?? []).filter((c) => String(c._id) !== cakeId);
+    if (r.cakes.length === before) {
+      throw new NotFoundException('Esa torta ya no está en la reserva.');
+    }
     r.updatedAt = new Date();
     await r.save();
     return this.publicView(r);
@@ -2138,7 +2249,28 @@ ${dto.notes}` : note,
       tableCodes: r.tableCodes ?? [],
       sharedTable: r.sharedTable ?? false,
       notes: r.notes,
+      kitchenNotes: r.kitchenNotes,
+      cakes: (r.cakes ?? []).map((c) => ({
+        _id: c._id ? String(c._id) : undefined,
+        label: c.label,
+        qty: c.qty,
+        amount: c.amount ?? 0,
+        free: !(c.amount && c.amount > 0),
+        notes: c.notes,
+      })),
       extras: (r.extras ?? []).map((x) => ({ label: x.label, amount: x.amount })),
+      transferReceipts: (r.transferReceipts ?? []).map((x) => ({
+        _id: x._id ? String(x._id) : undefined,
+        imageKey: x.imageKey,
+        amountDetected: x.amountDetected,
+        recipientOk: x.recipientOk,
+        operationNumber: x.operationNumber,
+        receiptDate: x.receiptDate,
+        status: x.status,
+        acceptedAmount: x.acceptedAmount,
+        createdAt: x.createdAt,
+        resolvedAt: x.resolvedAt,
+      })),
       createdAt: r.createdAt,
     };
   }

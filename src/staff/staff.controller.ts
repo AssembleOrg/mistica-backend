@@ -94,8 +94,11 @@ export class StaffController {
 
   @Get('shopping')
   @ApiOperation({ summary: 'Lista de compras del establecimiento' })
-  listShopping(@Query('status') status?: 'PENDING' | 'BOUGHT') {
-    return this.service.listShopping(status);
+  listShopping(
+    @Query('status') status: 'PENDING' | 'BOUGHT' | undefined,
+    @Req() req: AuthRequest,
+  ) {
+    return this.service.listShopping(status, req.user);
   }
 
   @Post('shopping')
@@ -112,13 +115,14 @@ export class StaffController {
   updateShoppingItem(
     @Param('id') id: string,
     @Body() dto: UpdateShoppingItemDto,
+    @Req() req: AuthRequest,
   ) {
-    return this.service.updateShoppingItem(id, dto);
+    return this.service.updateShoppingItem(id, dto, req.user);
   }
 
   @Delete('shopping/:id')
   @ApiOperation({ summary: 'Eliminar ítem' })
-  removeShoppingItem(@Param('id') id: string) {
-    return this.service.removeShoppingItem(id);
+  removeShoppingItem(@Param('id') id: string, @Req() req: AuthRequest) {
+    return this.service.removeShoppingItem(id, req.user);
   }
 }

@@ -41,6 +41,14 @@ export class ReservationsController {
     return this.reservationsService.createHold(dto);
   }
 
+  // Para el formulario público y el panel: desde y hasta qué hora se reserva.
+  @Get('business-hours')
+  @Public()
+  @ApiOperation({ summary: 'Horario del salón (ventana de reservas del día)' })
+  businessHours() {
+    return { open: envConfig.businessOpen, close: envConfig.businessClose };
+  }
+
   @Get('availability')
   @Public()
   @Throttle(60, 60)

@@ -150,6 +150,39 @@ export class UpdateStudentPaymentDto extends PartialType(
   CreateStudentPaymentDto,
 ) {}
 
+/** Cobrar una cuota pendiente: entera o una parte (queda el saldo). */
+export class CollectStudentPaymentDto {
+  @ApiProperty({
+    description:
+      'Lo que se cobra ahora (ARS). Menos que el importe de la cuota = pago parcial: la cuota sigue pendiente por el saldo.',
+    minimum: 0.01,
+  })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.01)
+  amount: number;
+
+  @ApiPropertyOptional({ description: 'Medio de pago (texto libre)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  method?: string;
+
+  @ApiPropertyOptional({ description: 'Notas' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Sólo pago parcial: nuevo vencimiento del saldo (ISO). Si no viene, sigue el de la cuota.',
+  })
+  @IsOptional()
+  @IsDateString()
+  balanceDueDate?: string;
+}
+
 export class AttendanceRecordDto {
   @ApiProperty({ description: 'Alumno' })
   @IsMongoId()

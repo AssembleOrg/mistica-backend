@@ -58,6 +58,12 @@ function fakeModel(initial: Doc[] = []) {
       };
       return q;
     },
+    findById: (id: unknown) => ({
+      exec: async () => {
+        const d = docs.find((x) => String(x._id) === String(id));
+        return d ? withSave(d) : null;
+      },
+    }),
     exists: async (f: Record<string, any>) => docs.some((d) => matches(d, f)),
     create: async (data: Record<string, any>) => {
       const d = { _id: new Types.ObjectId(), ...data } as Doc;
@@ -194,6 +200,67 @@ describe('Cuotas mensuales de alumnos', () => {
     expect(info).toMatchObject({ name: 'Melisa', paymentDay: 16 });
     expect(info!.pending.map((p) => p.concept)).toEqual(['Cuota octubre 2026']);
     expect(await service.feeStatusOfClient(String(new Types.ObjectId()))).toBeNull();
+  });
+
+  it('pago parcial: registra lo cobrado y la cuota queda pendiente por el saldo', async () => {
+    const a = student({ monthlyFee: 65000 });
+    const { service, paymentModel } = build({ students: [a] });
+    await service.ensureMonthlyFees(OCT_1);
+    const fee = paymentModel.docs[0];
+
+    const first = await service.collectPayment(String(fee._id), {
+      amount: 30000,
+      method: 'Efectivo',
+      balanceDueDate: '2026-10-15T23:59:00-03:00',
+    });
+    expect(first).toEqual({ paid: 30000, remaining: 35000 });
+    expect(fee).toMatchObject({
+      status: 'PENDING',
+      amount: 35000,
+      concept: 'Cuota octubre 2026 · saldo',
+    });
+    expect(fee.dueDate.toISOString()).toBe('2026-10-16T02:59:00.000Z');
+    const partial = paymentModel.docs.find((p) => p.status === 'PAID')!;
+    expect(partial).toMatchObject({
+      concept: 'Cuota octubre 2026 · pago parcial',
+      amount: 30000,
+      period: '2026-10',
+      method: 'Efectivo',
+    });
+
+    const second = await service.collectPayment(String(fee._id), {
+      amount: 35000,
+      method: 'Transferencia',
+    });
+    expect(second.remaining).toBe(0);
+    expect(fee).toMatchObject({ status: 'PAID', amount: 35000 });
+    await expect(
+      service.collectPayment(String(fee._id), { amount: 1 }),
+    ).rejects.toThrow('ya está paga');
+  });
+
+  it('la venta que cobra menos que la cuota deja el saldo pendiente, también al adelantar', async () => {
+    const clientId = new Types.ObjectId();
+    const a = student({ clientId, monthlyFee: 65000 });
+    const { service, paymentModel } = build({ students: [a] });
+    await service.ensureMonthlyFees(OCT_1);
+
+    await service.payFeesFromSale({
+      clientId: String(clientId),
+      saleId: String(new Types.ObjectId()),
+      saleNumber: 'V-3',
+      method: 'Efectivo',
+      units: [65000, 30000],
+    });
+
+    const rows = paymentModel.docs
+      .map((p) => [p.period, p.concept, p.status, p.amount])
+      .sort((x, y) => String(x).localeCompare(String(y)));
+    expect(rows).toEqual([
+      ['2026-10', 'Cuota octubre 2026', 'PAID', 65000],
+      ['2026-11', 'Cuota noviembre 2026 · pago parcial', 'PAID', 30000],
+      ['2026-11', 'Cuota noviembre 2026 · saldo', 'PENDING', 35000],
+    ]);
   });
 
   it('si el cliente no es alumno, la venta no toca nada', async () => {

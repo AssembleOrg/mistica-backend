@@ -75,6 +75,15 @@ export class UpsertMonthlyPieceDto {
   @IsString()
   @MaxLength(300)
   notes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Quién hace la gestión (cuentas compartidas). Si no viene, el nombre de la cuenta.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  doneBy?: string;
 }
 
 /** Producción marca la pieza lista (o la desmarca). */

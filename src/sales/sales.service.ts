@@ -80,6 +80,7 @@ export class SalesService {
       })),
       status: saleObj.status,
       balanceDue: saleObj.balanceDue ?? 0,
+      onAccount: saleObj.onAccount || undefined,
       settledLines: (saleObj.settledLines || []).map((l: any) => ({
         saleId: l.saleId?.toString(),
         saleNumber: l.saleNumber,
@@ -636,10 +637,31 @@ export class SalesService {
 
   async create(createSaleDto: CreateSaleDto): Promise<Sale> {
     try {
-      // Bloqueo: no se puede vender sin caja abierta.
+      // Venta a cuenta (fiado): se lleva los productos y paga después.
+      const onAccount = createSaleDto.onAccount === true;
+      const paymentsIn = (createSaleDto.payments ?? []).filter((p) =>
+        onAccount ? (p.amount ?? 0) > 0 : true,
+      );
+      // Bloqueo: no se puede vender sin caja abierta. Un fiado sin pagos no
+      // mueve plata, así que no la necesita.
       const openSession = await this.cashboxService.findOpenSession();
-      if (!openSession) {
+      if (!openSession && (!onAccount || paymentsIn.length > 0)) {
         throw new CajaNoAbiertaException();
+      }
+      if (onAccount && !createSaleDto.clientId) {
+        throw new BadRequestException(
+          'Para dejar la venta a cuenta elegí el cliente que se la lleva.',
+        );
+      }
+      if (onAccount && (createSaleDto.items ?? []).length === 0) {
+        throw new BadRequestException(
+          'Una venta a cuenta tiene que tener productos.',
+        );
+      }
+      if (onAccount && (createSaleDto.settlements ?? []).length > 0) {
+        throw new BadRequestException(
+          'Una venta a cuenta no puede cobrar saldos de otras ventas.',
+        );
       }
 
       // Validar que el cliente existe solo si se proporciona clientId
@@ -709,7 +731,7 @@ export class SalesService {
       // Calcular totales finales
       const totals = this.calculateTotal(subtotal, taxPercent, discountFlat, prepaidUsed);
 
-      const paymentsSum = (createSaleDto.payments || []).reduce(
+      const paymentsSum = paymentsIn.reduce(
         (acc, p) => acc + (p.amount || 0),
         0,
       );
@@ -719,7 +741,16 @@ export class SalesService {
       let saleStatus: SaleStatus = SaleStatus.PENDING;
       let balanceDue = 0;
 
-      if (isPartial) {
+      if (onAccount) {
+        // Fiado: el total es el de lista (con su descuento) y lo que no paga
+        // ahora queda de saldo. Nace PARTIAL, que el cierre de caja no toca.
+        if (paymentsSum > finalTotal + 0.01) {
+          throw new BadRequestException(
+            'Lo cobrado supera el total de la venta.',
+          );
+        }
+        balanceDue = Number(Math.max(0, finalTotal - paymentsSum).toFixed(2));
+      } else if (isPartial) {
         if (paymentsSum <= 0) {
           throw new BadRequestException('Una venta con pago parcial requiere al menos un pago > 0.');
         }
@@ -766,7 +797,7 @@ export class SalesService {
       // (positivo = descuento si se cobró de menos; negativo = recargo si se
       // cobró de más). Antes el sobre-cobro se bloqueaba; ahora se permite.
       // En PARTIAL la diferencia es saldo pendiente, no ajuste.
-      if (!isPartial) {
+      if (!isPartial && !onAccount) {
         const autoAdjust = Number((finalTotal - paymentsSum).toFixed(2));
         if (Math.abs(autoAdjust) > 0.01) {
           finalDiscount = Number((finalDiscount + autoAdjust).toFixed(2));
@@ -775,7 +806,11 @@ export class SalesService {
       }
 
       // Normalizar pagos: 1 entrada por método, amount > 0, createdAt = now.
-      const payments = this.buildSalePayments(createSaleDto.payments);
+      // Un fiado puede no traer ninguno.
+      const payments =
+        onAccount && paymentsIn.length === 0
+          ? []
+          : this.buildSalePayments(paymentsIn);
 
       // Si hay saldo pendiente la venta nace PARTIAL (no PENDING).
       if (balanceDue > 0.01) {
@@ -812,6 +847,7 @@ export class SalesService {
         })),
         notes: createSaleDto.notes,
         seller: createSaleDto.seller,
+        ...(onAccount ? { onAccount: true } : {}),
       });
 
       if (!sale || !sale._id) {
@@ -851,7 +887,12 @@ export class SalesService {
 
       // Cuotas de alumno ("mes cerámica"): si el cliente es alumno, cada unidad
       // cobrada paga su cuota del mes. Nunca tumba la venta (ver el servicio).
-      if (createSaleDto.clientId && itemsWithProduct.length > 0) {
+      // Un fiado con saldo todavía no pagó la cuota: se marca a mano al cobrar.
+      if (
+        createSaleDto.clientId &&
+        itemsWithProduct.length > 0 &&
+        !(onAccount && balanceDue > 0.01)
+      ) {
         const feeProducts = await this.productModel
           .find({
             _id: { $in: itemsWithProduct.map((i) => i.productId) },
@@ -905,6 +946,75 @@ export class SalesService {
       console.error('Error creating sale:', error);
       throw new BadRequestException('Error durante la creación de la venta');
     }
+  }
+
+  /**
+   * Ventas a cuenta (fiados) con saldo, agrupadas por cliente: quién debe,
+   * cuánto y de qué venta, la más vieja primero.
+   */
+  async receivables() {
+    const sales = await this.saleModel
+      .find({
+        onAccount: true,
+        balanceDue: { $gt: 0.01 },
+        status: { $in: [SaleStatus.PARTIAL, SaleStatus.PENDING] },
+        deletedAt: { $exists: false },
+      })
+      .sort({ createdAt: 1 })
+      .select(
+        'saleNumber name clientId customerName items total balanceDue payments seller notes createdAt',
+      )
+      .lean();
+    const clientIds = [
+      ...new Set(sales.filter((s) => s.clientId).map((s) => String(s.clientId))),
+    ];
+    const clients = await this.clientModel
+      .find({ _id: { $in: clientIds } })
+      .select('fullName phone')
+      .lean();
+    const clientOf = new Map(clients.map((c) => [String(c._id), c]));
+    const groups = new Map<
+      string,
+      {
+        clientId?: string;
+        clientName: string;
+        phone?: string;
+        balanceDue: number;
+        sales: Array<Record<string, unknown>>;
+      }
+    >();
+    for (const s of sales) {
+      const key = s.clientId ? String(s.clientId) : `sin-cliente:${s.customerName ?? ''}`;
+      const client = s.clientId ? clientOf.get(String(s.clientId)) : undefined;
+      const group = groups.get(key) ?? {
+        clientId: s.clientId ? String(s.clientId) : undefined,
+        clientName: client?.fullName ?? s.customerName ?? 'Sin cliente',
+        phone: client?.phone,
+        balanceDue: 0,
+        sales: [],
+      };
+      group.balanceDue = Number((group.balanceDue + (s.balanceDue ?? 0)).toFixed(2));
+      group.sales.push({
+        id: String(s._id),
+        saleNumber: s.saleNumber,
+        name: s.name,
+        createdAt: s.createdAt,
+        items: (s.items ?? []).map((i) => ({
+          productName: i.productName,
+          quantity: i.quantity,
+          subtotal: i.subtotal,
+        })),
+        total: s.total,
+        paid: Number(
+          (s.payments ?? []).reduce((a, p) => a + (p.amount || 0), 0).toFixed(2),
+        ),
+        balanceDue: s.balanceDue,
+        seller: s.seller,
+        notes: s.notes,
+      });
+      groups.set(key, group);
+    }
+    return [...groups.values()].sort((a, b) => b.balanceDue - a.balanceDue);
   }
 
   /** Si el cliente es alumno, su próxima cuota (para la caja). */
@@ -1238,6 +1348,11 @@ export class SalesService {
       );
     }
 
+    // La plata que entra tiene que caer en una caja.
+    if (!(await this.cashboxService.findOpenSession())) {
+      throw new CajaNoAbiertaException();
+    }
+
     const newLines = this.buildSalePayments(dto.payments);
     // Combinar pagos por método: si la venta ya tiene CASH y el nuevo pago
     // también es CASH, sumamos los amounts y dejamos createdAt = now en el
@@ -1258,8 +1373,8 @@ export class SalesService {
 
     sale.payments = allPayments as any;
 
-    if (dto.markCompleted) {
-      // Completar la venta. Si pagaron menos que el total, la diferencia queda
+    if (dto.markCompleted || newSum >= total - 0.01) {
+      // Completar la venta (o quedó saldada con este pago). Si pagaron menos que el total, la diferencia queda
       // como descuento (autoDiscount), reduciendo el total a lo efectivamente
       // cobrado. Así la reportería queda coherente con la caja.
       if (newSum < total - 0.01) {

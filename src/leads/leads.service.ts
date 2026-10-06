@@ -18,8 +18,12 @@ import {
   UpdateLeadDto,
 } from '../common/dto/lead.dto';
 import { LeadSource } from '../common/enums/lead.enum';
+import { ReservationStatus } from '../common/enums/reservation.enum';
 import { NotificationsService } from '../notifications/notifications.service';
+import { InAppNotificationsService } from '../in-app-notifications/in-app-notifications.service';
 import { SpacesService } from '../common/services/spaces.service';
+import { DateTime } from 'luxon';
+import { envConfig } from '../config/env.config';
 
 @Injectable()
 export class LeadsService {
@@ -31,6 +35,7 @@ export class LeadsService {
     private readonly reservationModel: Model<ReservationDocument>,
     private readonly notifications: NotificationsService,
     private readonly spaces: SpacesService,
+    private readonly inAppNotifications: InAppNotificationsService,
   ) {}
 
   /** Alta pública de una consulta (la usa el bot y la web). */
@@ -110,26 +115,7 @@ export class LeadsService {
 
     // Imagen a Spaces (privada). Best-effort: sin bucket o con error, la
     // consulta se registra igual y queda constancia de que no hay imagen.
-    let imageKey = '';
-    if (this.spaces.enabled) {
-      try {
-        const buf = Buffer.from(dto.imageBase64, 'base64');
-        const ext = (dto.imageMime || '').includes('png')
-          ? 'png'
-          : (dto.imageMime || '').includes('webp')
-            ? 'webp'
-            : 'jpg';
-        const rand = Math.random().toString(36).slice(2, 10);
-        imageKey = await this.spaces.uploadPrivate(
-          `orphan-receipts/${Date.now()}-${rand}.${ext}`,
-          buf,
-          dto.imageMime || 'image/jpeg',
-        );
-      } catch (err) {
-        this.logger.warn(`No se pudo subir el comprobante a Spaces: ${String(err)}`);
-        imageKey = '';
-      }
-    }
+    const imageKey = await this.uploadReceipt(dto);
 
     const customerName =
       reservations.find((r) => r.code === matched?.code)?.customerName ||
@@ -173,6 +159,115 @@ export class LeadsService {
     );
 
     return { ok: true, leadId: String(doc._id), autoOk };
+  }
+
+  /**
+   * Comprobante de alguien que reservó por otro lado (en el local, cargado en
+   * el panel) y lo manda después por WhatsApp. Si el teléfono tiene una
+   * reserva confirmada próxima con saldo, el comprobante queda en esa reserva
+   * POR VERIFICAR y se avisa al equipo. No confirma ni cobra nada solo: el
+   * equipo lo valida y cobra desde la reserva.
+   */
+  async attachReceiptToBooking(dto: OrphanReceiptDto) {
+    const core = this.phoneCore(dto.phone);
+    if (core.length < 6) return { matched: false };
+    const pattern = core.slice(-8).split('').join('\\D*');
+    const candidates = await this.reservationModel
+      .find({
+        deletedAt: { $exists: false },
+        customerPhone: { $regex: pattern },
+        status: ReservationStatus.CONFIRMED,
+        startAt: { $gte: new Date(Date.now() - 24 * 3600_000) },
+        balanceDue: { $gt: 0.01 },
+      })
+      .sort({ startAt: 1 })
+      .limit(5)
+      .exec();
+    if (!candidates.length) return { matched: false };
+
+    const amount = dto.amountDetected;
+    const near = (v?: number) =>
+      typeof amount === 'number' &&
+      amount > 0 &&
+      !!v &&
+      v > 0 &&
+      Math.abs(amount - v) <= Math.max(1, v * 0.01);
+    const byAmount = candidates.find(
+      (r) => near(r.depositAmount) || near(r.totalAmount) || near(r.balanceDue),
+    );
+    // Con varias reservas y un monto que no coincide con ninguna, no se adivina.
+    const r = byAmount ?? (candidates.length === 1 ? candidates[0] : undefined);
+    if (!r) return { matched: false };
+
+    const imageKey = await this.uploadReceipt(dto);
+    r.transferReceipts = [
+      ...(r.transferReceipts ?? []),
+      {
+        imageKey: imageKey || undefined,
+        amountDetected: typeof amount === 'number' ? amount : undefined,
+        recipientOk: dto.destinatarioOk,
+        operationNumber: dto.operationNumber,
+        receiptDate: dto.receiptDate,
+        status: 'PENDING',
+        createdAt: new Date(),
+      },
+    ];
+    r.updatedAt = new Date();
+    await r.save();
+
+    const when = DateTime.fromJSDate(r.startAt, { zone: envConfig.timezone })
+      .setLocale('es')
+      .toFormat("cccc d/M 'a las' HH:mm");
+    const montoTxt =
+      typeof amount === 'number' ? `$${amount}` : 'monto ilegible';
+    void this.notifications.notifyTeam(
+      [
+        '📎 *Comprobante para una reserva*',
+        `Cliente: ${r.customerName}`,
+        `Reserva: ${r.experienceName} · ${when}`,
+        `Monto leído: ${montoTxt}${dto.destinatarioOk ? '' : ' · ⚠ destinatario no coincide'}`,
+        'Verificalo en Reservas, en la ficha de la reserva.',
+      ].join('\n'),
+    );
+    try {
+      await this.inAppNotifications.create({
+        type: 'INFO',
+        title: 'Comprobante por verificar',
+        body: `${r.customerName} · ${r.experienceName} ${when} · ${montoTxt}`,
+        visibleToRoles: ['admin'],
+      });
+    } catch (err) {
+      this.logger.warn(`No se pudo crear el aviso del comprobante: ${String(err)}`);
+    }
+    return {
+      matched: true,
+      reservation: {
+        experienceName: r.experienceName,
+        startAt: r.startAt,
+      },
+    };
+  }
+
+  /** Sube la imagen del comprobante a Spaces (privada). '' si no se pudo. */
+  private async uploadReceipt(dto: OrphanReceiptDto): Promise<string> {
+    if (!this.spaces.enabled) return '';
+    try {
+      const buf = Buffer.from(dto.imageBase64, 'base64');
+      const ext = (dto.imageMime || '').includes('png')
+        ? 'png'
+        : (dto.imageMime || '').includes('webp')
+          ? 'webp'
+          : 'jpg';
+      const rand = Math.random().toString(36).slice(2, 10);
+      return await this.spaces.uploadPrivate(
+        `orphan-receipts/${Date.now()}-${rand}.${ext}`,
+        buf,
+        dto.imageMime || 'image/jpeg',
+      );
+    } catch (err) {
+      this.logger.warn(`No se pudo subir el comprobante a Spaces: ${String(err)}`);
+      return '';
+    }
   }
 
   /** URL firmada de corta vida para ver la imagen de un comprobante (admin). */

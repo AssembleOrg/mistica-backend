@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
+  CollectStudentPaymentDto,
   CreateStudentDto,
   CreateStudentPaymentDto,
   SaveAttendanceDto,
@@ -178,6 +179,20 @@ export class StudentsController {
     @Body() dto: UpdateStudentPaymentDto,
   ) {
     return this.service.updatePayment(paymentId, dto);
+  }
+
+  @Post('payments/:paymentId/collect')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary:
+      'Cobrar una cuota pendiente, entera o una parte (pago parcial: queda el saldo pendiente)',
+  })
+  collectPayment(
+    @Param('paymentId') paymentId: string,
+    @Body() dto: CollectStudentPaymentDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.service.collectPayment(paymentId, dto, req.user?.id);
   }
 
   @Delete('payments/:paymentId')

@@ -17,6 +17,19 @@ import {
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+/** Horario del salón: la ventana del día en la que se toman reservas. */
+export class BusinessHoursDto {
+  @ApiProperty({ description: "Apertura (hora local, 'HH:mm')", example: '10:00' })
+  @IsString()
+  @Matches(HHMM, { message: 'La apertura va en formato HH:mm' })
+  open: string;
+
+  @ApiProperty({ description: "Cierre (hora local, 'HH:mm')", example: '20:00' })
+  @IsString()
+  @Matches(HHMM, { message: 'El cierre va en formato HH:mm' })
+  close: string;
+}
+
 export class DayAgendaQueryDto {
   @ApiProperty({ description: 'Fecha del día, YYYY-MM-DD (hora de Argentina)' })
   @Matches(YMD, { message: 'date debe ser YYYY-MM-DD' })

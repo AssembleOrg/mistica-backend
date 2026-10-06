@@ -6,12 +6,14 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   BlockTableDto,
+  BusinessHoursDto,
   CreateRecurringBlockDto,
   CreateShiftTemplateDto,
   DayAgendaQueryDto,
@@ -26,6 +28,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { TablesService } from './tables.service';
 import { ShiftsService } from './shifts.service';
 import { RecurringBlocksService } from './recurring-blocks.service';
+import { BusinessHoursService } from './business-hours.service';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 import { AllowedViews } from '../common/decorators';
 
@@ -39,7 +42,27 @@ export class TablesController {
     private readonly service: TablesService,
     private readonly shifts: ShiftsService,
     private readonly recurring: RecurringBlocksService,
+    private readonly hours: BusinessHoursService,
   ) {}
+
+  // ── Horario del salón (ventana de reservas del día) ──
+
+  @Get('business-hours')
+  @ApiOperation({ summary: 'Horario del salón: apertura y cierre de reservas' })
+  businessHours() {
+    return this.hours.get();
+  }
+
+  @Put('business-hours')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary:
+      'Cambiar el horario del salón. Devuelve los turnos que quedan fuera (no se ofrecen hasta ajustarlos).',
+  })
+  setBusinessHours(@Body() dto: BusinessHoursDto) {
+    return this.hours.set(dto);
+  }
 
   @Get()
   @ApiOperation({ summary: 'Listar las mesas activas del salón' })

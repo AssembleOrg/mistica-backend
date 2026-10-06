@@ -1,4 +1,4 @@
-import { IsArray, IsString, IsEmail, IsEnum, IsOptional, IsUrl, MinLength, MaxLength, IsNotEmpty } from 'class-validator';
+import { IsArray, IsBoolean, IsString, IsEmail, IsEnum, IsOptional, IsUrl, MinLength, MaxLength, IsNotEmpty } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from '../enums';
 
@@ -37,6 +37,14 @@ export class CreateUserDto {
   @IsString({ each: true })
   @MaxLength(40, { each: true })
   allowedViews?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Cuenta compartida (compu del mostrador, tablets): el panel pide quién hace cada gestión.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  sharedAccount?: boolean;
 
   @ApiPropertyOptional({ description: 'Avatar del usuario' })
   @IsOptional()
@@ -81,6 +89,14 @@ export class UpdateUserDto {
   @IsString({ each: true })
   @MaxLength(40, { each: true })
   allowedViews?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Cuenta compartida (compu del mostrador, tablets): el panel pide quién hace cada gestión.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  sharedAccount?: boolean;
 
   @ApiPropertyOptional({ description: 'Avatar del usuario' })
   @IsOptional()

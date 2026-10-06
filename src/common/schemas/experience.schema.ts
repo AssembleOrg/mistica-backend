@@ -173,6 +173,11 @@ export class Experience {
   @Prop({ required: true, min: 0, default: 0 })
   venueSeats: number;
 
+  // ¿Incluye buffet/merienda? Para la vista de Cocina: cuenta a sus personas.
+  // Sin valor, cocina lo deduce del nombre y la descripción (buffet, brunch…).
+  @Prop({ type: Boolean })
+  hasBuffet?: boolean;
+
   @Prop({ type: Boolean, default: true })
   isActive: boolean;
 

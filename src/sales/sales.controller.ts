@@ -102,6 +102,15 @@ export class SalesController {
     };
   }
 
+  // Antes de ':id'. Fiados: quién debe, cuánto y de qué venta.
+  @Get('receivables')
+  @ApiOperation({
+    summary: 'Ventas a cuenta (fiados) con saldo, agrupadas por cliente',
+  })
+  async receivables() {
+    return { success: true, data: await this.salesService.receivables() };
+  }
+
   // Antes de ':id'. La caja pregunta si el cliente es alumno para ofrecer
   // registrar la cuota del mes con la venta.
   @Get('student-fee/:clientId')

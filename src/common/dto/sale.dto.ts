@@ -132,12 +132,10 @@ export class CreateSaleDto {
 
   @ApiProperty({
     description:
-      'Pagos de la venta. La suma de `amount` debe igualar el `total` calculado. Sólo se permite una entrada por método.',
+      'Pagos de la venta. La suma de `amount` debe igualar el `total` calculado. Sólo se permite una entrada por método. Puede venir vacío sólo en una venta a cuenta (`onAccount`).',
     type: [CreateSalePaymentDto],
-    minItems: 1,
   })
   @IsArray({ message: 'Los pagos deben ser un array' })
-  @ArrayMinSize(1, { message: 'La venta debe tener al menos un pago' })
   @ValidateNested({ each: true })
   @Type(() => CreateSalePaymentDto)
   payments: CreateSalePaymentDto[];
@@ -159,6 +157,15 @@ export class CreateSaleDto {
   @IsOptional()
   @IsBoolean({ message: 'isPartial debe ser un booleano' })
   isPartial?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Venta a cuenta (fiado): el cliente (obligatorio) se lleva los productos y paga después. Sin pagos o con una parte; el saldo queda pendiente (PARTIAL), descuenta stock y no necesita caja abierta si no entra plata.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean({ message: 'onAccount debe ser un booleano' })
+  onAccount?: boolean;
 
   @ApiPropertyOptional({
     description:

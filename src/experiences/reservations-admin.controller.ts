@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -13,7 +14,9 @@ import { Request } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
+  AddReservationCakeDto,
   AdminCreateReservationDto,
+  ResolveTransferReceiptDto,
   AdminRescheduleReservationDto,
   AdminUpdateReservationDto,
   ListReservationsQueryDto,
@@ -108,6 +111,40 @@ export class ReservationsAdminController {
   @ApiOperation({ summary: 'Editar datos de una reserva' })
   async update(@Param('id') id: string, @Body() dto: AdminUpdateReservationDto) {
     return this.reservationsService.adminUpdate(id, dto);
+  }
+
+  @Post(':id/cakes')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary:
+      'Sumar una torta para cocina (con precio, también suma como adicional)',
+  })
+  async addCake(@Param('id') id: string, @Body() dto: AddReservationCakeDto) {
+    return this.reservationsService.addCake(id, dto);
+  }
+
+  @Delete(':id/cakes/:cakeId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Sacar una torta de la lista de cocina' })
+  async removeCake(@Param('id') id: string, @Param('cakeId') cakeId: string) {
+    return this.reservationsService.removeCake(id, cakeId);
+  }
+
+  @Post(':id/receipts/:receiptId/resolve')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary:
+      'Verificar un comprobante que mandó el cliente: cobrar con él o descartarlo',
+  })
+  async resolveReceipt(
+    @Param('id') id: string,
+    @Param('receiptId') receiptId: string,
+    @Body() dto: ResolveTransferReceiptDto,
+  ) {
+    return this.reservationsService.resolveTransferReceipt(id, receiptId, dto);
   }
 
   @Post(':id/collect-balance')

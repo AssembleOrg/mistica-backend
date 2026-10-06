@@ -18,6 +18,11 @@ import { TablesController } from './tables.controller';
 import { TablesService } from './tables.service';
 import { ShiftsService } from './shifts.service';
 import { RecurringBlocksService } from './recurring-blocks.service';
+import { BusinessHoursService } from './business-hours.service';
+import {
+  AppSetting,
+  AppSettingSchema,
+} from '../common/schemas/app-setting.schema';
 
 @Module({
   imports: [
@@ -28,10 +33,21 @@ import { RecurringBlocksService } from './recurring-blocks.service';
       { name: ShiftTemplate.name, schema: ShiftTemplateSchema },
       { name: ExperienceSession.name, schema: ExperienceSessionSchema },
       { name: RecurringBlock.name, schema: RecurringBlockSchema },
+      { name: AppSetting.name, schema: AppSettingSchema },
     ]),
   ],
   controllers: [TablesController],
-  providers: [TablesService, ShiftsService, RecurringBlocksService],
-  exports: [TablesService, ShiftsService, RecurringBlocksService],
+  providers: [
+    TablesService,
+    ShiftsService,
+    RecurringBlocksService,
+    BusinessHoursService,
+  ],
+  exports: [
+    TablesService,
+    ShiftsService,
+    RecurringBlocksService,
+    BusinessHoursService,
+  ],
 })
 export class TablesModule {}

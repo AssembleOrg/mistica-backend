@@ -59,6 +59,23 @@ export class LeadsController {
     return this.leadsService.registerOrphanReceipt(dto);
   }
 
+  // Uso INTERNO del bot (X-Bot-Secret): comprobante de alguien que reservó en
+  // el local (o por el panel). Si el teléfono tiene una reserva próxima con
+  // saldo, queda en esa reserva por verificar. { matched: false } si no.
+  @Post('booking-receipt')
+  @Public()
+  @Throttle(6, 60)
+  @ApiOperation({
+    summary: 'Adjuntar un comprobante a la reserva próxima del teléfono (interno del bot)',
+  })
+  async bookingReceipt(
+    @Body() dto: OrphanReceiptDto,
+    @Headers('x-bot-secret') secret?: string,
+  ) {
+    this.assertBotSecret(secret);
+    return this.leadsService.attachReceiptToBooking(dto);
+  }
+
   // ── Admin ──
   @Get('receipt-image')
   @UseGuards(JwtAuthGuard, AllowedViewsGuard)

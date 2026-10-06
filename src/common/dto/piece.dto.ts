@@ -59,6 +59,15 @@ export class CreateReservationPiecesDto {
   @ValidateNested({ each: true })
   @Type(() => ReservationPieceEntryDto)
   entries: ReservationPieceEntryDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Quién carga las fichas (cuentas compartidas). Si no viene, el nombre de la cuenta.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  registeredBy?: string;
 }
 
 /** Una ficha de pieza para un alumno del grupo. */
@@ -103,6 +112,15 @@ export class CreateGroupPiecesDto {
   @ValidateNested({ each: true })
   @Type(() => GroupPieceEntryDto)
   entries: GroupPieceEntryDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Quién carga las fichas (cuentas compartidas). Si no viene, el nombre de la cuenta.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  registeredBy?: string;
 }
 
 export class CreatePieceDto {

@@ -8,9 +8,12 @@ import {
   IsIn,
   IsInt,
   IsMongoId,
+  IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -413,6 +416,12 @@ export class AdminCreateReservationDto {
   @IsOptional()
   @IsBoolean()
   isBirthday?: boolean;
+
+  @ApiPropertyOptional({ description: 'Nota para cocina' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  kitchenNotes?: string;
 }
 
 /**
@@ -484,6 +493,89 @@ export class AdminUpdateReservationDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  @ApiPropertyOptional({
+    description: 'Restricciones alimentarias del grupo (etiquetas).',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  dietaryTags?: string[];
+
+  @ApiPropertyOptional({ description: 'Detalle de las restricciones.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  dietaryNotes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Es un cumpleaños (sólo informativo: el precio ya cobrado no se recalcula).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isBirthday?: boolean;
+
+  @ApiPropertyOptional({ description: 'Nota para cocina' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  kitchenNotes?: string;
+}
+
+/** Torta para cocina; con precio, también suma como adicional al total. */
+export class AddReservationCakeDto {
+  @ApiProperty({ description: "Qué torta ('Torta simbólica', 'Torta grande')" })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  label: string;
+
+  @ApiPropertyOptional({ description: 'Cantidad', default: 1, minimum: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  qty?: number;
+
+  @ApiPropertyOptional({
+    description: 'Precio unitario. 0 = de regalo (bonificada).',
+    default: 0,
+    minimum: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  amount?: number;
+
+  @ApiPropertyOptional({ description: 'Detalle (sabor, nombre…)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  notes?: string;
+}
+
+/** Verificar un comprobante que mandó el cliente: cobrar con él o descartarlo. */
+export class ResolveTransferReceiptDto {
+  @ApiProperty({
+    enum: ['accept', 'dismiss'],
+    description: 'accept = cobra ese monto por transferencia; dismiss = lo descarta',
+  })
+  @IsIn(['accept', 'dismiss'])
+  action: 'accept' | 'dismiss';
+
+  @ApiPropertyOptional({
+    description: 'Monto a cobrar (accept). Por defecto, el leído del comprobante.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.01)
+  amount?: number;
 }
 
 export class ResolveReviewDto {

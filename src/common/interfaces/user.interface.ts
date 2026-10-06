@@ -21,6 +21,8 @@ export interface UserResponse {
   avatar: string | null;
   /** Vistas del panel habilitadas; vacío = acceso estándar según el rol. */
   allowedViews: string[];
+  /** Cuenta compartida: el panel pide quién hace cada gestión. */
+  sharedAccount: boolean;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;

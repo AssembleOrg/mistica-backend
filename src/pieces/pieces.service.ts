@@ -10,6 +10,7 @@ import { Model, Types } from 'mongoose';
 import { PieceDocument, ReservationDocument } from '../common/schemas';
 import { Student, StudentDocument } from '../common/schemas/student.schema';
 import { Group, GroupDocument } from '../common/schemas/group.schema';
+import { User, UserDocument } from '../common/schemas/user.schema';
 import { ProfessorsService } from '../professors/professors.service';
 import { ReservationsService } from '../reservations/reservations.service';
 import { PieceExtrasService } from './piece-extras.service';
@@ -53,6 +54,8 @@ export class PiecesService implements OnModuleInit {
     private readonly studentModel: Model<StudentDocument>,
     @InjectModel(Group.name)
     private readonly groupModel: Model<GroupDocument>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
     private readonly notifications: NotificationsService,
     private readonly professors: ProfessorsService,
     private readonly reservations: ReservationsService,
@@ -200,6 +203,7 @@ export class PiecesService implements OnModuleInit {
     }
 
     const professor = await this.professors.ofUser(actor?.id);
+    const registeredByName = await this.registrant(dto.registeredBy, actor);
     const documents = dto.entries.map((entry) => ({
       reservationId: reservation._id,
       reservationCode: reservation.code,
@@ -214,6 +218,7 @@ export class PiecesService implements OnModuleInit {
       signature: entry.signature.trim(),
       pieceType: entry.pieceType.trim(),
       colorsUsed: entry.colorsUsed.trim(),
+      registeredByName,
       ...(entry.extraId && {
         extraName: catalog.get(entry.extraId)!.name,
         extraAmount: catalog.get(entry.extraId)!.amount,
@@ -282,6 +287,7 @@ export class PiecesService implements OnModuleInit {
     const own = await this.professors.ofUser(actor?.id);
     const professorId = group.professorId ?? own?._id;
     const professorName = group.professorName ?? own?.name;
+    const registeredByName = await this.registrant(dto.registeredBy, actor);
 
     const documents = dto.entries.map((entry) => {
       const s = byId.get(entry.studentId);
@@ -299,10 +305,25 @@ export class PiecesService implements OnModuleInit {
         signature: entry.signature.trim(),
         pieceType: entry.pieceType.trim(),
         colorsUsed: entry.colorsUsed.trim(),
+        registeredByName,
         photos: [],
       };
     });
     return this.pieceModel.insertMany(documents);
+  }
+
+  /**
+   * Quién carga las fichas: el que se eligió en una cuenta compartida o, si
+   * no, el nombre de la cuenta.
+   */
+  private async registrant(
+    chosen: string | undefined,
+    actor?: { id?: string },
+  ): Promise<string | undefined> {
+    if (chosen?.trim()) return chosen.trim();
+    if (!actor?.id || !Types.ObjectId.isValid(actor.id)) return undefined;
+    const user = await this.userModel.findById(actor.id).select('name').lean();
+    return user?.name;
   }
 
   async list(query: ListPiecesQueryDto) {

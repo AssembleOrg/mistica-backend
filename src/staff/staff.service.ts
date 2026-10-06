@@ -165,9 +165,14 @@ export class StaffService {
 
   // ── Lista de compras ─────────────────────────────────────────────────────
 
-  async listShopping(status?: 'PENDING' | 'BOUGHT') {
+  /**
+   * Lista de compras. El admin ve todo; el resto, sólo lo que pidió desde su
+   * cuenta (así la profe no ve mezclado lo de cocina, y viceversa).
+   */
+  async listShopping(status?: 'PENDING' | 'BOUGHT', actor?: Actor) {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (status) filter.status = status;
+    if (!isAdmin(actor)) filter.addedById = actorObjectId(actor);
     return this.shoppingModel
       .find(filter)
       .sort({ status: 1, createdAt: -1 })
@@ -187,14 +192,22 @@ export class StaffService {
       addedById:
         userId && Types.ObjectId.isValid(userId) ? userId : undefined,
       addedByName,
+      requestedByName: dto.requestedBy?.trim() || addedByName,
     });
   }
 
-  async updateShoppingItem(id: string, dto: UpdateShoppingItemDto) {
+  async updateShoppingItem(
+    id: string,
+    dto: UpdateShoppingItemDto,
+    actor?: Actor,
+  ) {
     const item = await this.findShoppingItem(id);
+    this.assertOwnShoppingItem(item, actor);
     if (dto.name !== undefined) item.name = dto.name;
     if (dto.quantity !== undefined) item.quantity = dto.quantity;
     if (dto.notes !== undefined) item.notes = dto.notes;
+    if (dto.requestedBy !== undefined)
+      item.requestedByName = dto.requestedBy.trim() || item.addedByName;
     if (dto.status !== undefined) {
       item.status = dto.status;
       item.boughtAt = dto.status === 'BOUGHT' ? new Date() : undefined;
@@ -204,11 +217,24 @@ export class StaffService {
     return item;
   }
 
-  async removeShoppingItem(id: string) {
+  async removeShoppingItem(id: string, actor?: Actor) {
     const item = await this.findShoppingItem(id);
+    this.assertOwnShoppingItem(item, actor);
     item.deletedAt = new Date();
     await item.save();
     return { success: true };
+  }
+
+  /** Quien no es admin sólo toca lo que cargó desde su cuenta. */
+  private assertOwnShoppingItem(
+    item: { addedById?: Types.ObjectId },
+    actor?: Actor,
+  ) {
+    if (isAdmin(actor)) return;
+    const me = actorObjectId(actor);
+    if (!me || !item.addedById || !item.addedById.equals(me)) {
+      throw new ForbiddenException('Ese ítem lo cargó otra cuenta.');
+    }
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────

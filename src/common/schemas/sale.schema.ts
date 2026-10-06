@@ -125,8 +125,15 @@ export class Sale {
     ],
     required: true,
     validate: {
-      validator: function (payments: Array<{ amount: number }>) {
-        return Array.isArray(payments) && payments.length > 0;
+      // Una venta a cuenta (fiado) puede nacer sin pagos.
+      validator: function (
+        this: { onAccount?: boolean },
+        payments: Array<{ amount: number }>,
+      ) {
+        return (
+          Array.isArray(payments) &&
+          (payments.length > 0 || this?.onAccount === true)
+        );
       },
       message: 'La venta debe tener al menos un pago',
     },
@@ -139,6 +146,12 @@ export class Sale {
 
   @Prop({ required: true, enum: SaleStatus, default: SaleStatus.PENDING })
   status: SaleStatus;
+
+  // Venta a cuenta (fiado): el cliente se llevó los productos y paga después.
+  // Sin pagos (o con una parte): nace PARTIAL con el saldo, que el cierre de
+  // caja no toca, y aparece en Ventas → Por cobrar hasta que se salda.
+  @Prop({ type: Boolean })
+  onAccount?: boolean;
 
   // Saldo pendiente. Sólo > 0 cuando status === PARTIAL.
   // balanceDue = total − Σ payments[].amount (ventas PARTIAL).
@@ -180,6 +193,7 @@ export const SaleSchema = SchemaFactory.createForClass(Sale);
 
 // Add indexes for better performance
 // Nota: saleNumber ya tiene índice único por el decorador @Prop({ unique: true })
+SaleSchema.index({ onAccount: 1, balanceDue: 1 });
 SaleSchema.index({ customerEmail: 1 });
 SaleSchema.index({ status: 1 });
 SaleSchema.index({ 'payments.method': 1 });

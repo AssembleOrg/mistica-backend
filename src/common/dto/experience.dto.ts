@@ -235,6 +235,14 @@ export class CreateExperienceDto {
 
   @ApiPropertyOptional({
     description:
+      '¿Incluye buffet/merienda? La vista de Cocina cuenta a sus personas.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  hasBuffet?: boolean;
+
+  @ApiPropertyOptional({
+    description:
       'Marca el doc Cumpleaños (ocasión): hereda precio/duración de la experiencia elegida y aporta beneficios. A lo sumo uno.',
     default: false,
   })

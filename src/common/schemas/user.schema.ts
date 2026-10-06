@@ -31,6 +31,11 @@ export class User {
   @Prop({ type: [String], default: undefined })
   allowedViews?: string[];
 
+  // Cuenta compartida (compu del mostrador, tablets): la usan varias personas,
+  // así que el panel pide quién hace cada gestión (lista de compras, piezas…).
+  @Prop({ type: Boolean, default: false })
+  sharedAccount?: boolean;
+
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
 

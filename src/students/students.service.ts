@@ -46,6 +46,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { InAppNotificationsService } from '../in-app-notifications/in-app-notifications.service';
 import {
   CreateStudentDto,
+  CollectStudentPaymentDto,
   CreateStudentPaymentDto,
   SaveAttendanceDto,
   UpdateStudentDto,
@@ -293,6 +294,97 @@ export class StudentsService implements OnApplicationBootstrap {
     await payment.save();
     await this.recordRegularity(payment.studentId, 'PAYMENT_UPDATED');
     return payment;
+  }
+
+  /**
+   * Cobra una cuota pendiente. Si se cobra menos que su importe es un pago
+   * parcial: queda registrado lo cobrado y la cuota sigue pendiente por el
+   * saldo, con su vencimiento (o el nuevo que se indique).
+   */
+  async collectPayment(
+    paymentId: string,
+    dto: CollectStudentPaymentDto,
+    userId?: string,
+  ) {
+    if (!Types.ObjectId.isValid(paymentId))
+      throw new BadRequestException('id inválido');
+    const payment = await this.paymentModel.findById(paymentId).exec();
+    if (!payment || payment.deletedAt)
+      throw new NotFoundException('Pago no encontrado');
+    if (payment.status !== 'PENDING')
+      throw new BadRequestException('Esta cuota ya está paga.');
+    const remaining = await this.applyToPending(payment, dto.amount, {
+      method: dto.method,
+      notes: dto.notes,
+      createdById: userId,
+      balanceDueDate: dto.balanceDueDate
+        ? new Date(dto.balanceDueDate)
+        : undefined,
+    });
+    await this.recordRegularity(payment.studentId, 'PAYMENT_UPDATED');
+    return { paid: round2(dto.amount), remaining };
+  }
+
+  /**
+   * Aplica un cobro a una cuota pendiente. Si cubre el importe (o la cuota no
+   * tenía importe), queda PAGADA por lo cobrado. Si no, pago parcial: lo
+   * cobrado se registra aparte, pagado y del mismo mes, y la cuota queda
+   * pendiente por el saldo. Devuelve el saldo que queda.
+   */
+  private async applyToPending(
+    pending: StudentPaymentDocument,
+    amount: number,
+    opts: {
+      method?: string;
+      notes?: string;
+      saleId?: string;
+      createdById?: string;
+      balanceDueDate?: Date;
+      now?: Date;
+    },
+  ): Promise<number> {
+    const now = opts.now ?? new Date();
+    const paid = round2(amount);
+    const due = round2(pending.amount ?? 0);
+    const saleId = opts.saleId ? new Types.ObjectId(opts.saleId) : undefined;
+    if (due <= 0 || paid >= due - 0.01) {
+      pending.status = 'PAID';
+      pending.paidAt = now;
+      pending.amount = paid;
+      if (opts.method) pending.method = opts.method;
+      if (opts.notes) pending.notes = opts.notes;
+      if (saleId) pending.saleId = saleId;
+      await pending.save();
+      return 0;
+    }
+    const base = pending.concept.replace(BALANCE_SUFFIX, '');
+    await this.paymentModel.create({
+      studentId: pending.studentId,
+      concept: `${base} · pago parcial`,
+      amount: paid,
+      status: 'PAID',
+      paidAt: now,
+      dueDate: pending.dueDate,
+      period: pending.period,
+      method: opts.method,
+      notes: opts.notes,
+      saleId,
+      createdById:
+        opts.createdById && Types.ObjectId.isValid(opts.createdById)
+          ? opts.createdById
+          : undefined,
+    });
+    const remaining = round2(due - paid);
+    pending.amount = remaining;
+    pending.concept = `${base} · saldo`;
+    if (opts.balanceDueDate) {
+      pending.dueDate = opts.balanceDueDate;
+      // Vencimiento nuevo: los recordatorios vuelven a avisar.
+      pending.dueReminderSentAt = undefined;
+      pending.overdueReminderSentAt = undefined;
+    }
+    await pending.save();
+    return remaining;
   }
 
   async removePayment(paymentId: string) {
@@ -857,7 +949,7 @@ export class StudentsService implements OnApplicationBootstrap {
       if (!input.units.length || !Types.ObjectId.isValid(input.clientId)) return 0;
       const student = await this.studentModel
         .findOne({ clientId: input.clientId, deletedAt: { $exists: false } })
-        .select('_id paymentDay')
+        .select('_id paymentDay monthlyFee')
         .lean();
       if (!student) return 0;
       const now = new Date();
@@ -873,13 +965,13 @@ export class StudentsService implements OnApplicationBootstrap {
           .sort({ period: 1 })
           .exec();
         if (pending) {
-          pending.status = 'PAID';
-          pending.paidAt = now;
-          pending.amount = amount;
-          pending.method = input.method;
-          pending.notes = note;
-          pending.saleId = new Types.ObjectId(input.saleId);
-          await pending.save();
+          // Menos que la cuota = pago parcial: queda el saldo pendiente.
+          await this.applyToPending(pending, amount, {
+            method: input.method,
+            notes: note,
+            saleId: input.saleId,
+            now,
+          });
           continue;
         }
         // Sin cuotas pendientes: paga el primer mes (desde el actual) que
@@ -894,18 +986,33 @@ export class StudentsService implements OnApplicationBootstrap {
         ) {
           period = nextPeriod(period);
         }
+        // Adelanto de una parte de la cuota: el resto queda pendiente.
+        const fee = round2(student.monthlyFee ?? 0);
+        const partial = fee > 0 && amount < fee - 0.01;
+        const concept = `Cuota ${monthLabelEs(period)}`;
+        const dueDate = dueDateOf(period, student.paymentDay);
         await this.paymentModel.create({
           studentId: student._id,
-          concept: `Cuota ${monthLabelEs(period)}`,
+          concept: partial ? `${concept} · pago parcial` : concept,
           amount,
           status: 'PAID',
           paidAt: now,
-          dueDate: dueDateOf(period, student.paymentDay),
+          dueDate,
           period,
           method: input.method,
           notes: note,
           saleId: new Types.ObjectId(input.saleId),
         });
+        if (partial) {
+          await this.paymentModel.create({
+            studentId: student._id,
+            concept: `${concept} · saldo`,
+            amount: round2(fee - amount),
+            status: 'PENDING',
+            dueDate,
+            period,
+          });
+        }
       }
       await this.recordRegularity(student._id as Types.ObjectId, 'PAYMENT_UPDATED');
       return input.units.length;
@@ -1076,6 +1183,12 @@ export class StudentsService implements OnApplicationBootstrap {
     if (actor?.id && Types.ObjectId.isValid(actor.id)) {
       set.updatedById = new Types.ObjectId(actor.id);
     }
+    const doneBy =
+      dto.doneBy?.trim() ||
+      (actor?.id && Types.ObjectId.isValid(actor.id)
+        ? (await this.userModel.findById(actor.id).select('name').lean())?.name
+        : undefined);
+    if (doneBy) set.updatedByName = doneBy;
     const update: Record<string, unknown> = {
       $set: set,
       // Fila nueva: `fresh` explícito, así no se deduce como en las viejas.
@@ -1232,6 +1345,7 @@ export class StudentsService implements OnApplicationBootstrap {
       readyAt: r.readyAt,
       delivered: r.delivered ?? false,
       notes: r.notes,
+      updatedByName: r.updatedByName,
       // El adicional y su cobro son datos administrativos.
       ...(isAdmin
         ? {
@@ -1325,6 +1439,13 @@ const MESES_ES = [
 ];
 
 /** 'YYYY-MM' del mes en curso (hora de Argentina). */
+/** Sufijo de la cuota que quedó pendiente por el saldo de un pago parcial. */
+const BALANCE_SUFFIX = / · saldo$/;
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 function periodOf(date: Date): string {
   return DateTime.fromJSDate(date, { zone: envConfig.timezone }).toFormat('yyyy-MM');
 }

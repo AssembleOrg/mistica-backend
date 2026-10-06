@@ -29,6 +29,11 @@ export class ShoppingItem {
   @Prop({ trim: true })
   addedByName?: string;
 
+  // Quién lo pidió (la persona). Desde una cuenta compartida (compu, tablet)
+  // se elige al cargar; si no, es el nombre de la cuenta.
+  @Prop({ trim: true })
+  requestedByName?: string;
+
   @Prop({ type: Date })
   boughtAt?: Date;
 
@@ -45,3 +50,4 @@ export class ShoppingItem {
 export const ShoppingItemSchema = SchemaFactory.createForClass(ShoppingItem);
 
 ShoppingItemSchema.index({ deletedAt: 1, status: 1, createdAt: -1 });
+ShoppingItemSchema.index({ addedById: 1, deletedAt: 1 });

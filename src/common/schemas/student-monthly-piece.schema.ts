@@ -78,6 +78,11 @@ export class StudentMonthlyPiece {
 
   @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   updatedById?: Types.ObjectId;
+
+  // Quién hizo el último cambio (la persona: en las cuentas compartidas se
+  // elige; si no, el nombre de la cuenta).
+  @Prop({ trim: true })
+  updatedByName?: string;
 }
 
 export const StudentMonthlyPieceSchema =

@@ -28,6 +28,7 @@ export class UsersService {
       role: userObj.role,
       avatar: userObj.avatar,
       allowedViews: userObj.allowedViews ?? [],
+      sharedAccount: !!userObj.sharedAccount,
       createdAt: userObj.createdAt,
       updatedAt: userObj.updatedAt,
       deletedAt: userObj.deletedAt,
@@ -153,6 +154,19 @@ export class UsersService {
     }
 
     return this.mapToUserResponse(user);
+  }
+
+  /**
+   * Personas del equipo (cuentas personales activas, sin las compartidas):
+   * para elegir quién hace una gestión desde la compu o una tablet.
+   */
+  async team(): Promise<Array<{ id: string; name: string }>> {
+    const users = await this.userModel
+      .find({ deletedAt: { $exists: false }, sharedAccount: { $ne: true } })
+      .select('name')
+      .sort({ name: 1 })
+      .lean();
+    return users.map((u) => ({ id: String(u._id), name: u.name }));
   }
 
   async update(id: string, updateUserDto: UpdateUserDto): Promise<UserResponse> {

@@ -61,10 +61,12 @@ export class ProductsService {
     }
 
     // Validación precio>costo solo si ambos están presentes (servicios y señas
-    // pueden no tener costo).
+    // pueden no tener costo). Precio 0 = producto de regalo (torta simbólica):
+    // tiene costo pero no se cobra.
     if (
       createProductDto.costPrice !== undefined &&
       createProductDto.costPrice > 0 &&
+      createProductDto.price > 0 &&
       createProductDto.price <= createProductDto.costPrice
     ) {
       throw new PrecioInvalidoException();
@@ -307,7 +309,7 @@ export class ProductsService {
 
       // La validación precio>costo y el cálculo de margen sólo aplican si
       // hay costo definido (servicios/señas no lo tienen).
-      if (newCost !== undefined && newCost > 0 && newPrice <= newCost) {
+      if (newCost !== undefined && newCost > 0 && newPrice > 0 && newPrice <= newCost) {
         errors.push({
           barcode,
           message: `Precio (${newPrice}) debe ser mayor al costo (${newCost})`,

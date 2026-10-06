@@ -46,6 +46,11 @@ export class Piece {
   @Prop({ trim: true })
   colorsUsed?: string;
 
+  // Quién cargó la ficha (la persona: en las cuentas compartidas, compu o
+  // tablets, se elige al cargar; si no, el nombre de la cuenta).
+  @Prop({ trim: true })
+  registeredByName?: string;
+
   @Prop({ trim: true })
   notes?: string;
 

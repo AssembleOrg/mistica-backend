@@ -74,6 +74,15 @@ export class CreateShoppingItemDto {
   @IsString()
   @MaxLength(300)
   notes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Quién lo pide (cuentas compartidas). Si no viene, el nombre de la cuenta.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  requestedBy?: string;
 }
 
 export class UpdateShoppingItemDto extends PartialType(CreateShoppingItemDto) {

@@ -20,6 +20,7 @@ import {
 } from '../common/schemas/reservation.schema';
 import { Student, StudentSchema } from '../common/schemas/student.schema';
 import { Group, GroupSchema } from '../common/schemas/group.schema';
+import { User, UserSchema } from '../common/schemas/user.schema';
 import {
   AppSetting,
   AppSettingSchema,
@@ -36,6 +37,7 @@ import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
       { name: Reservation.name, schema: ReservationSchema },
       { name: Student.name, schema: StudentSchema },
       { name: Group.name, schema: GroupSchema },
+      { name: User.name, schema: UserSchema },
       { name: AppSetting.name, schema: AppSettingSchema },
     ]),
     ProfessorsModule,
