@@ -125,7 +125,7 @@ function build({
     {} as any,
     {} as any,
   );
-  return { service, paymentModel, studentModel };
+  return { service, paymentModel, studentModel, clientModel };
 }
 
 const student = (extra: Record<string, any> = {}): Doc => ({
@@ -333,6 +333,32 @@ describe('Cuotas mensuales de alumnos', () => {
     expect(paid).toBe(1);
     expect(studentModel.docs).toHaveLength(2);
     expect(paymentModel.docs.map((p) => String(p.studentId))).toEqual([String(andrea._id)]);
+  });
+
+  it('todo alumno es también cliente: alta sin cliente lo crea', async () => {
+    const { service, clientModel } = build({ students: [] });
+    const st = await service.create({ name: 'Viviana Papalardo', phone: '11 4193-2738' } as any);
+    expect(clientModel.docs).toHaveLength(1);
+    expect(clientModel.docs[0]).toMatchObject({ fullName: 'Viviana Papalardo', phone: '11 4193-2738' });
+    expect(String(st.clientId)).toBe(String(clientModel.docs[0]._id));
+  });
+
+  it('alta sin cliente reutiliza el cliente de la misma persona y no confunde hermanos', async () => {
+    const yo = { _id: new Types.ObjectId(), fullName: 'Yanella Ojeda', phone: '+54 9 11 5048 6192' };
+    const hermano = { _id: new Types.ObjectId(), fullName: 'Tomás Ojeda', phone: '1150486192' };
+    const { service, clientModel } = build({ students: [], clients: [yo, hermano] });
+    const st = await service.create({ name: 'Yanella sabrina ojeda', phone: '11 5048-6192' } as any);
+    expect(clientModel.docs).toHaveLength(2);
+    expect(String(st.clientId)).toBe(String(yo._id));
+  });
+
+  it('vincula a un cliente los alumnos que no tenían (idempotente)', async () => {
+    const huerfana = student({ name: 'Viviana Papalardo', phone: '11 4193-2738' });
+    const { service, clientModel, studentModel } = build({ students: [huerfana] });
+    expect(await service.linkStudentsWithoutClient()).toEqual({ linked: 1 });
+    expect(await service.linkStudentsWithoutClient()).toEqual({ linked: 0 });
+    expect(clientModel.docs).toHaveLength(1);
+    expect(String(studentModel.docs[0].clientId)).toBe(String(clientModel.docs[0]._id));
   });
 
   it('si el cliente no existe, la venta no toca nada', async () => {

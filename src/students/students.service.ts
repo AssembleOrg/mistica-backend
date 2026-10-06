@@ -119,7 +119,11 @@ export class StudentsService implements OnApplicationBootstrap {
   }
 
   async create(dto: CreateStudentDto) {
-    const client = await this.clientFor(dto.clientId);
+    // Todo alumno es también cliente: si no eligieron uno, se busca el de la
+    // misma persona o se crea. Así se le puede cobrar en caja sin duplicarlo.
+    const client = dto.clientId
+      ? await this.clientFor(dto.clientId)
+      : await this.clientForNewStudent(dto);
     return this.studentModel.create({
       ...dto,
       clientId: client?._id,
@@ -145,6 +149,63 @@ export class StudentsService implements OnApplicationBootstrap {
     student.updatedAt = new Date();
     await student.save();
     return student;
+  }
+
+  /**
+   * Cliente de un alumno que se carga sin elegir cliente: el que tenga el
+   * mismo teléfono y el mismo nombre de pila (sólo si hay uno; dos hermanos
+   * con el teléfono de la familia no se confunden). Si no, se crea.
+   */
+  private async clientForNewStudent(dto: {
+    name: string;
+    phone?: string;
+    email?: string;
+  }): Promise<ClientDocument> {
+    const pattern = phoneTailPattern(dto.phone);
+    if (pattern) {
+      const key = firstNameKey(dto.name);
+      const same = (
+        await this.clientModel
+          .find({ deletedAt: { $exists: false }, phone: { $regex: pattern } })
+          .exec()
+      ).filter((c) => !!key && firstNameKey(c.fullName) === key);
+      if (same.length === 1) return same[0];
+    }
+    return this.clientModel.create({
+      fullName: dto.name.trim(),
+      phone: dto.phone?.trim() || undefined,
+      email: dto.email?.trim().toLowerCase() || undefined,
+      notes: 'Creado al dar de alta el alumno',
+    });
+  }
+
+  /**
+   * Vincula a un cliente los alumnos que todavía no tienen (alumnos cargados
+   * antes de que todo alumno fuera también cliente). Idempotente.
+   */
+  async linkStudentsWithoutClient(): Promise<{ linked: number }> {
+    const orphans = await this.studentModel
+      .find({ deletedAt: { $exists: false }, clientId: { $exists: false } })
+      .select('name phone email')
+      .lean();
+    for (const st of orphans) {
+      const client = await this.clientForNewStudent({
+        name: st.name,
+        phone: st.phone,
+        email: st.email,
+      });
+      await this.studentModel.updateOne(
+        { _id: st._id },
+        {
+          $set: {
+            clientId: client._id,
+            clientName: client.fullName,
+            updatedAt: new Date(),
+          },
+        },
+      );
+    }
+    return { linked: orphans.length };
   }
 
   private async clientFor(id?: string) {

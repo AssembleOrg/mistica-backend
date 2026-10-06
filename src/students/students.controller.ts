@@ -196,6 +196,15 @@ export class StudentsController {
     return this.service.adminProfile(id);
   }
 
+  @Post('link-clients')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Vincular a un cliente los alumnos que no tienen (idempotente)',
+  })
+  linkClients() {
+    return this.service.linkStudentsWithoutClient();
+  }
+
   @Post()
   @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Crear alumno' })
