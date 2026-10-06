@@ -11,6 +11,7 @@ import { Model, Types } from 'mongoose';
 import { Cron } from '@nestjs/schedule';
 import { DateTime } from 'luxon';
 import { envConfig } from '../config/env.config';
+import { phoneTailPattern } from '../common/utils/phone';
 import { Student, StudentDocument } from '../common/schemas/student.schema';
 import { Client, ClientDocument } from '../common/schemas/client.schema';
 import {
@@ -913,11 +914,7 @@ export class StudentsService implements OnApplicationBootstrap {
    * que la caja muestre qué se le va a marcar paga.
    */
   async feeStatusOfClient(clientId: string) {
-    if (!Types.ObjectId.isValid(clientId)) return null;
-    const student = await this.studentModel
-      .findOne({ clientId, deletedAt: { $exists: false } })
-      .select('name paymentDay monthlyFee isActive')
-      .lean();
+    const student = await this.studentOfClient(clientId);
     if (!student) return null;
     const pending = await this.paymentModel
       .find({
@@ -958,10 +955,11 @@ export class StudentsService implements OnApplicationBootstrap {
   }): Promise<number> {
     try {
       if (!input.units.length || !Types.ObjectId.isValid(input.clientId)) return 0;
-      const student = await this.studentModel
-        .findOne({ clientId: input.clientId, deletedAt: { $exists: false } })
-        .select('_id paymentDay monthlyFee')
-        .lean();
+      const student = await this.studentForFeeSale(
+        input.clientId,
+        input.saleNumber,
+        input.units[0] ?? 0,
+      );
       if (!student) return 0;
       const now = new Date();
       const note = `Cobrada en caja · venta ${input.saleNumber}`;
@@ -1033,6 +1031,98 @@ export class StudentsService implements OnApplicationBootstrap {
       );
       return 0;
     }
+  }
+
+  /**
+   * Ficha de alumno de un cliente: la vinculada a ese cliente o, si no hay, la
+   * de la misma persona cargada dos veces como cliente (mismo teléfono y mismo
+   * nombre de pila; si hay más de una, no adivina). Con `link`, la que no
+   * tenía cliente queda vinculada a éste.
+   */
+  private async studentOfClient(
+    clientId: string,
+    opts: { link?: boolean } = {},
+  ): Promise<FeeStudent | null> {
+    if (!Types.ObjectId.isValid(clientId)) return null;
+    const linked = await this.studentModel
+      .findOne({ clientId, deletedAt: { $exists: false } })
+      .select('name paymentDay monthlyFee')
+      .lean();
+    if (linked) return feeStudent(linked);
+    const client = await this.clientModel
+      .findOne({ _id: clientId, deletedAt: { $exists: false } })
+      .select('fullName phone')
+      .lean();
+    const pattern = phoneTailPattern(client?.phone);
+    if (!client || !pattern) return null;
+    const twins = await this.clientModel
+      .find({
+        _id: { $ne: client._id },
+        deletedAt: { $exists: false },
+        phone: { $regex: pattern },
+      })
+      .select('_id')
+      .lean();
+    const candidates = await this.studentModel
+      .find({
+        deletedAt: { $exists: false },
+        $or: [
+          { phone: { $regex: pattern } },
+          ...(twins.length ? [{ clientId: { $in: twins.map((t) => t._id) } }] : []),
+        ],
+      })
+      .select('name paymentDay monthlyFee clientId')
+      .lean();
+    const key = firstNameKey(client.fullName);
+    const same = candidates.filter((s) => !!key && firstNameKey(s.name) === key);
+    if (same.length !== 1) return null;
+    const [student] = same;
+    if (opts.link && !student.clientId) {
+      await this.studentModel.updateOne(
+        { _id: student._id },
+        { $set: { clientId: client._id, clientName: client.fullName } },
+      );
+    }
+    return feeStudent(student);
+  }
+
+  /**
+   * Alumno al que se le marca la cuota cobrada en una venta. Si el cliente
+   * todavía no es alumno, se lo da de alta con sus datos (lo cobrado queda
+   * como su cuota mensual) y se avisa para que le asignen su grupo.
+   */
+  private async studentForFeeSale(
+    clientId: string,
+    saleNumber: string,
+    fee: number,
+  ): Promise<FeeStudent | null> {
+    const found = await this.studentOfClient(clientId, { link: true });
+    if (found) return found;
+    const client = await this.clientModel
+      .findOne({ _id: clientId, deletedAt: { $exists: false } })
+      .select('fullName phone email')
+      .lean();
+    if (!client) return null;
+    const created = await this.studentModel.create({
+      name: client.fullName,
+      phone: client.phone || undefined,
+      email: client.email || undefined,
+      clientId: client._id,
+      clientName: client.fullName,
+      ...(fee > 0 && { monthlyFee: round2(fee) }),
+      joinedAt: new Date(),
+    });
+    this.logger.log(`Alumno dado de alta desde la venta ${saleNumber}: ${client.fullName}`);
+    try {
+      await this.inAppNotifications.create({
+        type: 'INFO',
+        title: `Alumno nuevo: ${client.fullName}`,
+        body: `Se dio de alta al cobrarle la cuota (venta ${saleNumber}). Asignale su grupo en Alumnos.`,
+      });
+    } catch (e) {
+      this.logger.warn(`No se pudo avisar del alumno nuevo: ${String(e)}`);
+    }
+    return feeStudent(created);
   }
 
   // ── Pieza del mes ────────────────────────────────────────────────────────
@@ -1747,6 +1837,38 @@ const MESES_ES = [
 ];
 
 /** 'YYYY-MM' del mes en curso (hora de Argentina). */
+/** Alumno con lo justo para cobrarle la cuota. */
+type FeeStudent = {
+  _id: Types.ObjectId;
+  name: string;
+  paymentDay?: number;
+  monthlyFee?: number;
+};
+
+function feeStudent(s: {
+  _id: unknown;
+  name: string;
+  paymentDay?: number;
+  monthlyFee?: number;
+}): FeeStudent {
+  return {
+    _id: s._id as Types.ObjectId,
+    name: s.name,
+    paymentDay: s.paymentDay,
+    monthlyFee: s.monthlyFee,
+  };
+}
+
+/** Nombre de pila sin tildes ni mayúsculas ("Andrea Tau" → "andrea"). */
+function firstNameKey(name?: string): string {
+  return (name ?? '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)[0];
+}
+
 /** Sufijo de la cuota que quedó pendiente por el saldo de un pago parcial. */
 const BALANCE_SUFFIX = / · saldo$/;
 

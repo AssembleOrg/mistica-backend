@@ -898,18 +898,23 @@ export class SalesService implements OnApplicationBootstrap {
         itemsWithProduct.length > 0 &&
         !(onAccount && balanceDue > 0.01)
       ) {
-        const feeProducts = await this.productModel
-          .find({
-            _id: { $in: itemsWithProduct.map((i) => i.productId) },
-            studentFee: true,
-          })
-          .select('_id')
-          .lean();
-        const feeIds = new Set([
-          ...feeProducts.map((p) => String(p._id)),
-          // Elegidos en la venta ("esta línea es su cuota").
-          ...(createSaleDto.studentFeeProductIds ?? []),
-        ]);
+        // Lo elegido en la venta ("esta línea es su cuota") manda, aunque no
+        // sea ninguna; si no vino, los marcados como cuota en el catálogo. Si
+        // el cliente todavía no es alumno, se lo da de alta (ver el servicio).
+        const chosen = createSaleDto.studentFeeProductIds;
+        const feeIds = new Set(
+          chosen !== undefined
+            ? chosen
+            : (
+                await this.productModel
+                  .find({
+                    _id: { $in: itemsWithProduct.map((i) => i.productId) },
+                    studentFee: true,
+                  })
+                  .select('_id')
+                  .lean()
+              ).map((p) => String(p._id)),
+        );
         const units = itemsWithProduct
           .filter((i) => feeIds.has(i.productId!.toString()))
           .flatMap((i) =>

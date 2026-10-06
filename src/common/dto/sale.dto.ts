@@ -253,7 +253,7 @@ export class CreateSaleDto {
   @ApiPropertyOptional({
     type: [String],
     description:
-      'Productos del carrito que son la cuota del alumno (el cliente): cada unidad paga su cuota del mes. Se suman a los marcados como cuota en el catálogo.',
+      'Productos del carrito que son la cuota del alumno (el cliente): cada unidad paga su cuota del mes. Si viene (aunque vacío) reemplaza a los marcados como cuota en el catálogo. Si el cliente no es alumno, se lo da de alta.',
   })
   @IsOptional()
   @IsArray()

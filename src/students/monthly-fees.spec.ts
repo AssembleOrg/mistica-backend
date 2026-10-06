@@ -3,17 +3,21 @@ import { StudentsService } from './students.service';
 
 /**
  * Modelo Mongoose falso, en memoria, con lo justo que usan las cuotas
- * mensuales: filtros por igualdad, $exists, $in, $gte/$lt y regex.
+ * mensuales: filtros por igualdad, $or, $exists, $in, $ne, $regex, $gte/$lt
+ * y regex.
  */
 type Doc = Record<string, any> & { _id: Types.ObjectId };
 
 function matches(doc: Doc, filter: Record<string, any>): boolean {
   return Object.entries(filter).every(([key, cond]) => {
+    if (key === '$or') return (cond as Record<string, any>[]).some((f) => matches(doc, f));
     const value = doc[key];
     if (cond instanceof RegExp) return typeof value === 'string' && cond.test(value);
     if (cond && typeof cond === 'object' && !(cond instanceof Types.ObjectId)) {
       if ('$exists' in cond) return cond.$exists ? value !== undefined : value === undefined;
       if ('$in' in cond) return cond.$in.map(String).includes(String(value));
+      if ('$ne' in cond) return String(value) !== String(cond.$ne);
+      if ('$regex' in cond) return typeof value === 'string' && new RegExp(cond.$regex).test(value);
       if ('$gte' in cond || '$lt' in cond) {
         return (
           value instanceof Date &&
@@ -58,6 +62,11 @@ function fakeModel(initial: Doc[] = []) {
       };
       return q;
     },
+    updateOne: async (f: Record<string, any>, u: { $set?: Record<string, any> }) => {
+      const d = docs.find((x) => matches(x, f));
+      if (d && u.$set) Object.assign(d, u.$set);
+      return { modifiedCount: d ? 1 : 0 };
+    },
     findById: (id: unknown) => ({
       exec: async () => {
         const d = docs.find((x) => String(x._id) === String(id));
@@ -82,12 +91,15 @@ function fakeModel(initial: Doc[] = []) {
 function build({
   students,
   payments = [],
+  clients = [],
 }: {
   students: Doc[];
   payments?: Doc[];
+  clients?: Doc[];
 }) {
   const studentModel = fakeModel(students);
   const paymentModel = fakeModel(payments);
+  const clientModel = fakeModel(clients);
   const groupModel = fakeModel([
     {
       _id: new Types.ObjectId(),
@@ -99,7 +111,7 @@ function build({
   const none = fakeModel();
   const service = new StudentsService(
     studentModel as any,
-    none as any,
+    clientModel as any,
     paymentModel as any,
     none as any,
     groupModel as any,
@@ -113,7 +125,7 @@ function build({
     {} as any,
     {} as any,
   );
-  return { service, paymentModel };
+  return { service, paymentModel, studentModel };
 }
 
 const student = (extra: Record<string, any> = {}): Doc => ({
@@ -274,7 +286,56 @@ describe('Cuotas mensuales de alumnos', () => {
     ]);
   });
 
-  it('si el cliente no es alumno, la venta no toca nada', async () => {
+  it('si el cliente todavía no es alumno, lo da de alta con sus datos y le marca la cuota', async () => {
+    const client = {
+      _id: new Types.ObjectId(),
+      fullName: 'Andrea Tau',
+      email: 'andrea@example.com',
+    };
+    const { service, paymentModel, studentModel } = build({
+      students: [],
+      clients: [client],
+    });
+    const paid = await service.payFeesFromSale({
+      clientId: String(client._id),
+      saleId: String(new Types.ObjectId()),
+      saleNumber: 'V-3',
+      method: 'Transferencia',
+      units: [75000],
+    });
+    expect(paid).toBe(1);
+    expect(studentModel.docs).toHaveLength(1);
+    const alta = studentModel.docs[0];
+    expect(alta).toMatchObject({ name: 'Andrea Tau', clientName: 'Andrea Tau', monthlyFee: 75000 });
+    expect(String(alta.clientId)).toBe(String(client._id));
+    expect(paymentModel.docs).toHaveLength(1);
+    expect(paymentModel.docs[0]).toMatchObject({ status: 'PAID', amount: 75000 });
+    expect(String(paymentModel.docs[0].studentId)).toBe(String(alta._id));
+  });
+
+  it('la misma persona cargada dos veces como cliente: usa su ficha (mismo teléfono y nombre de pila)', async () => {
+    const twin = { _id: new Types.ObjectId(), fullName: 'Andrea fabiana', phone: '+54 9 11 2893 4560' };
+    const client = { _id: new Types.ObjectId(), fullName: 'Andrea Tau Fabi', phone: '11 2893-4560' };
+    const andrea = student({ name: 'Andrea fabiana', clientId: twin._id, monthlyFee: 75000 });
+    // Una hermana con el mismo teléfono (el de la familia) no se confunde.
+    const hermana = student({ name: 'Sofía Tau', phone: '1128934560' });
+    const { service, paymentModel, studentModel } = build({
+      students: [andrea, hermana],
+      clients: [twin, client],
+    });
+    expect(await service.feeStatusOfClient(String(client._id))).toMatchObject({ name: 'Andrea fabiana' });
+    const paid = await service.payFeesFromSale({
+      clientId: String(client._id),
+      saleId: String(new Types.ObjectId()),
+      saleNumber: 'V-4',
+      units: [75000],
+    });
+    expect(paid).toBe(1);
+    expect(studentModel.docs).toHaveLength(2);
+    expect(paymentModel.docs.map((p) => String(p.studentId))).toEqual([String(andrea._id)]);
+  });
+
+  it('si el cliente no existe, la venta no toca nada', async () => {
     const { service, paymentModel } = build({ students: [student()] });
     const paid = await service.payFeesFromSale({
       clientId: String(new Types.ObjectId()),
