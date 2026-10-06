@@ -445,6 +445,13 @@ export class StudentsService implements OnApplicationBootstrap {
   ) {
     if (!Types.ObjectId.isValid(dto.groupId))
       throw new BadRequestException('groupId inválido');
+    // Por adelantado dejaba a todo el grupo presente (y la prueba "usada"):
+    // para anotar a alguien que viene a probar está la clase de prueba agendada.
+    if (dto.date > todayKey()) {
+      throw new BadRequestException(
+        'Esa clase todavía no pasó: la asistencia se toma ese día. Para anotar a alguien que viene a probar, agendá su clase de prueba.',
+      );
+    }
     const targetGroupId = new Types.ObjectId(dto.groupId);
     const previous = await this.attendanceModel
       .findOne({ groupId: targetGroupId, dateKey: dto.date })
