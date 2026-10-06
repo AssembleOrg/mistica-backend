@@ -35,7 +35,7 @@ export class ClosedDatesController {
   // ── Admin ──
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Crear día/regla de cierre (admin)' })
   async create(@Body() dto: CreateClosedDateDto) {
@@ -44,7 +44,7 @@ export class ClosedDatesController {
 
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Listar días/reglas de cierre (admin)' })
   async list() {
@@ -53,7 +53,7 @@ export class ClosedDatesController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Eliminar día/regla de cierre (admin)' })
   async remove(@Param('id') id: string) {

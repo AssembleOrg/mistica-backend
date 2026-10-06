@@ -29,7 +29,7 @@ export class EmployeesController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @Auditory({ entity: 'Employee', action: 'CREATE' })
   @ApiOperation({ summary: 'Crear nuevo empleado' })
   @ApiResponse({ status: 201, description: 'Empleado creado exitosamente' })
@@ -68,7 +68,7 @@ export class EmployeesController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @Auditory({ entity: 'Employee', action: 'UPDATE' })
   @ApiOperation({ summary: 'Actualizar empleado' })
   @ApiResponse({ status: 200, description: 'Empleado actualizado exitosamente' })

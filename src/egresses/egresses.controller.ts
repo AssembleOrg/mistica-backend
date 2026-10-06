@@ -69,6 +69,9 @@ export class EgressesController {
   // ── Categorías (antes de ':id' para que la ruta no se lo trague) ──
 
   @Get('categories')
+  // El egreso de caja se carga desde Ventas: quien tiene Ventas elige la
+  // categoría aunque no vea Finanzas.
+  @AllowedViews('finances', 'sales')
   @ApiOperation({ summary: 'Listar categorías de egreso' })
   async listCategories(@Query('includeInactive') includeInactive?: string) {
     return this.egressesService.listCategories(includeInactive === 'true');

@@ -41,12 +41,9 @@ export class GroupsController {
   constructor(private readonly service: GroupsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Listar grupos (profesor: sólo los suyos)' })
-  list(
-    @Req() req: AuthRequest,
-    @Query('includeInactive') includeInactive?: string,
-  ) {
-    return this.service.list(req.user, includeInactive === 'true');
+  @ApiOperation({ summary: 'Listar grupos' })
+  list(@Query('includeInactive') includeInactive?: string) {
+    return this.service.list(includeInactive === 'true');
   }
 
   @Get('agenda')
@@ -60,8 +57,8 @@ export class GroupsController {
 
   @Get('of-student/:studentId')
   @ApiOperation({ summary: 'Grupos en los que cursa un alumno' })
-  ofStudent(@Param('studentId') studentId: string, @Req() req: AuthRequest) {
-    return this.service.groupsOfStudent(studentId, req.user);
+  ofStudent(@Param('studentId') studentId: string) {
+    return this.service.groupsOfStudent(studentId);
   }
 
   @Post()
@@ -73,7 +70,7 @@ export class GroupsController {
   // Antes de ':id' para que "order" no se tome como id.
   @Patch('order')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Guardar el orden del listado de grupos (admin)' })
   reorder(@Body() dto: ReorderGroupsDto) {
     return this.service.reorder(dto.ids);

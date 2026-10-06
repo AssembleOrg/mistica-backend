@@ -36,7 +36,7 @@ export class ProductsController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @Auditory({ entity: 'Product', action: 'CREATE' })
   @ApiOperation({ summary: 'Crear nuevo producto' })
   @ApiResponse({ status: 201, description: 'Producto creado exitosamente' })
@@ -48,7 +48,7 @@ export class ProductsController {
 
   @Post('bulk-update')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @Auditory({ entity: 'Product', action: 'BULK_UPDATE' })
   @ApiOperation({
     summary: 'Actualización masiva por código de barras',
@@ -122,7 +122,7 @@ export class ProductsController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @Auditory({ entity: 'Product', action: 'UPDATE' })
   @ApiOperation({ summary: 'Actualizar producto' })
   @ApiResponse({ status: 200, description: 'Producto actualizado exitosamente' })
@@ -138,7 +138,7 @@ export class ProductsController {
 
   @Patch(':id/stock/add')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @Auditory({ entity: 'Product', action: 'UPDATE_STOCK' })
   @ApiOperation({ summary: 'Agregar stock al producto' })
   @ApiResponse({ status: 200, description: 'Stock actualizado exitosamente' })

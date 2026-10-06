@@ -32,7 +32,12 @@ export class InAppNotificationsService {
   async list(user: Recipient, unreadOnly = false) {
     const audience: Record<string, unknown>[] = [
       { targetUserIds: new Types.ObjectId(user.userId) },
-      { targetUserIds: { $size: 0 }, visibleToRoles: user.role },
+      {
+        targetUserIds: { $size: 0 },
+        // El encargado ve los avisos de gestión (comprobantes, cuotas) del admin.
+        visibleToRoles:
+          user.role === 'manager' ? { $in: ['manager', 'admin'] } : user.role,
+      },
     ];
     // Notificaciones creadas antes de introducir audiencias: eran de administración.
     if (user.role === 'admin') audience.push({ targetUserIds: { $exists: false }, visibleToRoles: { $exists: false } });

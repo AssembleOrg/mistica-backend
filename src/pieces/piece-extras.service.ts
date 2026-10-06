@@ -34,7 +34,7 @@ export class PieceExtrasService {
   ) {}
 
   private view(x: PieceExtraDocument) {
-    return { id: String(x._id), name: x.name, amount: x.amount };
+    return { id: String(x._id), name: x.name, amount: x.amount, pair: !!x.pair };
   }
 
   async list() {
@@ -57,20 +57,22 @@ export class PieceExtrasService {
     return new Map(rows.map((x) => [String(x._id), this.view(x)]));
   }
 
-  async create(name: string, amount: number) {
+  async create(name: string, amount: number, pair?: boolean) {
     const clean = name.trim();
     await this.assertFree(clean);
-    return this.view(await this.extraModel.create({ name: clean, amount }));
+    return this.view(
+      await this.extraModel.create({ name: clean, amount, ...(pair && { pair }) }),
+    );
   }
 
-  async update(id: string, name: string, amount: number) {
+  async update(id: string, name: string, amount: number, pair?: boolean) {
     const clean = name.trim();
     this.assertId(id);
     await this.assertFree(clean, id);
     const x = await this.extraModel
       .findOneAndUpdate(
         { _id: id, deletedAt: { $exists: false } },
-        { $set: { name: clean, amount } },
+        { $set: { name: clean, amount, ...(pair !== undefined && { pair }) } },
         { new: true },
       )
       .exec();

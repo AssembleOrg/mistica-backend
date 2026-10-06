@@ -28,7 +28,7 @@ import {
 } from '../common/dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { envConfig } from '../config/env.config';
-import { UserRole } from '../common/enums/user-role.enum';
+import { canManage } from '../common/enums/user-role.enum';
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -202,6 +202,24 @@ export class PiecesService implements OnModuleInit {
       );
     }
 
+    // 2x1: las dos piezas van en la misma ficha (una paleta), con el
+    // adicional cobrado una vez.
+    for (const entry of dto.entries) {
+      const extra = entry.extraId ? catalog.get(entry.extraId) : undefined;
+      if (extra?.pair && !entry.pieceType2?.trim()) {
+        throw new BadRequestException(
+          `${extra.name}: elegí las dos piezas de ${entry.personName.trim()}.`,
+        );
+      }
+    }
+    const pieceName = (entry: { extraId?: string; pieceType: string; pieceType2?: string }) => {
+      const pair = entry.extraId ? catalog.get(entry.extraId)?.pair : false;
+      const second = entry.pieceType2?.trim();
+      return pair && second
+        ? `${entry.pieceType.trim()} + ${second}`
+        : entry.pieceType.trim();
+    };
+
     const professor = await this.professors.ofUser(actor?.id);
     const registeredByName = await this.registrant(dto.registeredBy, actor);
     const documents = dto.entries.map((entry) => ({
@@ -216,7 +234,7 @@ export class PiecesService implements OnModuleInit {
       status: PieceStatus.PENDIENTE,
       personName: entry.personName.trim(),
       signature: entry.signature.trim(),
-      pieceType: entry.pieceType.trim(),
+      pieceType: pieceName(entry),
       colorsUsed: entry.colorsUsed.trim(),
       registeredByName,
       ...(entry.extraId && {
@@ -405,7 +423,7 @@ export class PiecesService implements OnModuleInit {
     });
     if (!piece) throw new NotFoundException('Pieza no encontrada');
 
-    if (actor?.role !== UserRole.ADMIN) {
+    if (!canManage(actor?.role)) {
       const changedFields = Object.keys(dto).filter(
         (key) => dto[key as keyof UpdatePieceDto] !== undefined,
       );

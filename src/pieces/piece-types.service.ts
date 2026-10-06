@@ -10,6 +10,10 @@ import {
   PieceType,
   PieceTypeDocument,
 } from '../common/schemas/piece-type.schema';
+import {
+  PieceExtra,
+  PieceExtraDocument,
+} from '../common/schemas/piece-extra.schema';
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -26,10 +30,16 @@ export class PieceTypesService {
     @InjectModel(PieceType.name)
     private readonly typeModel: Model<PieceTypeDocument>,
     @InjectModel('Piece') private readonly pieceModel: Model<PieceDocument>,
+    @InjectModel(PieceExtra.name)
+    private readonly extraModel: Model<PieceExtraDocument>,
   ) {}
 
   private view(t: PieceTypeDocument) {
-    return { id: String(t._id), name: t.name };
+    return {
+      id: String(t._id),
+      name: t.name,
+      extraId: t.extraId ? String(t.extraId) : undefined,
+    };
   }
 
   async list() {
@@ -42,20 +52,31 @@ export class PieceTypesService {
     return rows.map((t) => this.view(t));
   }
 
-  async create(name: string) {
+  /** `extraId`: categoría ('' la quita; undefined no la toca). */
+  async create(name: string, extraId?: string) {
     const clean = name.trim();
     await this.assertFree(clean);
-    return this.view(await this.typeModel.create({ name: clean }));
+    const category = await this.category(extraId);
+    return this.view(
+      await this.typeModel.create({
+        name: clean,
+        ...(category && { extraId: category }),
+      }),
+    );
   }
 
-  async update(id: string, name: string) {
+  async update(id: string, name: string, extraId?: string) {
     const clean = name.trim();
     this.assertId(id);
     await this.assertFree(clean, id);
+    const category = await this.category(extraId);
     const t = await this.typeModel
       .findOneAndUpdate(
         { _id: id, deletedAt: { $exists: false } },
-        { $set: { name: clean } },
+        {
+          $set: { name: clean, ...(category && { extraId: category }) },
+          ...(extraId === '' && { $unset: { extraId: 1 } }),
+        },
         { new: true },
       )
       .exec();
@@ -77,6 +98,20 @@ export class PieceTypesService {
 
   private assertId(id: string) {
     if (!Types.ObjectId.isValid(id)) throw new BadRequestException('id inválido');
+  }
+
+  /** La categoría tiene que ser un adicional vigente del catálogo. */
+  private async category(extraId?: string): Promise<Types.ObjectId | null> {
+    if (!extraId) return null;
+    this.assertId(extraId);
+    const exists = await this.extraModel.exists({
+      _id: extraId,
+      deletedAt: { $exists: false },
+    });
+    if (!exists) {
+      throw new BadRequestException('Esa categoría ya no existe. Elegí otra.');
+    }
+    return new Types.ObjectId(extraId);
   }
 
   /** Sin repetidos (ignora mayúsculas y espacios de los costados). */

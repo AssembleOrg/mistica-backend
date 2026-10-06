@@ -8,6 +8,8 @@ import {
   Delete,
   Query,
   UseGuards,
+  Req,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { SalesService } from './sales.service';
@@ -18,6 +20,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Auditory, AllowedViews } from '../common/decorators';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
+import { SaleStatus } from '../common/enums';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 @ApiTags('Ventas')
@@ -198,7 +201,7 @@ export class SalesController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @Auditory({ entity: 'Sale', action: 'UPDATE' })
   @ApiOperation({ summary: 'Actualizar venta' })
   @ApiParam({ name: 'id', description: 'ID de la venta' })
@@ -208,7 +211,15 @@ export class SalesController {
   async update(
     @Param('id') id: string,
     @Body() updateSaleDto: UpdateSaleDto,
+    @Req() req: { user?: { role?: string } },
   ): Promise<{ success: boolean; message: string; data: Sale }> {
+    // El encargado corrige ventas; anularlas queda para el admin.
+    if (
+      updateSaleDto.status === SaleStatus.CANCELLED &&
+      req.user?.role !== UserRole.ADMIN
+    ) {
+      throw new ForbiddenException('Anular una venta lo hace el admin.');
+    }
     const sale = await this.salesService.update(id, updateSaleDto);
     return {
       success: true,

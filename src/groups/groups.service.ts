@@ -34,7 +34,11 @@ function forList<T extends GroupRow>(rows: T[]) {
     .sort(byListOrder)
     .map((g) => ({ ...g, hasMonthlyPiece: takesMonthlyPiece(g) }));
 }
-import { UserRole } from '../common/enums/user-role.enum';
+import { UserRole, canManage } from '../common/enums/user-role.enum';
+import {
+  TrialClass,
+  TrialClassDocument,
+} from '../common/schemas/trial-class.schema';
 import { DateTime } from 'luxon';
 import { envConfig } from '../config/env.config';
 
@@ -60,10 +64,13 @@ export class GroupsService {
     private readonly studentModel: Model<StudentDocument>,
     @InjectModel(Client.name)
     private readonly clientModel: Model<ClientDocument>,
+    @InjectModel(TrialClass.name)
+    private readonly trialModel: Model<TrialClassDocument>,
   ) {}
 
+  /** Admin o encargado: gestionan todos los grupos. */
   private isAdmin(actor?: Actor): boolean {
-    return actor?.role === UserRole.ADMIN;
+    return canManage(actor?.role);
   }
 
   /** Profesor vinculado a la cuenta que llama (o null si no es profesor). */
@@ -74,16 +81,14 @@ export class GroupsService {
       .exec();
   }
 
-  async list(actor?: Actor, includeInactive = false) {
+  /**
+   * Todos los grupos: cualquier cuenta con la vista los ve (las profes y la
+   * compu necesitan saber quién va a cada clase). Editar sigue siendo del
+   * admin/encargado o de la profe del grupo.
+   */
+  async list(includeInactive = false) {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (!includeInactive) filter.isActive = true;
-    // Un profesor ve sólo sus grupos; el admin (o cuentas de gestión) ve todos.
-    if (!this.isAdmin(actor)) {
-      const prof = await this.professorOf(actor);
-      // Una cuenta sin profesor asociado no puede ver los grupos de otros.
-      if (!prof) return [];
-      filter.professorId = prof._id;
-    }
     return forList(await this.groupModel.find(filter).lean());
   }
 
@@ -195,23 +200,19 @@ export class GroupsService {
   }
 
   /** Grupos en los que cursa un alumno (para su ficha). */
-  async groupsOfStudent(studentId: string, actor?: Actor) {
+  async groupsOfStudent(studentId: string) {
     if (!Types.ObjectId.isValid(studentId)) return [];
     const filter: Record<string, unknown> = {
       studentIds: new Types.ObjectId(studentId),
       deletedAt: { $exists: false },
     };
-    if (!this.isAdmin(actor)) {
-      const prof = await this.professorOf(actor);
-      if (!prof) return [];
-      filter.professorId = prof._id;
-    }
     return forList(await this.groupModel.find(filter).lean());
   }
 
   /**
-   * Clases que tienen los grupos ese día, con cuántos alumnos hay anotados.
-   * Sin nombres: la usa cocina para saber cuánta gente viene al taller.
+   * Clases que tienen los grupos ese día, con cuántos alumnos hay anotados y
+   * cuántos vienen a una clase de prueba. Sin nombres: la usa cocina para
+   * saber cuánta gente viene al taller.
    */
   async dayAgenda(dateKey: string) {
     const weekday = DateTime.fromISO(dateKey, {
@@ -219,10 +220,18 @@ export class GroupsService {
     }).weekday;
     if (!Number.isFinite(weekday))
       throw new BadRequestException('date debe ser YYYY-MM-DD');
-    const groups = await this.groupModel
-      .find({ deletedAt: { $exists: false }, isActive: true })
-      .select('name schedule studentIds professorName')
-      .lean();
+    const [groups, trials] = await Promise.all([
+      this.groupModel
+        .find({ deletedAt: { $exists: false }, isActive: true })
+        .select('name schedule studentIds professorName')
+        .lean(),
+      this.trialModel.find({ date: dateKey }).select('groupId').lean(),
+    ]);
+    const trialsOf = new Map<string, number>();
+    for (const t of trials) {
+      const k = String(t.groupId);
+      trialsOf.set(k, (trialsOf.get(k) ?? 0) + 1);
+    }
     return groups
       .filter((g) => (g.schedule ?? []).some((slot) => slot.weekday === weekday))
       .map((g) => {
@@ -234,6 +243,7 @@ export class GroupsService {
           start: slot?.start ?? '',
           end: slot?.end ?? '',
           students: g.studentIds?.length ?? 0,
+          trials: trialsOf.get(String(g._id)) ?? 0,
         };
       })
       .sort((a, b) => a.start.localeCompare(b.start));

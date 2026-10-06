@@ -15,6 +15,11 @@ export class PieceExtra {
   @Prop({ required: true, min: 0 })
   amount: number;
 
+  // 2x1: se eligen DOS piezas de esta categoría y van en una sola ficha (una
+  // paleta de colores), con el adicional cobrado una vez.
+  @Prop({ type: Boolean })
+  pair?: boolean;
+
   @Prop({ type: Date })
   deletedAt?: Date;
 }

@@ -157,7 +157,7 @@ export class ClientsController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @Auditory({ entity: 'Client', action: 'UPDATE' })
   @ApiOperation({ summary: 'Actualizar cliente' })
   @ApiParam({ name: 'id', description: 'ID del cliente' })

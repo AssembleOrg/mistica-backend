@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { DateTime } from 'luxon';
@@ -18,7 +18,8 @@ import {
   CajaNoAbiertaException,
 } from '../common/exceptions';
 import { SaleDocument, ProductDocument, ClientDocument, PrepaidDocument } from '../common/schemas';
-import { InvoiceType, PaymentMethod, PaymentMethodFilter, PrepaidStatus, ProductKind, SaleStatus, TaxCondition } from '../common/enums';
+import { InvoiceType, PaymentMethod, PaymentMethodFilter, PrepaidStatus, ProductKind, ReservationStatus, SaleStatus, TaxCondition } from '../common/enums';
+import { Reservation, ReservationDocument } from '../common/schemas/reservation.schema';
 import { PrepaidsService } from '../prepaids/prepaids.service';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { StudentsService } from '../students/students.service';
@@ -33,12 +34,16 @@ const PAYMENT_METHOD_LABEL: Record<string, string> = {
 };
 
 @Injectable()
-export class SalesService {
+export class SalesService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(SalesService.name);
+
   constructor(
     @InjectModel('Sale') private readonly saleModel: Model<SaleDocument>,
     @InjectModel('Product') private readonly productModel: Model<ProductDocument>,
     @InjectModel('Client') private readonly clientModel: Model<ClientDocument>,
     @InjectModel('Prepaid') private readonly prepaidModel: Model<PrepaidDocument>,
+    @InjectModel(Reservation.name)
+    private readonly reservationModel: Model<ReservationDocument>,
     private readonly prepaidsService: PrepaidsService,
     private readonly cashboxService: CashboxService,
     private readonly studentsService: StudentsService,
@@ -1275,6 +1280,7 @@ export class SalesService {
     const refs: string[] = [];
 
     for (const { sale: s, amount } of items) {
+      const before = { total: s.total, balanceDue: s.balanceDue ?? 0 };
       const prevBalance = Number((s.balanceDue || 0).toFixed(2));
       const newBalance = Number(Math.max(0, prevBalance - amount).toFixed(2));
       s.discount = Number(((s.discount || 0) + amount).toFixed(2));
@@ -1290,6 +1296,12 @@ export class SalesService {
           : `Abono de $${amount.toFixed(2)} cobrado en la venta ${newSale.saleNumber}. Saldo restante: $${newBalance.toFixed(2)}.`;
       s.notes = s.notes ? `${s.notes}\n${note}` : note;
       await s.save();
+      // El total baja sólo por cómo se registra el abono: a la reserva le
+      // importa el saldo.
+      await this.syncLinkedReservation(s._id as Types.ObjectId, before, {
+        total: s.total,
+        balanceDue: s.balanceDue ?? 0,
+      });
       refs.push(`${s.saleNumber} ($${amount.toFixed(2)})`);
     }
 
@@ -1353,6 +1365,7 @@ export class SalesService {
       throw new CajaNoAbiertaException();
     }
 
+    const before = { total: sale.total, balanceDue: sale.balanceDue ?? 0 };
     const newLines = this.buildSalePayments(dto.payments);
     // Combinar pagos por método: si la venta ya tiene CASH y el nuevo pago
     // también es CASH, sumamos los amounts y dejamos createdAt = now en el
@@ -1390,6 +1403,10 @@ export class SalesService {
     }
 
     await sale.save();
+    await this.syncLinkedReservation(sale._id as Types.ObjectId, before, {
+      total: sale.total,
+      balanceDue: sale.balanceDue ?? 0,
+    });
     return this.mapToSaleResponse(sale);
   }
 
@@ -1596,7 +1613,10 @@ export class SalesService {
             );
           }
           updateData.balanceDue = Number((totalForPayments - sum).toFixed(2));
-          updateData.status = SaleStatus.PENDING;
+          // Con saldo queda PARTIAL, igual que al crearla. PENDING con saldo es
+          // lo que el cierre de caja salda como descuento: la deuda se perdía.
+          updateData.status =
+            updateData.balanceDue > 0.01 ? SaleStatus.PARTIAL : SaleStatus.PENDING;
         } else {
           // Venta normal: se salda con lo cobrado. Si Σ pagos difiere del total,
           // el total pasa a ser lo cobrado y la diferencia se registra como
@@ -1610,6 +1630,15 @@ export class SalesService {
                 : existingSale.discount;
             updateData.discount = Number((baseDiscount + autoAdjust).toFixed(2));
             updateData.total = Number(sum.toFixed(2));
+          }
+          // Saldada con lo cobrado: no le queda saldo (si venía con seña, sigue
+          // el flujo normal y se confirma al cerrar la caja).
+          updateData.balanceDue = 0;
+          if (
+            updateSaleDto.status === undefined &&
+            existingSale.status === SaleStatus.PARTIAL
+          ) {
+            updateData.status = SaleStatus.PENDING;
           }
         }
         updateData.payments = this.buildSalePayments(updateSaleDto.payments);
@@ -1667,6 +1696,15 @@ export class SalesService {
         throw new VentaNoEncontradaException(id);
       }
 
+      if (sale.status !== SaleStatus.CANCELLED) {
+        await this.syncLinkedReservation(
+          sale._id as Types.ObjectId,
+          { total: existingSale.total, balanceDue: existingSale.balanceDue ?? 0 },
+          { total: sale.total, balanceDue: sale.balanceDue ?? 0 },
+          { total: true },
+        );
+      }
+
       // Log para confirmar que los datos de AFIP se guardaron
       if (updateData.afipCae) {
         console.log('✅ Datos de factura AFIP guardados exitosamente en la venta:', {
@@ -1689,6 +1727,126 @@ export class SalesService {
       console.error('Error updating sale:', error);
       throw new BadRequestException('Error durante la actualización de la venta');
     }
+  }
+
+  /**
+   * La reserva agendada desde una venta (o la que generó su venta) lleva su
+   * propio saldo. Lo que se cambia desde Ventas —editar los pagos, sumar un
+   * pago, cobrar el saldo dentro de otra venta— se lleva a la reserva, así la
+   * agenda no dice "Todo cobrado" con plata pendiente (ni al revés). Se
+   * traslada la diferencia y no el valor: la reserva puede deber distinto que
+   * la venta (lugares bonificados de un cumpleaños). Cuando el cambio lo
+   * origina la reserva (cobrar el saldo, adicionales), ella misma vuelve a
+   * guardar su saldo después.
+   */
+  private async syncLinkedReservation(
+    saleId: Types.ObjectId,
+    before: { total: number; balanceDue: number },
+    after: { total: number; balanceDue: number },
+    opts: { total?: boolean } = {},
+  ): Promise<void> {
+    const dBalance = Number(((after.balanceDue ?? 0) - (before.balanceDue ?? 0)).toFixed(2));
+    const dTotal = opts.total
+      ? Number(((after.total ?? 0) - (before.total ?? 0)).toFixed(2))
+      : 0;
+    if (Math.abs(dBalance) <= 0.01 && Math.abs(dTotal) <= 0.01) return;
+    try {
+      const linked = await this.reservationModel
+        .find({
+          saleId,
+          status: {
+            $in: [
+              ReservationStatus.CONFIRMED,
+              ReservationStatus.PENDING,
+              ReservationStatus.NEEDS_REVIEW,
+            ],
+          },
+        })
+        .select('balanceDue totalAmount')
+        .lean();
+      for (const r of linked) {
+        const set: Record<string, number> = {};
+        if (Math.abs(dBalance) > 0.01) {
+          set.balanceDue = Number(Math.max(0, (r.balanceDue ?? 0) + dBalance).toFixed(2));
+        }
+        if (Math.abs(dTotal) > 0.01) {
+          set.totalAmount = Number(Math.max(0, (r.totalAmount ?? 0) + dTotal).toFixed(2));
+        }
+        await this.reservationModel.updateOne({ _id: r._id }, { $set: set });
+      }
+    } catch (err) {
+      this.logger.error(`No se pudo actualizar la reserva de la venta ${String(saleId)}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Al arrancar corrige lo que dejó editar ventas con seña antes del arreglo:
+   * la venta quedaba PENDING (el cierre de caja le borraba el saldo como
+   * descuento) y su reserva no se enteraba del cambio.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    try {
+      const open = await this.cashboxService.findOpenSession();
+      if (open) {
+        const res = await this.saleModel.updateMany(
+          {
+            status: SaleStatus.PENDING,
+            balanceDue: { $gt: 0.01 },
+            deletedAt: { $exists: false },
+            createdAt: { $gte: open.openedAt },
+          },
+          { $set: { status: SaleStatus.PARTIAL } },
+        );
+        if (res.modifiedCount) {
+          this.logger.log(`Ventas con saldo pasadas a PARTIAL: ${res.modifiedCount}`);
+        }
+      }
+      await this.reconcileReservationBalances();
+    } catch (err) {
+      this.logger.error(`No se pudieron revisar los saldos al arrancar: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Reservas de los últimos 30 días en adelante cuyo saldo no coincide con el
+   * de su venta. Sólo si las dos tienen el mismo total (representan la misma
+   * plata): ahí manda la venta, que es donde quedan registrados los pagos.
+   */
+  private async reconcileReservationBalances(): Promise<number> {
+    const since = DateTime.now().minus({ days: 30 }).toJSDate();
+    const reservations = await this.reservationModel
+      .find({
+        status: ReservationStatus.CONFIRMED,
+        saleId: { $exists: true },
+        startAt: { $gte: since },
+      })
+      .select('code saleId totalAmount balanceDue')
+      .lean();
+    if (!reservations.length) return 0;
+    const sales = await this.saleModel
+      .find({
+        _id: { $in: reservations.map((r) => r.saleId) },
+        deletedAt: { $exists: false },
+        status: { $ne: SaleStatus.CANCELLED },
+      })
+      .select('total balanceDue')
+      .lean();
+    const byId = new Map(sales.map((s) => [String(s._id), s]));
+    let fixed = 0;
+    for (const r of reservations) {
+      const sale = byId.get(String(r.saleId));
+      if (!sale) continue;
+      const sameTotal = Math.abs((sale.total ?? 0) - (r.totalAmount ?? 0)) <= 0.01;
+      const balance = Number((sale.balanceDue ?? 0).toFixed(2));
+      if (!sameTotal || Math.abs(balance - (r.balanceDue ?? 0)) <= 0.01) continue;
+      await this.reservationModel.updateOne(
+        { _id: r._id },
+        { $set: { balanceDue: balance } },
+      );
+      this.logger.log(`Reserva ${r.code}: saldo ${r.balanceDue ?? 0} → ${balance} (de su venta)`);
+      fixed++;
+    }
+    return fixed;
   }
 
   async remove(id: string): Promise<void> {

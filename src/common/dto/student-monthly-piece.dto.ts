@@ -18,6 +18,22 @@ export class UpsertMonthlyPieceDto {
   @MaxLength(120)
   pieceName?: string;
 
+  @ApiPropertyOptional({
+    description:
+      "Pieza del catálogo (/pieces/types): pone el nombre y, por su categoría, el adicional. '' la desvincula.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  pieceTypeId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Adicional bonificado: no se cobra (sólo admin/encargado)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  waived?: boolean;
+
   @ApiPropertyOptional({ description: 'true = en bizcocho; false = fresca' })
   @IsOptional()
   @IsBoolean()

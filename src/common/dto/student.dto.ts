@@ -240,3 +240,78 @@ export class SaveAttendanceDto {
   @Type(() => AttendanceRecordDto)
   records: AttendanceRecordDto[];
 }
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Agendar una clase de prueba: alumno existente o una persona nueva. */
+export class ScheduleTrialDto {
+  @ApiProperty({ description: 'Grupo que viene a probar' })
+  @IsMongoId()
+  groupId: string;
+
+  @ApiProperty({ description: "Día de la clase, 'YYYY-MM-DD'" })
+  @Matches(YMD, { message: 'La fecha va en formato YYYY-MM-DD' })
+  date: string;
+
+  @ApiPropertyOptional({ description: 'Alumno ya cargado (si no, nombre y teléfono)' })
+  @IsOptional()
+  @IsMongoId()
+  studentId?: string;
+
+  @ApiPropertyOptional({ description: 'Nombre de quien viene a probar' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  name?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  phone?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  notes?: string;
+
+  @ApiPropertyOptional({
+    description: 'Quién la agenda (cuentas compartidas). Si no viene, el nombre de la cuenta.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  doneBy?: string;
+}
+
+/** Inscribir en el grupo a quien vino a probar: desde cuándo cursa y paga. */
+export class EnrollTrialDto {
+  @ApiProperty({ description: "Desde qué clase cursa y paga, 'YYYY-MM-DD'" })
+  @Matches(YMD, { message: 'La fecha va en formato YYYY-MM-DD' })
+  startDate: string;
+
+  @ApiProperty({ description: 'Día límite de pago de cada mes', minimum: 1, maximum: 31 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  paymentDay: number;
+
+  @ApiPropertyOptional({ description: 'Cuota mensual' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  monthlyFee?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Monto de la primera cuota (p. ej. el proporcional para pasar al día de pago). Si no viene, la cuota mensual.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  firstAmount?: number;
+}

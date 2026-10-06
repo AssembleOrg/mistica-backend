@@ -104,10 +104,12 @@ function build({
     none as any,
     groupModel as any,
     none as any,
-    none as any,
     regularityModel as any,
     none as any,
     none as any, // userModel
+    none as any, // pieceTypeModel
+    none as any, // pieceExtraModel
+    none as any, // trialModel
     {} as any,
     {} as any,
   );
@@ -137,6 +139,15 @@ describe('Cuotas mensuales de alumnos', () => {
     expect(fa.dueDate.toISOString()).toBe('2026-10-11T02:59:59.999Z');
     expect(fb.amount).toBe(65000);
     expect(fb.dueDate.toISOString()).toBe('2026-10-23T02:59:59.999Z');
+  });
+
+  it('quien se inscribe para arrancar el mes que viene no debe éste', async () => {
+    const proximo = student({ joinedAt: new Date('2026-11-04T12:00:00-03:00') });
+    const este = student({ joinedAt: new Date('2026-10-14T12:00:00-03:00') });
+    const { service, paymentModel } = build({ students: [proximo, este] });
+
+    expect(await service.ensureMonthlyFees(OCT_1)).toBe(1);
+    expect(paymentModel.docs.map((p) => String(p.studentId))).toEqual([String(este._id)]);
   });
 
   it('es idempotente y respeta una cuota paga cargada a mano en el mes', async () => {

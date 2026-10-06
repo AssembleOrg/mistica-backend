@@ -31,7 +31,7 @@ import { PieceExtrasService } from './piece-extras.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { UserRole } from '../common/enums/user-role.enum';
+import { UserRole, canManage } from '../common/enums/user-role.enum';
 import { Public, AllowedViews } from '../common/decorators';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 import { envConfig } from '../config/env.config';
@@ -83,7 +83,7 @@ export class PiecesController {
 
   @Patch('statuses')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Intentar reemplazar estados (flujo fijo)' })
   setStatuses(@Body() dto: SetPieceStatusesDto) {
     return this.piecesService.setStatusConfig(dto.statuses);
@@ -91,6 +91,8 @@ export class PiecesController {
 
   // Catálogo de piezas para el selector de "Pieza elegida".
   @Get('types')
+  // También lo usa la pieza del mes de los alumnos (y Producción la lee).
+  @AllowedViews('reservas:piezas', 'alumnos', 'produccion')
   @ApiOperation({ summary: 'Catálogo de piezas (taza, bowl, plato…)' })
   listTypes() {
     return this.pieceTypes.list();
@@ -98,14 +100,26 @@ export class PiecesController {
 
   @Post('types')
   @ApiOperation({ summary: 'Agregar una pieza al catálogo' })
-  createType(@Body() dto: SavePieceTypeDto) {
-    return this.pieceTypes.create(dto.name);
+  createType(@Body() dto: SavePieceTypeDto, @Req() req: AuthRequest) {
+    // La categoría define el adicional que se cobra: la pone admin/encargado.
+    return this.pieceTypes.create(
+      dto.name,
+      canManage(req.user?.role) ? dto.extraId : undefined,
+    );
   }
 
   @Patch('types/:id')
   @ApiOperation({ summary: 'Renombrar una pieza del catálogo' })
-  updateType(@Param('id') id: string, @Body() dto: SavePieceTypeDto) {
-    return this.pieceTypes.update(id, dto.name);
+  updateType(
+    @Param('id') id: string,
+    @Body() dto: SavePieceTypeDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.pieceTypes.update(
+      id,
+      dto.name,
+      canManage(req.user?.role) ? dto.extraId : undefined,
+    );
   }
 
   @Delete('types/:id')
@@ -119,6 +133,7 @@ export class PiecesController {
   // Adicionales de pieza (Incluida, Estándar, Premium…): los ve quien carga
   // fichas; los precios los toca sólo el admin porque impactan en la reserva.
   @Get('extras')
+  @AllowedViews('reservas:piezas', 'alumnos', 'produccion')
   @ApiOperation({ summary: 'Catálogo de adicionales de pieza' })
   listExtras() {
     return this.pieceExtras.list();
@@ -126,23 +141,23 @@ export class PiecesController {
 
   @Post('extras')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Agregar un adicional de pieza' })
   createExtra(@Body() dto: SavePieceExtraDto) {
-    return this.pieceExtras.create(dto.name, dto.amount);
+    return this.pieceExtras.create(dto.name, dto.amount, dto.pair);
   }
 
   @Patch('extras/:id')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Editar título o monto de un adicional' })
   updateExtra(@Param('id') id: string, @Body() dto: SavePieceExtraDto) {
-    return this.pieceExtras.update(id, dto.name, dto.amount);
+    return this.pieceExtras.update(id, dto.name, dto.amount, dto.pair);
   }
 
   @Delete('extras/:id')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Quitar un adicional (lo ya cargado en reservas no cambia)',
   })
@@ -197,7 +212,7 @@ export class PiecesController {
 
   @Post(':id/notify-ready')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Enviar manualmente el aviso de retiro' })
   notifyReady(@Param('id') id: string) {
     return this.piecesService.notifyReadyByAdmin(id);

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TrialClass, TrialClassSchema } from '../common/schemas/trial-class.schema';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Group, GroupSchema } from '../common/schemas/group.schema';
 import {
@@ -18,6 +19,7 @@ import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
       { name: Professor.name, schema: ProfessorSchema },
       { name: Student.name, schema: StudentSchema },
       { name: Client.name, schema: ClientSchema },
+      { name: TrialClass.name, schema: TrialClassSchema },
     ]),
   ],
   controllers: [GroupsController],

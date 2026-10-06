@@ -27,11 +27,7 @@ import {
   takesMonthlyPiece,
 } from '../common/schemas/group.schema';
 import { Piece, PieceDocument } from '../common/schemas/piece.schema';
-import {
-  Professor,
-  ProfessorDocument,
-} from '../common/schemas/professor.schema';
-import { UserRole } from '../common/enums/user-role.enum';
+import { canManage } from '../common/enums/user-role.enum';
 import {
   StudentRegularityEvent,
   StudentRegularityEventDocument,
@@ -42,13 +38,27 @@ import {
 } from '../common/schemas/student-monthly-piece.schema';
 import { UpsertMonthlyPieceDto } from '../common/dto/student-monthly-piece.dto';
 import { User, UserDocument } from '../common/schemas/user.schema';
+import {
+  PieceType,
+  PieceTypeDocument,
+} from '../common/schemas/piece-type.schema';
+import {
+  PieceExtra,
+  PieceExtraDocument,
+} from '../common/schemas/piece-extra.schema';
+import {
+  TrialClass,
+  TrialClassDocument,
+} from '../common/schemas/trial-class.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InAppNotificationsService } from '../in-app-notifications/in-app-notifications.service';
 import {
   CreateStudentDto,
   CollectStudentPaymentDto,
   CreateStudentPaymentDto,
+  EnrollTrialDto,
   SaveAttendanceDto,
+  ScheduleTrialDto,
   UpdateStudentDto,
   UpdateStudentPaymentDto,
 } from '../common/dto/student.dto';
@@ -74,14 +84,18 @@ export class StudentsService implements OnApplicationBootstrap {
     private readonly groupModel: Model<GroupDocument>,
     @InjectModel(Piece.name)
     private readonly pieceModel: Model<PieceDocument>,
-    @InjectModel(Professor.name)
-    private readonly professorModel: Model<ProfessorDocument>,
     @InjectModel(StudentRegularityEvent.name)
     private readonly regularityEventModel: Model<StudentRegularityEventDocument>,
     @InjectModel(StudentMonthlyPiece.name)
     private readonly monthlyPieceModel: Model<StudentMonthlyPieceDocument>,
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
+    @InjectModel(PieceType.name)
+    private readonly pieceTypeModel: Model<PieceTypeDocument>,
+    @InjectModel(PieceExtra.name)
+    private readonly pieceExtraModel: Model<PieceExtraDocument>,
+    @InjectModel(TrialClass.name)
+    private readonly trialModel: Model<TrialClassDocument>,
     private readonly notifications: NotificationsService,
     private readonly inAppNotifications: InAppNotificationsService,
   ) {}
@@ -91,23 +105,13 @@ export class StudentsService implements OnApplicationBootstrap {
   async list(actor?: { id?: string; role?: string }, includeInactive = false) {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (!includeInactive) filter.isActive = true;
-    if (actor?.role === UserRole.ADMIN) {
+    if (canManage(actor?.role)) {
       return this.studentModel.find(filter).sort({ name: 1 }).lean();
     }
-
-    const professor = await this.professorOf(actor);
-    if (!professor) return [];
-    const groupRows = await this.groupModel
-      .find({ professorId: professor._id, deletedAt: { $exists: false } })
-      .select('studentIds')
-      .lean();
-    const ids = [
-      ...new Set(groupRows.flatMap((group) => group.studentIds.map(String))),
-    ];
-    if (!ids.length) return [];
-    // El listado de profesor no incluye datos personales/administrativos.
+    // Las demás cuentas con la vista (profes, producción) ven a todos los
+    // alumnos para saber quién va a cada clase, sin datos administrativos.
     return this.studentModel
-      .find({ ...filter, _id: { $in: ids } })
+      .find(filter)
       .select('name isActive createdAt updatedAt')
       .sort({ name: 1 })
       .lean();
@@ -169,7 +173,6 @@ export class StudentsService implements OnApplicationBootstrap {
   async practicalProfile(id: string, actor?: { id?: string; role?: string }) {
     const student = await this.findOrThrow(id);
     const sid = student._id as Types.ObjectId;
-    await this.assertCanReadPractical(sid, actor);
     const [groups, recentAttendance, pieces] = await Promise.all([
       this.groupModel
         .find({ studentIds: sid, deletedAt: { $exists: false } })
@@ -441,7 +444,6 @@ export class StudentsService implements OnApplicationBootstrap {
   ) {
     if (!Types.ObjectId.isValid(dto.groupId))
       throw new BadRequestException('groupId inválido');
-    await this.assertCanManageGroup(new Types.ObjectId(dto.groupId), actor);
     const targetGroupId = new Types.ObjectId(dto.groupId);
     const previous = await this.attendanceModel
       .findOne({ groupId: targetGroupId, dateKey: dto.date })
@@ -628,7 +630,6 @@ export class StudentsService implements OnApplicationBootstrap {
   ) {
     if (!Types.ObjectId.isValid(groupId))
       throw new BadRequestException('groupId inválido');
-    await this.assertCanReadGroup(new Types.ObjectId(groupId), actor);
     return this.attendanceModel
       .find({ groupId: new Types.ObjectId(groupId) })
       .sort({ dateKey: -1 })
@@ -829,6 +830,12 @@ export class StudentsService implements OnApplicationBootstrap {
     void this.ensureMonthlyFees().catch((err) =>
       this.logger.error(`Cuotas del mes al iniciar: ${String(err)}`),
     );
+    // La pieza del mes era una por alumno y mes (índice único); ahora pueden
+    // ser varias. Se borra el índice viejo (si ya no está, no pasa nada).
+    void this.monthlyPieceModel.collection
+      .dropIndex('studentId_1_month_1')
+      .then(() => this.logger.log('Índice único de piezas del mes borrado'))
+      .catch(() => undefined);
   }
 
   /**
@@ -851,11 +858,12 @@ export class StudentsService implements OnApplicationBootstrap {
         isActive: true,
         deletedAt: { $exists: false },
       })
-      .select('name paymentDay monthlyFee')
+      .select('name paymentDay monthlyFee joinedAt')
       .lean();
     const monthStart = DateTime.fromISO(`${period}-01`, {
       zone: envConfig.timezone,
     });
+    const nextMonthStart = monthStart.plus({ months: 1 }).toJSDate();
     const [withPeriod, paidByHand] = await Promise.all([
       this.paymentModel
         .find({ period, deletedAt: { $exists: false } })
@@ -882,6 +890,9 @@ export class StudentsService implements OnApplicationBootstrap {
     );
     const docs = students
       .filter((st) => !covered.has(String(st._id)))
+      // Quien se inscribió para arrancar el mes que viene (después de su
+      // clase de prueba) todavía no debe éste.
+      .filter((st) => !st.joinedAt || st.joinedAt < nextMonthStart)
       .map((st) => ({
         studentId: st._id,
         concept: `Cuota ${monthLabelEs(period)}`,
@@ -1029,7 +1040,10 @@ export class StudentsService implements OnApplicationBootstrap {
   // planilla "coladas del mes". Lo práctico (pieza, bizcocho, entregada) lo
   // carga cualquiera con acceso al alumno; el adicional y su cobro, sólo admin.
 
-  /** Planilla del mes: todos los alumnos visibles para el actor, con su pieza. */
+  /**
+   * Planilla del mes: todos los alumnos visibles para el actor, con sus
+   * piezas (una o más) en el orden en que las pidieron.
+   */
   async monthlyPiecesOfMonth(
     month: string,
     actor?: { id?: string; role?: string },
@@ -1038,14 +1052,21 @@ export class StudentsService implements OnApplicationBootstrap {
     const students = await this.list(actor, false);
     const ids = students.map((s) => s._id as Types.ObjectId);
     const [pieces, groups] = await Promise.all([
-      this.monthlyPieceModel.find({ month, studentId: { $in: ids } }).lean(),
+      this.monthlyPieceModel
+        .find({ month, studentId: { $in: ids } })
+        .sort({ createdAt: 1 })
+        .lean(),
       this.groupModel
         .find({ studentIds: { $in: ids }, deletedAt: { $exists: false } })
         .select('name schedule studentIds hasMonthlyPiece')
         .lean(),
     ]);
     const hex = (v: unknown) => (v as Types.ObjectId).toHexString();
-    const byStudent = new Map(pieces.map((p) => [hex(p.studentId), p]));
+    const byStudent = new Map<string, typeof pieces>();
+    for (const p of pieces) {
+      const k = hex(p.studentId);
+      byStudent.set(k, [...(byStudent.get(k) ?? []), p]);
+    }
     const groupsOf = new Map<string, { name: string; schedule: unknown[] }[]>();
     for (const g of groups) {
       for (const sid of g.studentIds) {
@@ -1065,13 +1086,16 @@ export class StudentsService implements OnApplicationBootstrap {
         takes.set(k, (takes.get(k) ?? false) || t);
       }
     }
-    const isAdmin = actor?.role === UserRole.ADMIN;
+    const isAdmin = canManage(actor?.role);
+    // Sin grupo (p. ej. quien viene a una clase de prueba) tampoco: no cursa.
     return students
-      .filter((s) => takes.get(hex(s._id)) !== false)
+      .filter((s) => takes.get(hex(s._id)) === true || byStudent.has(hex(s._id)))
       .map((s) => ({
         student: { _id: hex(s._id), name: s.name },
         groups: groupsOf.get(hex(s._id)) ?? [],
-        piece: this.monthlyPieceView(byStudent.get(hex(s._id)), isAdmin),
+        pieces: (byStudent.get(hex(s._id)) ?? []).map(
+          (p) => this.monthlyPieceView(p, isAdmin)!,
+        ),
       }));
   }
 
@@ -1081,16 +1105,19 @@ export class StudentsService implements OnApplicationBootstrap {
     actor?: { id?: string; role?: string },
   ) {
     const student = await this.findOrThrow(id);
-    await this.assertCanReadPractical(student._id as Types.ObjectId, actor);
     const rows = await this.monthlyPieceModel
       .find({ studentId: student._id })
-      .sort({ month: -1 })
-      .limit(24)
+      .sort({ month: -1, createdAt: 1 })
+      .limit(36)
       .lean();
-    const isAdmin = actor?.role === UserRole.ADMIN;
+    const isAdmin = canManage(actor?.role);
     return rows.map((r) => this.monthlyPieceView(r, isAdmin));
   }
 
+  /**
+   * La pieza del mes de un alumno (la primera que pidió): la usan la ficha
+   * del alumno y la carga de fichas del grupo. Si no tiene, la crea.
+   */
   async upsertMonthlyPiece(
     id: string,
     month: string,
@@ -1099,17 +1126,359 @@ export class StudentsService implements OnApplicationBootstrap {
   ) {
     assertMonth(month);
     const student = await this.findOrThrow(id);
-    await this.assertCanReadPractical(student._id as Types.ObjectId, actor);
-    const isAdmin = actor?.role === UserRole.ADMIN;
     const current = await this.monthlyPieceModel
       .findOne({ studentId: student._id, month })
+      .sort({ createdAt: 1 })
       .lean();
+    return this.saveMonthlyPiece(student, month, current, dto, actor);
+  }
+
+  /** Otra pieza del mismo mes: puede pedir más de una (las de más llevan adicional). */
+  async addMonthlyPiece(
+    id: string,
+    month: string,
+    dto: UpsertMonthlyPieceDto,
+    actor?: { id?: string; role?: string },
+  ) {
+    assertMonth(month);
+    const student = await this.findOrThrow(id);
+    return this.saveMonthlyPiece(student, month, null, dto, actor);
+  }
+
+  /** Edita una pieza del mes puntual (cuando el alumno tiene varias). */
+  async updateMonthlyPiece(
+    pieceId: string,
+    dto: UpsertMonthlyPieceDto,
+    actor?: { id?: string; role?: string },
+  ) {
+    if (!Types.ObjectId.isValid(pieceId))
+      throw new BadRequestException('id inválido');
+    const current = await this.monthlyPieceModel.findById(pieceId).lean();
+    if (!current) throw new NotFoundException('Pieza no encontrada');
+    const student = await this.findOrThrow(String(current.studentId));
+    return this.saveMonthlyPiece(student, current.month, current, dto, actor);
+  }
+
+  /** Borra una pieza del mes. Si su adicional ya se cobró, primero se deshace el cobro. */
+  async removeMonthlyPieceById(pieceId: string) {
+    if (!Types.ObjectId.isValid(pieceId))
+      throw new BadRequestException('id inválido');
+    const row = await this.monthlyPieceModel.findById(pieceId).lean();
+    if (!row) throw new NotFoundException('Pieza no encontrada');
+    if (row.paid) {
+      throw new BadRequestException(
+        'El adicional de esta pieza ya se cobró: deshacé el cobro antes de borrarla.',
+      );
+    }
+    await this.monthlyPieceModel.deleteOne({ _id: row._id });
+    return { success: true };
+  }
+
+  // ── Clases de prueba agendadas ────────────────────────────────────────────
+
+  /**
+   * Clases de prueba entre dos fechas (por defecto, de hace un mes en
+   * adelante). Dice si vino (la asistencia marca su prueba) y si ya se
+   * inscribió. El teléfono, sólo para admin/encargado.
+   */
+  async listTrials(
+    query: { from?: string; to?: string; groupId?: string },
+    actor?: { role?: string },
+  ) {
+    const today = todayKey();
+    const from =
+      query.from || DateTime.fromISO(today).minus({ days: 30 }).toISODate()!;
+    const filter: Record<string, unknown> = {
+      date: { $gte: from, ...(query.to ? { $lte: query.to } : {}) },
+    };
+    if (query.groupId && Types.ObjectId.isValid(query.groupId)) {
+      filter.groupId = new Types.ObjectId(query.groupId);
+    }
+    const rows = await this.trialModel
+      .find(filter)
+      .sort({ date: 1, createdAt: 1 })
+      .limit(300)
+      .lean();
+    if (!rows.length) return [];
+    const [students, groups] = await Promise.all([
+      this.studentModel
+        .find({ _id: { $in: rows.map((r) => r.studentId) } })
+        .select('name phone trialGroupId trialDate')
+        .lean(),
+      this.groupModel
+        .find({ _id: { $in: rows.map((r) => r.groupId) } })
+        .select('name schedule studentIds')
+        .lean(),
+    ]);
+    const studentById = new Map(students.map((s) => [String(s._id), s]));
+    const groupById = new Map(groups.map((g) => [String(g._id), g]));
+    const withPhone = canManage(actor?.role);
+    return rows.map((r) => {
+      const s = studentById.get(String(r.studentId));
+      const g = groupById.get(String(r.groupId));
+      const slot = g?.schedule?.[0];
+      return {
+        _id: String(r._id),
+        groupId: String(r.groupId),
+        groupName: g?.name ?? 'Grupo',
+        start: slot?.start,
+        date: r.date,
+        student: {
+          _id: String(r.studentId),
+          name: s?.name ?? '—',
+          ...(withPhone && s?.phone ? { phone: s.phone } : {}),
+        },
+        notes: r.notes,
+        createdByName: r.createdByName,
+        attended:
+          !!s?.trialDate &&
+          s.trialDate === r.date &&
+          String(s.trialGroupId) === String(r.groupId),
+        enrolled:
+          !!r.enrolledAt ||
+          (g?.studentIds ?? []).some((id) => String(id) === String(r.studentId)),
+      };
+    });
+  }
+
+  async scheduleTrial(
+    dto: ScheduleTrialDto,
+    actor?: { id?: string; role?: string },
+  ) {
+    const group = await this.groupModel
+      .findOne({ _id: dto.groupId, deletedAt: { $exists: false } })
+      .lean();
+    if (!group) throw new NotFoundException('Grupo no encontrado');
+    const weekday = DateTime.fromISO(dto.date, { zone: envConfig.timezone })
+      .weekday;
+    if (!(group.schedule ?? []).some((slot) => slot.weekday === weekday)) {
+      throw new BadRequestException('Ese día el grupo no tiene clase.');
+    }
+    if (dto.date < todayKey()) {
+      throw new BadRequestException(
+        'Esa clase ya pasó: si vino, sumala desde la asistencia de ese día.',
+      );
+    }
+
+    let studentId: Types.ObjectId;
+    if (dto.studentId) {
+      const student = await this.findOrThrow(dto.studentId);
+      studentId = student._id as Types.ObjectId;
+      const enrolled = await this.groupModel
+        .findOne({ studentIds: studentId, deletedAt: { $exists: false } })
+        .select('name')
+        .lean();
+      if (enrolled) {
+        throw new BadRequestException(
+          `${student.name} ya está inscripto en ${enrolled.name}: la clase de prueba es para quien todavía no se anotó.`,
+        );
+      }
+      if (student.trialDate) {
+        const [y, m, d] = student.trialDate.split('-');
+        throw new BadRequestException(
+          `${student.name} ya usó su clase de prueba gratuita (el ${d}/${m}/${y}).`,
+        );
+      }
+    } else {
+      const name = dto.name?.trim();
+      if (!name) {
+        throw new BadRequestException('Escribí el nombre de quien viene a probar.');
+      }
+      const created = await this.create({
+        name,
+        phone: dto.phone?.trim() || undefined,
+      } as CreateStudentDto);
+      studentId = created._id as Types.ObjectId;
+    }
+
+    const pending = await this.trialModel
+      .findOne({
+        studentId,
+        date: { $gte: todayKey() },
+        enrolledAt: { $exists: false },
+      })
+      .lean();
+    if (pending) {
+      const [, m, d] = pending.date.split('-');
+      throw new BadRequestException(
+        `Ya tiene una clase de prueba agendada el ${d}/${m}.`,
+      );
+    }
+    const createdByName =
+      dto.doneBy?.trim() ||
+      (actor?.id && Types.ObjectId.isValid(actor.id)
+        ? (await this.userModel.findById(actor.id).select('name').lean())?.name
+        : undefined);
+    const trial = await this.trialModel.create({
+      groupId: group._id,
+      date: dto.date,
+      studentId,
+      notes: dto.notes?.trim() || undefined,
+      createdByName,
+    });
+    const [view] = (
+      await this.listTrials(
+        { from: dto.date, to: dto.date, groupId: String(group._id) },
+        actor,
+      )
+    ).filter((t) => t._id === String(trial._id));
+    return view;
+  }
+
+  /** Cancela una clase de prueba agendada (la persona queda cargada). */
+  async cancelTrial(trialId: string) {
+    if (!Types.ObjectId.isValid(trialId))
+      throw new BadRequestException('id inválido');
+    const trial = await this.trialModel.findById(trialId);
+    if (!trial) throw new NotFoundException('Clase de prueba no encontrada');
+    if (trial.enrolledAt) {
+      throw new BadRequestException(
+        'Ya se inscribió en el grupo: no hay prueba que cancelar.',
+      );
+    }
+    await trial.deleteOne();
+    return { success: true };
+  }
+
+  /**
+   * Quien vino a probar se queda: entra al grupo y su mes arranca en la clase
+   * que se elija (la prueba no se cobra ni cuenta). Su primera cuota vence
+   * ese día; con el proporcional, se acomoda al día de pago de siempre.
+   */
+  async enrollTrial(
+    trialId: string,
+    dto: EnrollTrialDto,
+    actor?: { id?: string },
+  ) {
+    if (!Types.ObjectId.isValid(trialId))
+      throw new BadRequestException('id inválido');
+    const trial = await this.trialModel.findById(trialId);
+    if (!trial) throw new NotFoundException('Clase de prueba no encontrada');
+    const group = await this.groupModel.findOne({
+      _id: trial.groupId,
+      deletedAt: { $exists: false },
+    });
+    if (!group) throw new NotFoundException('El grupo ya no existe');
+    if (dto.startDate < trial.date) {
+      throw new BadRequestException(
+        'La fecha de inicio no puede ser anterior a la clase de prueba.',
+      );
+    }
+    const student = await this.findOrThrow(String(trial.studentId));
+    const sid = student._id as Types.ObjectId;
+
+    if (!group.studentIds.some((id) => String(id) === String(sid))) {
+      group.studentIds.push(sid);
+      group.updatedAt = new Date();
+      await group.save();
+    }
+    const start = DateTime.fromISO(dto.startDate, { zone: envConfig.timezone });
+    student.joinedAt = start.startOf('day').toJSDate();
+    student.paymentDay = dto.paymentDay;
+    if (dto.monthlyFee !== undefined) student.monthlyFee = dto.monthlyFee;
+    student.isActive = true;
+    student.updatedAt = new Date();
+    await student.save();
+
+    // Primera cuota: el mes en que arranca, con vencimiento ese día.
+    const period = dto.startDate.slice(0, 7);
+    const covered = await this.paymentModel.exists({
+      studentId: sid,
+      period,
+      deletedAt: { $exists: false },
+    });
+    if (!covered) {
+      const amount = dto.firstAmount ?? student.monthlyFee ?? 0;
+      const proportional =
+        dto.firstAmount !== undefined && dto.firstAmount !== student.monthlyFee;
+      await this.paymentModel.create({
+        studentId: sid,
+        concept: `Cuota ${monthLabelEs(period)}${proportional ? ' (proporcional)' : ''}`,
+        amount,
+        status: 'PENDING',
+        dueDate: start.endOf('day').toJSDate(),
+        period,
+        createdById:
+          actor?.id && Types.ObjectId.isValid(actor.id) ? actor.id : undefined,
+      });
+    }
+    trial.enrolledAt = new Date();
+    await trial.save();
+    return { success: true, groupName: group.name };
+  }
+
+  private async saveMonthlyPiece(
+    student: StudentDocument,
+    month: string,
+    current: (StudentMonthlyPiece & { _id: unknown }) | null,
+    dto: UpsertMonthlyPieceDto,
+    actor?: { id?: string; role?: string },
+  ) {
+    const isAdmin = canManage(actor?.role);
     const set: Record<string, unknown> = {};
     const unset: Record<string, 1> = {};
     if (dto.pieceName !== undefined) {
       set.pieceName = dto.pieceName.trim();
-      if (set.pieceName && !current?.requestedAt) set.requestedAt = new Date();
     }
+    // Plata manual: sólo admin/encargado. Un profesor que mande estos campos
+    // los ignora (el adicional que sale del catálogo sí aplica, abajo).
+    if (isAdmin) {
+      if (dto.extraCharge !== undefined) {
+        set.extraCharge = dto.extraCharge;
+        if (dto.extraCharge) set.waived = false;
+      }
+      if (dto.extraAmount !== undefined) set.extraAmount = dto.extraAmount;
+      if (dto.waived !== undefined) {
+        if (dto.waived && current?.paid) {
+          throw new BadRequestException(
+            'El adicional ya se cobró: deshacé el cobro para bonificarlo.',
+          );
+        }
+        set.waived = dto.waived;
+      }
+    }
+    const waived = (set.waived as boolean | undefined) ?? current?.waived ?? false;
+
+    // Pieza del catálogo: el nombre y, por su categoría, el adicional (si
+    // todavía no se cobró). Sin categoría, el adicional queda como estaba.
+    if (dto.pieceTypeId !== undefined) {
+      if (!dto.pieceTypeId) {
+        unset.pieceTypeId = 1;
+        unset.category = 1;
+      } else {
+        if (!Types.ObjectId.isValid(dto.pieceTypeId))
+          throw new BadRequestException('Pieza inválida');
+        const type = await this.pieceTypeModel
+          .findOne({ _id: dto.pieceTypeId, deletedAt: { $exists: false } })
+          .lean();
+        if (!type) {
+          throw new BadRequestException('Esa pieza ya no está en el catálogo.');
+        }
+        set.pieceTypeId = type._id;
+        if (dto.pieceName === undefined) set.pieceName = type.name;
+        const category = type.extraId
+          ? await this.pieceExtraModel
+              .findOne({ _id: type.extraId, deletedAt: { $exists: false } })
+              .lean()
+          : null;
+        if (category) {
+          set.category = category.name;
+          if (!current?.paid) {
+            set.extraAmount = category.amount;
+            set.extraCharge = category.amount > 0 && !waived;
+          }
+        } else {
+          unset.category = 1;
+        }
+      }
+    }
+    if (set.waived !== undefined && set.extraCharge === undefined) {
+      // Bonificar apaga el cobro; sacar la bonificación lo vuelve a pedir.
+      const amount =
+        (set.extraAmount as number | undefined) ?? current?.extraAmount ?? 0;
+      set.extraCharge = !set.waived && amount > 0;
+    }
+    if (set.pieceName && !current?.requestedAt) set.requestedAt = new Date();
     // Fresca y bizcocho se excluyen: prender una apaga la otra.
     if (dto.bisque !== undefined) {
       set.bisque = dto.bisque;
@@ -1130,55 +1499,51 @@ export class StudentsService implements OnApplicationBootstrap {
       else unset.readyAt = 1;
     }
     if (dto.notes !== undefined) set.notes = dto.notes.trim();
-    // Plata: sólo admin. Un profesor que mande estos campos los ignora.
-    if (isAdmin) {
-      if (dto.extraCharge !== undefined) set.extraCharge = dto.extraCharge;
-      if (dto.extraAmount !== undefined) set.extraAmount = dto.extraAmount;
 
-      // Cobrar el adicional = registrar un pago del alumno (queda en su
-      // historial). Se puede deshacer 24 hs: se anula ese pago.
-      if (dto.paid === true && !current?.paid) {
-        const amount = dto.extraAmount ?? current?.extraAmount ?? 0;
-        const extra = dto.extraCharge ?? current?.extraCharge ?? false;
-        if (!extra || amount <= 0) {
-          throw new BadRequestException(
-            'Para cobrar, marcá el adicional y cargá el monto.',
-          );
-        }
-        const payment = await this.addPayment(
-          id,
-          {
-            concept: `Adicional pieza ${monthLabelEs(month)}`,
-            amount,
-            status: 'PAID',
-            method: dto.paymentMethod,
-            notes: current?.pieceName
-              ? `Pieza: ${current.pieceName}`
-              : undefined,
-          },
-          actor?.id,
+    // Cobrar el adicional = registrar un pago del alumno (queda en su
+    // historial). Se puede deshacer 24 hs: se anula ese pago.
+    if (isAdmin && dto.paid === true && !current?.paid) {
+      const amount =
+        (set.extraAmount as number | undefined) ?? current?.extraAmount ?? 0;
+      const extra =
+        (set.extraCharge as boolean | undefined) ?? current?.extraCharge ?? false;
+      if (!extra || amount <= 0) {
+        throw new BadRequestException(
+          'Para cobrar, marcá el adicional y cargá el monto.',
         );
-        set.paid = true;
-        set.paidAt = new Date();
-        set.paymentId = payment._id;
-      } else if (dto.paid === false && current?.paid) {
-        const paidAt = current.paidAt ? new Date(current.paidAt).getTime() : 0;
-        if (paidAt && Date.now() - paidAt > UNDO_PAID_MS) {
-          throw new BadRequestException(
-            'Pasaron más de 24 hs del cobro: anulalo desde los pagos del alumno.',
-          );
-        }
-        if (current.paymentId) {
-          try {
-            await this.removePayment(String(current.paymentId));
-          } catch (e) {
-            if (!(e instanceof NotFoundException)) throw e;
-          }
-        }
-        set.paid = false;
-        unset.paidAt = 1;
-        unset.paymentId = 1;
       }
+      const pieceName = (set.pieceName as string | undefined) ?? current?.pieceName;
+      const payment = await this.addPayment(
+        String(student._id),
+        {
+          concept: `Adicional pieza ${monthLabelEs(month)}`,
+          amount,
+          status: 'PAID',
+          method: dto.paymentMethod,
+          notes: pieceName ? `Pieza: ${pieceName}` : undefined,
+        },
+        actor?.id,
+      );
+      set.paid = true;
+      set.paidAt = new Date();
+      set.paymentId = payment._id;
+    } else if (isAdmin && dto.paid === false && current?.paid) {
+      const paidAt = current.paidAt ? new Date(current.paidAt).getTime() : 0;
+      if (paidAt && Date.now() - paidAt > UNDO_PAID_MS) {
+        throw new BadRequestException(
+          'Pasaron más de 24 hs del cobro: anulalo desde los pagos del alumno.',
+        );
+      }
+      if (current.paymentId) {
+        try {
+          await this.removePayment(String(current.paymentId));
+        } catch (e) {
+          if (!(e instanceof NotFoundException)) throw e;
+        }
+      }
+      set.paid = false;
+      unset.paidAt = 1;
+      unset.paymentId = 1;
     }
     if (actor?.id && Types.ObjectId.isValid(actor.id)) {
       set.updatedById = new Types.ObjectId(actor.id);
@@ -1189,22 +1554,24 @@ export class StudentsService implements OnApplicationBootstrap {
         ? (await this.userModel.findById(actor.id).select('name').lean())?.name
         : undefined);
     if (doneBy) set.updatedByName = doneBy;
-    const update: Record<string, unknown> = {
-      $set: set,
+
+    let row: (StudentMonthlyPiece & { _id: unknown }) | null;
+    if (current) {
+      const update: Record<string, unknown> = { $set: set };
+      if (Object.keys(unset).length) update.$unset = unset;
+      row = await this.monthlyPieceModel
+        .findByIdAndUpdate(current._id, update, { new: true })
+        .lean();
+    } else {
       // Fila nueva: `fresh` explícito, así no se deduce como en las viejas.
-      $setOnInsert: {
+      const created = await this.monthlyPieceModel.create({
+        fresh: false,
+        ...set,
         studentId: student._id,
         month,
-        ...(set.fresh === undefined ? { fresh: false } : {}),
-      },
-    };
-    if (Object.keys(unset).length) update.$unset = unset;
-    const row = await this.monthlyPieceModel
-      .findOneAndUpdate({ studentId: student._id, month }, update, {
-        new: true,
-        upsert: true,
-      })
-      .lean();
+      });
+      row = created.toObject() as StudentMonthlyPiece & { _id: unknown };
+    }
     if (row && !row.notifiedAt && row.pieceName && (row.fresh || row.bisque)) {
       await this.notifyProduction(student.name, row, 'new');
     } else if (
@@ -1321,13 +1688,6 @@ export class StudentsService implements OnApplicationBootstrap {
       }));
   }
 
-  async removeMonthlyPiece(id: string, month: string) {
-    assertMonth(month);
-    const student = await this.findOrThrow(id);
-    await this.monthlyPieceModel.deleteOne({ studentId: student._id, month });
-    return { success: true };
-  }
-
   private monthlyPieceView(
     r: (StudentMonthlyPiece & { _id: unknown }) | null | undefined,
     isAdmin: boolean,
@@ -1346,10 +1706,13 @@ export class StudentsService implements OnApplicationBootstrap {
       delivered: r.delivered ?? false,
       notes: r.notes,
       updatedByName: r.updatedByName,
+      pieceTypeId: r.pieceTypeId ? String(r.pieceTypeId) : undefined,
+      category: r.category,
       // El adicional y su cobro son datos administrativos.
       ...(isAdmin
         ? {
             extraCharge: r.extraCharge ?? false,
+            waived: r.waived ?? false,
             extraAmount: r.extraAmount,
             paid: r.paid ?? false,
             paidAt: r.paidAt,
@@ -1362,61 +1725,6 @@ export class StudentsService implements OnApplicationBootstrap {
           }
         : {}),
     };
-  }
-
-  private async professorOf(actor?: {
-    id?: string;
-  }): Promise<ProfessorDocument | null> {
-    if (!actor?.id || !Types.ObjectId.isValid(actor.id)) return null;
-    return this.professorModel
-      .findOne({ userId: actor.id, deletedAt: { $exists: false } })
-      .exec();
-  }
-
-  private async assertCanReadPractical(
-    studentId: Types.ObjectId,
-    actor?: { id?: string; role?: string },
-  ) {
-    if (actor?.role === UserRole.ADMIN) return;
-    const professor = await this.professorOf(actor);
-    if (!professor) {
-      throw new ForbiddenException(
-        'Tu cuenta no está vinculada a un profesor.',
-      );
-    }
-    const belongs = await this.groupModel.exists({
-      professorId: professor._id,
-      studentIds: studentId,
-      deletedAt: { $exists: false },
-    });
-    if (!belongs)
-      throw new ForbiddenException(
-        'Sólo podés consultar alumnos de tus grupos.',
-      );
-  }
-
-  private async assertCanReadGroup(
-    groupId: Types.ObjectId,
-    actor?: { id?: string; role?: string },
-  ) {
-    if (actor?.role === UserRole.ADMIN) return;
-    const professor = await this.professorOf(actor);
-    const owns =
-      professor &&
-      (await this.groupModel.exists({
-        _id: groupId,
-        professorId: professor._id,
-        deletedAt: { $exists: false },
-      }));
-    if (!owns)
-      throw new ForbiddenException('Sólo podés consultar tus propios grupos.');
-  }
-
-  private async assertCanManageGroup(
-    groupId: Types.ObjectId,
-    actor?: { id?: string; role?: string },
-  ) {
-    return this.assertCanReadGroup(groupId, actor);
   }
 }
 
@@ -1459,6 +1767,11 @@ function dueDateOf(ym: string, paymentDay?: number): Date {
   const first = DateTime.fromISO(`${ym}-01`, { zone: envConfig.timezone });
   const day = Math.min(paymentDay ?? 10, first.daysInMonth ?? 28);
   return first.set({ day }).endOf('day').toJSDate();
+}
+
+/** 'YYYY-MM-DD' de hoy (hora de Argentina). */
+function todayKey(): string {
+  return DateTime.now().setZone(envConfig.timezone).toISODate()!;
 }
 
 function monthLabelEs(ym: string): string {

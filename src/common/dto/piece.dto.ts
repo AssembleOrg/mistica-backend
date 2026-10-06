@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   ValidateNested,
   IsInt,
   IsMongoId,
@@ -46,6 +47,15 @@ export class ReservationPieceEntryDto {
   @IsOptional()
   @IsMongoId()
   extraId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Segunda pieza de un adicional 2x1: las dos van en esta ficha (una sola paleta).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  pieceType2?: string;
 }
 
 export class CreateReservationPiecesDto {
@@ -362,6 +372,15 @@ export class SavePieceTypeDto {
   @IsNotEmpty({ message: 'El nombre es obligatorio' })
   @MaxLength(120)
   name: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Categoría: id del adicional (/pieces/extras). '' la quita. Sólo admin/encargado.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  extraId?: string;
 }
 
 /** Alta / edición de un adicional de pieza del catálogo. */
@@ -377,4 +396,11 @@ export class SavePieceExtraDto {
   @IsNumber({}, { message: 'El monto debe ser un número' })
   @Min(0)
   amount: number;
+
+  @ApiPropertyOptional({
+    description: '2x1: se eligen dos piezas de esta categoría para una sola ficha',
+  })
+  @IsOptional()
+  @IsBoolean()
+  pair?: boolean;
 }

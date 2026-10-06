@@ -1,3 +1,6 @@
+import { PieceType, PieceTypeSchema } from '../common/schemas/piece-type.schema';
+import { PieceExtra, PieceExtraSchema } from '../common/schemas/piece-extra.schema';
+import { TrialClass, TrialClassSchema } from '../common/schemas/trial-class.schema';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Student, StudentSchema } from '../common/schemas/student.schema';
@@ -42,6 +45,9 @@ import { StudentsService } from './students.service';
         schema: StudentRegularityEventSchema,
       },
       { name: StudentMonthlyPiece.name, schema: StudentMonthlyPieceSchema },
+      { name: PieceType.name, schema: PieceTypeSchema },
+      { name: PieceExtra.name, schema: PieceExtraSchema },
+      { name: TrialClass.name, schema: TrialClassSchema },
     ]),
   ],
   controllers: [StudentsController],

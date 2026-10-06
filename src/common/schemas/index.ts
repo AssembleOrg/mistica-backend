@@ -33,3 +33,4 @@ export * from './in-app-notification.schema';
 export * from './bot-settings.schema';
 export * from './bot-faq.schema';
 export * from './student-monthly-piece.schema';
+export * from './trial-class.schema';

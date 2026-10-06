@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 
 export type PieceTypeDocument = PieceType & Document;
 
@@ -8,6 +8,12 @@ export type PieceTypeDocument = PieceType & Document;
 export class PieceType {
   @Prop({ required: true, trim: true })
   name: string;
+
+  // Categoría (adicional del catálogo: Incluida, Especial, Premium, 2x1…).
+  // Al elegir la pieza se propone su adicional, en las fichas de reservas y
+  // en la pieza del mes de los alumnos.
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'PieceExtra' })
+  extraId?: Types.ObjectId;
 
   @Prop({ type: Date })
   deletedAt?: Date;

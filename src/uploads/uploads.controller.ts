@@ -65,7 +65,7 @@ export class UploadsController {
 
   @Delete('image')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Borrar una imagen del bucket (por key)' })
   remove(@Query('key') key: string) {
     return this.service.deleteImage(key || '');

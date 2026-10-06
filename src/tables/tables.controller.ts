@@ -55,7 +55,7 @@ export class TablesController {
 
   @Put('business-hours')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary:
       'Cambiar el horario del salón. Devuelve los turnos que quedan fuera (no se ofrecen hasta ajustarlos).',

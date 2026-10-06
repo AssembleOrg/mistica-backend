@@ -4,9 +4,9 @@ import { Document, SchemaTypes, Types } from 'mongoose';
 export type StudentMonthlyPieceDocument = StudentMonthlyPiece & Document;
 
 /**
- * Pieza del mes de un alumno del taller. Cada mes el alumno elige UNA pieza
- * (fresca o bizcochada); si es más grande corresponde un adicional. Reemplaza
- * la planilla "coladas del mes": una fila por alumno y mes.
+ * Pieza del mes de un alumno del taller (fresca o bizcochada). Reemplaza la
+ * planilla "coladas del mes". Cada mes elige una; puede pedir más, y las de
+ * más (o las de categoría especial/premium) llevan adicional.
  */
 @Schema({ timestamps: true, collection: 'student_monthly_pieces' })
 export class StudentMonthlyPiece {
@@ -20,6 +20,14 @@ export class StudentMonthlyPiece {
   /** Qué pieza pidió ("tazón XL", "tartera"). */
   @Prop({ trim: true, default: '' })
   pieceName: string;
+
+  /** Pieza del catálogo (el mismo de las fichas de reservas), si se eligió de ahí. */
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'PieceType' })
+  pieceTypeId?: Types.ObjectId;
+
+  /** Categoría de la pieza al elegirla (Especial, Premium…): define el adicional. */
+  @Prop({ trim: true })
+  category?: string;
 
   /** La pide en bizcocho. Excluyente con `fresh`; las dos apagadas = sin elegir. */
   @Prop({ type: Boolean, default: false })
@@ -61,6 +69,10 @@ export class StudentMonthlyPiece {
   @Prop({ type: Number, min: 0 })
   extraAmount?: number;
 
+  /** Adicional bonificado (p. ej. por una clase que no pudo recuperar): no se cobra. */
+  @Prop({ type: Boolean })
+  waived?: boolean;
+
   /** El adicional ya se cobró (genera un pago del alumno). */
   @Prop({ type: Boolean, default: false })
   paid: boolean;
@@ -88,5 +100,6 @@ export class StudentMonthlyPiece {
 export const StudentMonthlyPieceSchema =
   SchemaFactory.createForClass(StudentMonthlyPiece);
 
-StudentMonthlyPieceSchema.index({ studentId: 1, month: 1 }, { unique: true });
+// Varias por alumno y mes (antes había un índice único, se borra al arrancar).
+StudentMonthlyPieceSchema.index({ studentId: 1, month: 1, createdAt: 1 });
 StudentMonthlyPieceSchema.index({ month: 1 });

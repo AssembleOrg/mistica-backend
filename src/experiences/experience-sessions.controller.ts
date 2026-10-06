@@ -56,7 +56,7 @@ export class ExperienceSessionsController {
   // ── Admin ──
   @Post('generate')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Generar turnos en lote (repetir carga)' })
   async generate(@Body() dto: GenerateSessionsDto) {
@@ -105,7 +105,7 @@ export class ExperienceSessionsController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiBearerAuth()
   async update(@Param('id') id: string, @Body() dto: UpdateSessionDto) {
     return this.experiencesService.updateSession(id, dto);

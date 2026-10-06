@@ -45,7 +45,7 @@ export class ReservationsAdminController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Crear reserva desde admin (CONFIRMED + caja)' })
   async create(
     @Body() dto: AdminCreateReservationDto,
@@ -56,7 +56,7 @@ export class ReservationsAdminController {
 
   @Post('from-sale/:saleId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary:
       'Agendar una venta del local (POS): reserva CONFIRMED vinculada a la venta, sin cobrar de nuevo',
@@ -77,7 +77,7 @@ export class ReservationsAdminController {
 
   @Post(':id/cancel')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Cancelar reserva (libera cupo; reembolsa si MP)' })
   async cancel(@Param('id') id: string) {
     return this.reservationsService.adminCancel(id);
@@ -85,7 +85,7 @@ export class ReservationsAdminController {
 
   @Post(':id/resolve')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Resolver una reserva en revisión (confirm | cancel)' })
   async resolve(@Param('id') id: string, @Body() dto: ResolveReviewDto) {
     return this.reservationsService.adminResolveReview(id, dto.action);
@@ -93,7 +93,7 @@ export class ReservationsAdminController {
 
   @Post(':id/reschedule')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary:
       'Reprogramar reserva a otro turno (hasta 48 h antes; force = override)',
@@ -107,7 +107,7 @@ export class ReservationsAdminController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Editar datos de una reserva' })
   async update(@Param('id') id: string, @Body() dto: AdminUpdateReservationDto) {
     return this.reservationsService.adminUpdate(id, dto);
@@ -115,7 +115,7 @@ export class ReservationsAdminController {
 
   @Post(':id/cakes')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary:
       'Sumar una torta para cocina (con precio, también suma como adicional)',
@@ -126,7 +126,7 @@ export class ReservationsAdminController {
 
   @Delete(':id/cakes/:cakeId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Sacar una torta de la lista de cocina' })
   async removeCake(@Param('id') id: string, @Param('cakeId') cakeId: string) {
     return this.reservationsService.removeCake(id, cakeId);
@@ -134,7 +134,7 @@ export class ReservationsAdminController {
 
   @Post(':id/receipts/:receiptId/resolve')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary:
       'Verificar un comprobante que mandó el cliente: cobrar con él o descartarlo',
@@ -149,7 +149,7 @@ export class ReservationsAdminController {
 
   @Post(':id/collect-balance')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Cobrar el saldo pendiente (sobre la venta vinculada)' })
   async collectBalance(
     @Param('id') id: string,
@@ -160,7 +160,7 @@ export class ReservationsAdminController {
 
   @Get(':id/checkout')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Qué se cobra al pasar la reserva por Nueva venta' })
   async checkoutPlan(@Param('id') id: string) {
     return this.reservationsService.checkoutPlan(id);
@@ -168,7 +168,7 @@ export class ReservationsAdminController {
 
   @Post(':id/checkout')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Cobrar la reserva con una venta del POS (la deja saldada)' })
   async checkout(@Param('id') id: string, @Body() dto: CreateSaleDto) {
     return this.reservationsService.checkout(id, dto);

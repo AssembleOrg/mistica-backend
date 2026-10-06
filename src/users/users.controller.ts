@@ -63,7 +63,7 @@ export class UsersController {
 
   // Cualquier cuenta: las compartidas eligen de acá quién hace cada gestión.
   @Get('team')
-  @Roles(UserRole.ADMIN, UserRole.USER)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.USER)
   @ApiOperation({
     summary: 'Personas del equipo (nombre de las cuentas personales)',
   })

@@ -24,11 +24,12 @@ import {
 } from '../common/dto/staff.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InAppNotificationsService } from '../in-app-notifications/in-app-notifications.service';
-import { UserRole } from '../common/enums/user-role.enum';
+import { canManage } from '../common/enums/user-role.enum';
 
 type Actor = { id?: string; role?: string };
 
-const isAdmin = (actor?: Actor) => actor?.role === UserRole.ADMIN;
+// Admin y encargado ven y gestionan las tareas y compras de todos.
+const isAdmin = (actor?: Actor) => canManage(actor?.role);
 
 const actorObjectId = (actor?: Actor) =>
   actor?.id && Types.ObjectId.isValid(actor.id)

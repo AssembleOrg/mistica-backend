@@ -38,14 +38,14 @@ export class ProfessorsController {
   }
 
   @Post()
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Crear un profesor' })
   create(@Body() dto: CreateProfessorDto) {
     return this.service.create(dto);
   }
 
   @Patch(':id')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Editar un profesor' })
   update(@Param('id') id: string, @Body() dto: UpdateProfessorDto) {
     return this.service.update(id, dto);

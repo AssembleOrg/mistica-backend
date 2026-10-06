@@ -21,7 +21,7 @@ import { UserRole } from '../common/enums/user-role.enum';
 @Controller('categories')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
-@Roles(UserRole.ADMIN)
+@Roles(UserRole.ADMIN, UserRole.MANAGER)
 export class CategoriesController {
   constructor(private readonly service: CategoriesService) {}
 
@@ -41,7 +41,7 @@ export class CategoriesController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @Auditory({ entity: 'Category', action: 'CREATE' })
   @ApiOperation({ summary: 'Crear categoría' })
   async create(@Body() dto: CreateCategoryDto) {
@@ -51,7 +51,7 @@ export class CategoriesController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @Auditory({ entity: 'Category', action: 'UPDATE' })
   @ApiOperation({ summary: 'Actualizar categoría' })
   async update(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {

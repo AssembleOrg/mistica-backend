@@ -37,7 +37,7 @@ export class ExperiencesController {
   // ── Admin ──
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Crear experiencia' })
   async create(@Body() dto: CreateExperienceDto) {
@@ -61,7 +61,7 @@ export class ExperiencesController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiBearerAuth()
   async update(@Param('id') id: string, @Body() dto: UpdateExperienceDto) {
     return this.experiencesService.updateExperience(id, dto);

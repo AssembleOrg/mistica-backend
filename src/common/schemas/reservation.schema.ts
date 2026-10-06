@@ -298,6 +298,8 @@ export const ReservationSchema = SchemaFactory.createForClass(Reservation);
 
 // code ya tiene índice único por @Prop({ unique: true }).
 ReservationSchema.index({ sessionId: 1 });
+// La venta de la reserva (cambios hechos desde Ventas se llevan a la reserva).
+ReservationSchema.index({ saleId: 1 }, { sparse: true });
 ReservationSchema.index({ experienceId: 1 });
 ReservationSchema.index({ status: 1 });
 ReservationSchema.index({ status: 1, expiresAt: 1 });

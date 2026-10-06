@@ -56,7 +56,7 @@ export class StaffController {
 
   @Post('tasks')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Crear tarea (opcionalmente asignada)' })
   createTask(@Body() dto: CreateStaffTaskDto, @Req() req: AuthRequest) {
     return this.service.createTask(dto, req.user?.id);
@@ -84,7 +84,7 @@ export class StaffController {
 
   @Delete('tasks/:id')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Eliminar tarea' })
   removeTask(@Param('id') id: string) {
     return this.service.removeTask(id);

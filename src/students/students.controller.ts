@@ -17,6 +17,8 @@ import {
   CreateStudentDto,
   CreateStudentPaymentDto,
   SaveAttendanceDto,
+  ScheduleTrialDto,
+  EnrollTrialDto,
   UpdateStudentDto,
   UpdateStudentPaymentDto,
 } from '../common/dto/student.dto';
@@ -59,7 +61,7 @@ export class StudentsController {
   }
 
   @Get('payment-alerts')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Cuotas vencidas y por vencer (situaciones administrativas)',
   })
@@ -96,6 +98,43 @@ export class StudentsController {
     return this.service.setPieceReady(pieceId, dto.ready);
   }
 
+  // Clases de prueba agendadas (antes de las rutas ':id/…').
+  @Get('trials')
+  @ApiOperation({ summary: 'Clases de prueba agendadas' })
+  listTrials(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @Query('groupId') groupId: string | undefined,
+    @Req() req: AuthRequest,
+  ) {
+    return this.service.listTrials({ from, to, groupId }, req.user);
+  }
+
+  @Post('trials')
+  @ApiOperation({ summary: 'Agendar una clase de prueba en un grupo' })
+  scheduleTrial(@Body() dto: ScheduleTrialDto, @Req() req: AuthRequest) {
+    return this.service.scheduleTrial(dto, req.user);
+  }
+
+  @Delete('trials/:trialId')
+  @ApiOperation({ summary: 'Cancelar una clase de prueba agendada' })
+  cancelTrial(@Param('trialId') trialId: string) {
+    return this.service.cancelTrial(trialId);
+  }
+
+  @Post('trials/:trialId/enroll')
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Inscribir en el grupo a quien vino a probar (arranca su mes)',
+  })
+  enrollTrial(
+    @Param('trialId') trialId: string,
+    @Body() dto: EnrollTrialDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.service.enrollTrial(trialId, dto, req.user);
+  }
+
   @Get(':id/monthly-pieces')
   @ApiOperation({ summary: 'Historial de piezas del mes de un alumno' })
   monthlyPiecesOf(@Param('id') id: string, @Req() req: AuthRequest) {
@@ -113,11 +152,31 @@ export class StudentsController {
     return this.service.upsertMonthlyPiece(id, month, dto, req.user);
   }
 
-  @Delete(':id/monthly-pieces/:month')
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Borrar la pieza del mes de un alumno' })
-  removeMonthlyPiece(@Param('id') id: string, @Param('month') month: string) {
-    return this.service.removeMonthlyPiece(id, month);
+  @Post(':id/monthly-pieces/:month')
+  @ApiOperation({ summary: 'Sumar otra pieza del mes a un alumno' })
+  addMonthlyPiece(
+    @Param('id') id: string,
+    @Param('month') month: string,
+    @Body() dto: UpsertMonthlyPieceDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.service.addMonthlyPiece(id, month, dto, req.user);
+  }
+
+  @Patch('monthly-pieces/:pieceId')
+  @ApiOperation({ summary: 'Editar una pieza del mes puntual' })
+  updateMonthlyPiece(
+    @Param('pieceId') pieceId: string,
+    @Body() dto: UpsertMonthlyPieceDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.service.updateMonthlyPiece(pieceId, dto, req.user);
+  }
+
+  @Delete('monthly-pieces/:pieceId')
+  @ApiOperation({ summary: 'Borrar una pieza del mes (sin adicional cobrado)' })
+  removeMonthlyPiece(@Param('pieceId') pieceId: string) {
+    return this.service.removeMonthlyPieceById(pieceId);
   }
 
   @Get(':id/practical')
@@ -129,7 +188,7 @@ export class StudentsController {
   }
 
   @Get(':id/admin')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Ficha ADMINISTRATIVA (datos, pagos, regularidad)',
   })
@@ -138,21 +197,21 @@ export class StudentsController {
   }
 
   @Post()
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Crear alumno' })
   create(@Body() dto: CreateStudentDto) {
     return this.service.create(dto);
   }
 
   @Patch(':id')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Editar alumno' })
   update(@Param('id') id: string, @Body() dto: UpdateStudentDto) {
     return this.service.update(id, dto);
   }
 
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Eliminar alumno (soft delete)' })
   remove(@Param('id') id: string) {
     return this.service.remove(id);
@@ -161,7 +220,7 @@ export class StudentsController {
   // ── Pagos ──
 
   @Post(':id/payments')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Registrar pago o cuota de un alumno' })
   addPayment(
     @Param('id') id: string,
@@ -172,7 +231,7 @@ export class StudentsController {
   }
 
   @Patch('payments/:paymentId')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Editar un pago (marcar pagado, corregir)' })
   updatePayment(
     @Param('paymentId') paymentId: string,
@@ -182,7 +241,7 @@ export class StudentsController {
   }
 
   @Post('payments/:paymentId/collect')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary:
       'Cobrar una cuota pendiente, entera o una parte (pago parcial: queda el saldo pendiente)',

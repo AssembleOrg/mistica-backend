@@ -45,6 +45,7 @@ async function build(opts: {
       { provide: getModelToken(Professor.name), useValue: {} },
       { provide: getModelToken(Student.name), useValue: studentModel },
       { provide: getModelToken(Client.name), useValue: clientModel },
+      { provide: getModelToken('TrialClass'), useValue: {} },
     ],
   }).compile();
   return { service: moduleRef.get(GroupsService), groupModel, studentModel };
