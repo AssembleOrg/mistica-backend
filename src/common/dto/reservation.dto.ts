@@ -299,6 +299,28 @@ export class ScheduleSaleDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  @ApiPropertyOptional({
+    description: 'Restricciones alimentarias del grupo (sin TACC, vegano…)',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  dietaryTags?: string[];
+
+  @ApiPropertyOptional({ description: 'Detalle de las restricciones' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  dietaryNotes?: string;
+
+  @ApiPropertyOptional({ description: 'Nota para cocina' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  kitchenNotes?: string;
 }
 
 /**
