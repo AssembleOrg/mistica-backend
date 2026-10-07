@@ -51,6 +51,12 @@ export class Group {
   @Prop({ type: [SchemaTypes.ObjectId], ref: 'Student', default: [] })
   studentIds: Types.ObjectId[];
 
+  // Experiencias que se reservan para venir a este grupo (la Escuelita se
+  // reserva por la web/bot o se agenda desde una venta): quien reserva queda
+  // como alumno del grupo y la reserva no se muestra como un turno aparte.
+  @Prop({ type: [SchemaTypes.ObjectId], ref: 'Experience', default: undefined })
+  experienceIds?: Types.ObjectId[];
+
   // Información relacionada con la actividad (materiales, temario, etc.).
   @Prop({ trim: true })
   notes?: string;

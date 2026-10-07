@@ -60,6 +60,7 @@ import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { TablesService } from '../tables/tables.service';
 import { businessDateKey } from '../tables/shifts';
 import { AvailabilityService } from './availability.service';
+import { GroupsService } from '../groups/groups.service';
 import { isOwnSlot } from '../experiences/own-schedule';
 import { UserRole } from '../common/enums/user-role.enum';
 
@@ -115,7 +116,18 @@ export class ReservationsService {
     private readonly closedDates: ClosedDatesService,
     private readonly tables: TablesService,
     private readonly availability: AvailabilityService,
+    private readonly groups?: GroupsService,
   ) {}
+
+  /** Experiencia que va a un grupo del taller (Escuelita): suma al alumno. */
+  private async joinGroup(reservationId: unknown) {
+    await this.groups?.enrollFromReservation(reservationId);
+  }
+
+  /** Cancelada: si la reserva lo había sumado al grupo, sale. */
+  private async leaveGroup(reservationId: unknown) {
+    await this.groups?.releaseFromReservation(reservationId);
+  }
 
   // ───────────────────────── Público: hold + pago ─────────────────────────
 
@@ -251,6 +263,7 @@ export class ReservationsService {
       reservation.status = ReservationStatus.CONFIRMED;
       reservation.confirmedAt = new Date();
       await reservation.save();
+      await this.joinGroup(reservation._id);
       return this.holdResponse(reservation);
     }
 
@@ -553,6 +566,7 @@ export class ReservationsService {
 
     if (dto.approved) {
       await this.createSaleForReservation(won, PaymentMethod.TRANSFER);
+      await this.joinGroup(won._id);
     } else {
       // Igual que el flujo de revisión existente: el cupo se libera y
       // adminResolveReview lo re-toma si el admin confirma.
@@ -624,6 +638,7 @@ export class ReservationsService {
 
     await this.tables.release(won._id as Types.ObjectId, won.startAt);
     await this.releaseSeats(won.sessionId, won.quantity);
+    await this.leaveGroup(won._id);
 
     if (
       wasConfirmed &&
@@ -691,6 +706,7 @@ export class ReservationsService {
     if (won) {
       await this.createSaleForReservation(won, PaymentMethod.MERCADOPAGO);
       await this.notifyConfirmed(won);
+      await this.joinGroup(won._id);
       return;
     }
 
@@ -726,6 +742,7 @@ export class ReservationsService {
         await r.save();
         this.logger.log(`Reserva ${reservationId} re-tomada tras pago tardío`);
         await this.createSaleForReservation(r, PaymentMethod.MERCADOPAGO);
+        await this.joinGroup(r._id);
       } catch {
         // Sin cupo o sin mesas: marcar para revisión y reembolsar.
         r.status = ReservationStatus.NEEDS_REVIEW;
@@ -864,6 +881,7 @@ export class ReservationsService {
         this.mapToSalePaymentMethod(dto.paymentMethod),
       );
     }
+    await this.joinGroup(reservation._id);
 
     return this.publicView(reservation);
   }
@@ -1620,6 +1638,7 @@ export class ReservationsService {
     if (!won) return this.publicView(await this.findByIdOrThrow(id));
     await this.tables.release(won._id as Types.ObjectId, won.startAt);
     await this.releaseSeats(won.sessionId, won.quantity);
+    await this.leaveGroup(won._id);
     if (
       wasConfirmed &&
       won.paymentMethod === ReservationPaymentMethod.MERCADOPAGO
@@ -1661,6 +1680,7 @@ export class ReservationsService {
       r,
       this.mapToSalePaymentMethod(r.paymentMethod),
     );
+    await this.joinGroup(r._id);
     return this.publicView(r);
   }
 

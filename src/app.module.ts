@@ -31,6 +31,7 @@ import { PiecesModule } from './pieces/pieces.module';
 import { ProfessorsModule } from './professors/professors.module';
 import { GroupsModule } from './groups/groups.module';
 import { StudentsModule } from './students/students.module';
+import { MakeupsModule } from './makeups/makeups.module';
 import { StaffModule } from './staff/staff.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { SpaceBlocksModule } from './space-blocks/space-blocks.module';
@@ -68,6 +69,7 @@ import { InAppNotificationsModule } from './in-app-notifications/in-app-notifica
     ProfessorsModule,
     GroupsModule,
     StudentsModule,
+    MakeupsModule,
     StaffModule,
     UploadsModule,
     SpaceBlocksModule,

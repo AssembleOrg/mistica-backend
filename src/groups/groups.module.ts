@@ -8,6 +8,14 @@ import {
 } from '../common/schemas/professor.schema';
 import { Student, StudentSchema } from '../common/schemas/student.schema';
 import { Client, ClientSchema } from '../common/schemas/client.schema';
+import {
+  Reservation,
+  ReservationSchema,
+} from '../common/schemas/reservation.schema';
+import {
+  MakeupClass,
+  MakeupClassSchema,
+} from '../common/schemas/makeup-class.schema';
 import { GroupsController } from './groups.controller';
 import { GroupsService } from './groups.service';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
@@ -20,6 +28,8 @@ import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
       { name: Student.name, schema: StudentSchema },
       { name: Client.name, schema: ClientSchema },
       { name: TrialClass.name, schema: TrialClassSchema },
+      { name: Reservation.name, schema: ReservationSchema },
+      { name: MakeupClass.name, schema: MakeupClassSchema },
     ]),
   ],
   controllers: [GroupsController],

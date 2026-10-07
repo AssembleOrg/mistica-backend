@@ -204,6 +204,18 @@ export class Reservation {
   @Prop({ type: SchemaTypes.ObjectId, ref: 'Sale' })
   saleId?: Types.ObjectId;
 
+  // Reserva de una experiencia que va a un grupo del taller (Escuelita): el
+  // alumno que quedó anotado en el grupo. `addedToGroup` = lo sumó ESTA
+  // reserva (si se cancela, sale del grupo); sin él, ya cursaba.
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Group' })
+  enrolledGroupId?: Types.ObjectId;
+
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Student' })
+  enrolledStudentId?: Types.ObjectId;
+
+  @Prop({ type: Boolean })
+  addedToGroup?: boolean;
+
   // true = la reserva está CONFIRMED pero la venta todavía no se registró
   // (caja cerrada al confirmarse por webhook). Un cron la crea al abrir caja.
   @Prop({ type: Boolean, default: false })

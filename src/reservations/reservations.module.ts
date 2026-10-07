@@ -19,6 +19,7 @@ import { MercadopagoModule } from '../mercadopago/mercadopago.module';
 import { SalesModule } from '../sales/sales.module';
 import { ClosedDatesModule } from '../closed-dates/closed-dates.module';
 import { TablesModule } from '../tables/tables.module';
+import { GroupsModule } from '../groups/groups.module';
 import { ReservationsController } from './reservations.controller';
 import { ReservationsWebhookController } from './reservations-webhook.controller';
 import { ReservationsService } from './reservations.service';
@@ -40,6 +41,7 @@ import { ReservationsCron } from './reservations.cron';
     SalesModule,
     ClosedDatesModule,
     TablesModule,
+    GroupsModule,
   ],
   controllers: [ReservationsController, ReservationsWebhookController],
   providers: [ReservationsService, ReservationsCron, AvailabilityService],

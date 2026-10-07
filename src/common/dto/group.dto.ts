@@ -81,6 +81,16 @@ export class CreateGroupDto {
   @IsMongoId({ each: true })
   clientIds?: string[];
 
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Experiencias que se reservan para venir a este grupo: quien reserva queda como alumno',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsMongoId({ each: true })
+  experienceIds?: string[];
+
   @ApiPropertyOptional({ description: 'Información de la actividad' })
   @IsOptional()
   @IsString()
