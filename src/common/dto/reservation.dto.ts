@@ -366,6 +366,17 @@ export class AdminCreateReservationDto {
   @Min(1)
   quantity: number;
 
+  @ApiPropertyOptional({
+    description:
+      'De esas personas, cuántas van bonificadas: entran (piezas, cocina) pero no se cobran.',
+    minimum: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  freeSpots?: number;
+
   @ApiProperty({ description: 'Nombre y apellido del cliente' })
   @IsString()
   @MaxLength(120)
@@ -492,6 +503,28 @@ export class AdminRescheduleReservationDto {
 }
 
 export class AdminUpdateReservationDto {
+  @ApiPropertyOptional({
+    description:
+      'Nueva cantidad de personas (se suman o se descuentan del total y del saldo).',
+    minimum: 1,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  quantity?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'De esas personas, cuántas van bonificadas: entran (piezas, cocina) pero no se cobran.',
+    minimum: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  freeSpots?: number;
+
   @ApiPropertyOptional({ description: 'Nombre del cliente' })
   @IsOptional()
   @IsString()

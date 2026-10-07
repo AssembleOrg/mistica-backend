@@ -18,6 +18,11 @@ export class InAppNotificationsController {
     return this.service.list({ userId: req.user.id, role: req.user.role }, unread === 'true');
   }
 
+  @Patch('read-all')
+  readAll(@Req() req: { user: { id: string; role: string } }) {
+    return this.service.markAllRead({ userId: req.user.id, role: req.user.role });
+  }
+
   @Patch(':id/read')
   read(@Param('id') id: string, @Req() req: { user: { id: string; role: string } }) {
     return this.service.markRead(id, { userId: req.user.id, role: req.user.role });

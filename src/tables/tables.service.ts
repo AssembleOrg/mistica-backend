@@ -55,6 +55,8 @@ export interface AssignRequest {
   durationMinutes: number;
   /** El cliente ya aceptó compartir mesa grande. */
   sharedAccepted?: boolean;
+  /** Si no entra, tomar todas las mesas libres (alta del admin sin tope). */
+  takeAllIfShort?: boolean;
 }
 
 export interface Assignment {
@@ -587,10 +589,22 @@ export class TablesService {
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       const free = await this.freeTablesFor(interval);
-      const plan = planTables(req.qty, free, {
+      let plan = planTables(req.qty, free, {
         smallGroupCanTakeLarge: envConfig.smallGroupCanTakeLarge,
         sharedAccepted: req.sharedAccepted,
       });
+      // El admin carga un grupo más grande que lo que entra con las mesas
+      // libres (un cumple de 25): se le dan todas las libres y el resto lo
+      // acomoda el local.
+      if (!plan.ok && req.takeAllIfShort && plan.reason !== 'INVALID_QTY') {
+        const all: TableRef[] = [
+          ...free.large.map((code) => ({ code, kind: 'LARGE' as const })),
+          ...free.small.map((code) => ({ code, kind: 'SMALL' as const })),
+        ];
+        if (all.length) {
+          plan = { ok: true, tables: all, shared: false, seats: seatsForSelection(all) };
+        }
+      }
 
       if (!plan.ok)
         throw this.planError(plan, req.qty, await this.venueMaxParty());

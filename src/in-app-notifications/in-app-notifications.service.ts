@@ -20,7 +20,7 @@ export class InAppNotificationsService {
     ) as Observable<InAppNotificationEvent>;
   }
 
-  async create(input: { title: string; body: string; type: InAppNotification['type']; expiresAt?: Date; targetUserIds?: string[]; visibleToRoles?: string[] }) {
+  async create(input: { title: string; body: string; type: InAppNotification['type']; expiresAt?: Date; targetUserIds?: string[]; visibleToRoles?: string[]; link?: string }) {
     const targetUserIds = [...new Set(input.targetUserIds ?? [])]
       .filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id));
     const notification = await this.model.create({ ...input, targetUserIds, visibleToRoles: input.visibleToRoles ?? ['admin'] });
@@ -57,6 +57,18 @@ export class InAppNotificationsService {
     return this.view(notification, user.userId);
   }
 
+  /** Marca leídos todos los avisos que ve el usuario. */
+  async markAllRead(user: Recipient) {
+    if (!Types.ObjectId.isValid(user.userId)) return { updated: 0 };
+    const unread = await this.list(user, true);
+    if (!unread.length) return { updated: 0 };
+    const res = await this.model.updateMany(
+      { _id: { $in: unread.map((n) => new Types.ObjectId(n.id)) } },
+      { $addToSet: { readByUserIds: new Types.ObjectId(user.userId) } },
+    );
+    return { updated: res.modifiedCount };
+  }
+
   private async recipients(notification: InAppNotificationDocument): Promise<Recipient[]> {
     const targetIds = notification.targetUserIds ?? [];
     if (targetIds.length) return targetIds.map((id) => ({ userId: String(id), role: '' }));
@@ -67,6 +79,6 @@ export class InAppNotificationsService {
 
   private view(notification: InAppNotificationDocument | Record<string, any>, userId?: string) {
     const readBy = notification.readByUserIds ?? [];
-    return { id: String(notification._id), title: notification.title, body: notification.body, type: notification.type, createdAt: notification.createdAt, read: !!userId && readBy.some((id: Types.ObjectId) => String(id) === userId) };
+    return { id: String(notification._id), title: notification.title, body: notification.body, type: notification.type, link: notification.link, createdAt: notification.createdAt, read: !!userId && readBy.some((id: Types.ObjectId) => String(id) === userId) };
   }
 }

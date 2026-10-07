@@ -28,6 +28,10 @@ export class InAppNotification {
   @Prop({ type: Date })
   expiresAt?: Date;
 
+  /** Ruta del panel a la que lleva el aviso (p. ej. la pestaña Cocina). */
+  @Prop({ trim: true })
+  link?: string;
+
   createdAt: Date;
   updatedAt: Date;
 }

@@ -48,6 +48,12 @@ export class Reservation {
   @Prop({ required: true, min: 1 })
   quantity: number;
 
+  // Personas bonificadas a mano (p. ej. un cumple de 8 con 1 de regalo):
+  // cuentan para piezas y cocina, pero no se cobran. Los lugares de regalo de
+  // la promo de cumpleaños se calculan aparte, por precio.
+  @Prop({ type: Number, min: 0 })
+  freeSpots?: number;
+
   // `amount` = lo que se COBRA en esta operación (la seña en reservas públicas;
   // lo que cobró el admin en reservas de admin). Es lo que va a MercadoPago y a
   // caja. Se mantiene por compatibilidad histórica.

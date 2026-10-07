@@ -61,6 +61,8 @@ import { TablesService } from '../tables/tables.service';
 import { businessDateKey } from '../tables/shifts';
 import { AvailabilityService } from './availability.service';
 import { GroupsService } from '../groups/groups.service';
+import { InAppNotificationsService } from '../in-app-notifications/in-app-notifications.service';
+import { User, UserDocument } from '../common/schemas/user.schema';
 import { isOwnSlot } from '../experiences/own-schedule';
 import { UserRole } from '../common/enums/user-role.enum';
 
@@ -92,6 +94,24 @@ interface Actor {
   allowedViews?: string[];
 }
 
+/** Cocina se entera de lo que pasa en los próximos días (producción semanal). */
+const KITCHEN_NOTICE_DAYS = 14;
+/** Cuentas de cocina: las que tienen la pestaña Cocina (o la agenda vieja). */
+const KITCHEN_VIEWS = ['reservas:cocina', 'reservas:agenda'];
+const LOOKS_LIKE_FOOD = /buffet|brunch|merienda|degustaci|desayuno/i;
+
+type KitchenReservation = {
+  experienceId?: Types.ObjectId | string;
+  experienceName: string;
+  startAt: Date;
+  quantity: number;
+  isBirthday?: boolean;
+  dietaryTags?: string[];
+  dietaryNotes?: string;
+  kitchenNotes?: string;
+  cakes?: Array<{ label: string; qty?: number }>;
+};
+
 @Injectable()
 export class ReservationsService {
   private readonly logger = new Logger(ReservationsService.name);
@@ -117,7 +137,94 @@ export class ReservationsService {
     private readonly tables: TablesService,
     private readonly availability: AvailabilityService,
     private readonly groups?: GroupsService,
+    private readonly inApp?: InAppNotificationsService,
+    @InjectModel(User.name)
+    private readonly userModel?: Model<UserDocument>,
   ) {}
+
+  /** Reserva recién confirmada: grupo del taller (Escuelita) y aviso a cocina. */
+  private async afterConfirmed(reservationId: unknown) {
+    await this.joinGroup(reservationId);
+    const r = await this.reservationModel.findById(reservationId).lean();
+    if (r) await this.notifyKitchen(r, 'Reserva nueva', this.kitchenDetail(r));
+  }
+
+  /** Reserva cancelada: sale del grupo si la había sumado y cocina se entera. */
+  private async afterCancelled(r: KitchenReservation & { _id: unknown }) {
+    await this.leaveGroup(r._id);
+    await this.notifyKitchen(r, 'Reserva cancelada');
+  }
+
+  /** Lo que cocina tiene que saber de una reserva, en pocas líneas. */
+  private kitchenDetail(r: KitchenReservation): string {
+    const diet = [...(r.dietaryTags ?? []), r.dietaryNotes?.trim()].filter(Boolean);
+    const cakes = (r.cakes ?? []).map((c) =>
+      (c.qty ?? 1) > 1 ? `${c.label} x${c.qty}` : c.label,
+    );
+    return [
+      r.isBirthday ? 'Cumpleaños 🎉' : '',
+      cakes.length ? `Torta: ${cakes.join(', ')}` : '',
+      diet.length ? `Restricciones: ${diet.join(' · ')}` : '',
+      r.kitchenNotes?.trim() ? `Nota: ${r.kitchenNotes.trim()}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  /**
+   * Aviso a cocina (las cuentas con la pestaña Cocina, como la de Meli) de lo
+   * que cambia en la producción de los próximos días: reservas nuevas, más o
+   * menos personas, tortas, restricciones. Sólo si hay comida de por medio
+   * (experiencia con buffet, torta o restricciones). Nunca lanza.
+   */
+  private async notifyKitchen(r: KitchenReservation, title: string, detail?: string) {
+    try {
+      if (!this.inApp || !this.userModel) return;
+      const start = new Date(r.startAt).getTime();
+      const now = Date.now();
+      if (start < now - 3 * 3_600_000 || start > now + KITCHEN_NOTICE_DAYS * 86_400_000) {
+        return;
+      }
+      const exp = await this.experienceModel
+        .findById(r.experienceId)
+        .select('name description hasBuffet')
+        .lean();
+      const food =
+        exp?.hasBuffet ??
+        LOOKS_LIKE_FOOD.test(`${exp?.name ?? r.experienceName} ${exp?.description ?? ''}`);
+      const matters =
+        food ||
+        (r.cakes?.length ?? 0) > 0 ||
+        (r.dietaryTags?.length ?? 0) > 0 ||
+        !!r.dietaryNotes?.trim() ||
+        !!r.isBirthday;
+      if (!matters) return;
+      const cooks = await this.userModel
+        .find({
+          deletedAt: { $exists: false },
+          role: { $ne: UserRole.ADMIN },
+          allowedViews: { $in: KITCHEN_VIEWS },
+        })
+        .select('_id')
+        .lean();
+      if (!cooks.length) return;
+      await this.inApp.create({
+        type: 'INFO',
+        title,
+        body: [
+          `${r.experienceName} · ${this.fmtWhen(r.startAt)}`,
+          `${r.quantity} ${r.quantity === 1 ? 'persona' : 'personas'}`,
+          detail,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        targetUserIds: cooks.map((u) => String(u._id)),
+        link: '/dashboard/reservas?tab=cocina',
+      });
+    } catch (err) {
+      this.logger.warn(`No se pudo avisar a cocina: ${String(err)}`);
+    }
+  }
 
   /** Experiencia que va a un grupo del taller (Escuelita): suma al alumno. */
   private async joinGroup(reservationId: unknown) {
@@ -263,7 +370,7 @@ export class ReservationsService {
       reservation.status = ReservationStatus.CONFIRMED;
       reservation.confirmedAt = new Date();
       await reservation.save();
-      await this.joinGroup(reservation._id);
+      await this.afterConfirmed(reservation._id);
       return this.holdResponse(reservation);
     }
 
@@ -566,7 +673,7 @@ export class ReservationsService {
 
     if (dto.approved) {
       await this.createSaleForReservation(won, PaymentMethod.TRANSFER);
-      await this.joinGroup(won._id);
+      await this.afterConfirmed(won._id);
     } else {
       // Igual que el flujo de revisión existente: el cupo se libera y
       // adminResolveReview lo re-toma si el admin confirma.
@@ -638,7 +745,7 @@ export class ReservationsService {
 
     await this.tables.release(won._id as Types.ObjectId, won.startAt);
     await this.releaseSeats(won.sessionId, won.quantity);
-    await this.leaveGroup(won._id);
+    await this.afterCancelled(won);
 
     if (
       wasConfirmed &&
@@ -706,7 +813,7 @@ export class ReservationsService {
     if (won) {
       await this.createSaleForReservation(won, PaymentMethod.MERCADOPAGO);
       await this.notifyConfirmed(won);
-      await this.joinGroup(won._id);
+      await this.afterConfirmed(won._id);
       return;
     }
 
@@ -742,7 +849,7 @@ export class ReservationsService {
         await r.save();
         this.logger.log(`Reserva ${reservationId} re-tomada tras pago tardío`);
         await this.createSaleForReservation(r, PaymentMethod.MERCADOPAGO);
-        await this.joinGroup(r._id);
+        await this.afterConfirmed(r._id);
       } catch {
         // Sin cupo o sin mesas: marcar para revisión y reembolsar.
         r.status = ReservationStatus.NEEDS_REVIEW;
@@ -801,11 +908,14 @@ export class ReservationsService {
   ) {
     const qty = dto.quantity;
     const sessionId = await this.resolveSessionId(dto);
-    const session = await this.reserveSeats(sessionId, qty, [
-      SessionStatus.OPEN,
-      SessionStatus.CLOSED,
-      SessionStatus.DRAFT,
-    ]);
+    // El admin ve el salón y decide: puede cargar más personas que el cupo
+    // del turno o las mesas libres (un cumple de 25).
+    const session = await this.reserveSeats(
+      sessionId,
+      qty,
+      [SessionStatus.OPEN, SessionStatus.CLOSED, SessionStatus.DRAFT],
+      true,
+    );
 
     const { unitPrice, billableQty } = await this.effectivePriceFor(
       session.experienceId,
@@ -814,7 +924,10 @@ export class ReservationsService {
       session.startAt,
       dto.isBirthday,
     );
-    const total = fromSale ? fromSale.total : unitPrice * billableQty;
+    // Bonificados a mano: entran (piezas, cocina) pero no se cobran.
+    const freeSpots = Math.min(qty, dto.freeSpots ?? 0);
+    const billable = Math.max(0, Math.min(billableQty, qty - freeSpots));
+    const total = fromSale ? fromSale.total : unitPrice * billable;
     // El admin puede cobrar el total o una seña (dto.amount). El saldo es el resto.
     if (!fromSale && dto.amount != null && dto.amount > total + 0.01) {
       await this.releaseSeats(session._id as Types.ObjectId, qty);
@@ -835,6 +948,7 @@ export class ReservationsService {
         startAt: session.startAt,
         unitPrice,
         quantity: qty,
+        ...(freeSpots > 0 && { freeSpots }),
         amount,
         totalAmount: total,
         depositAmount: isCourtesy ? 0 : amount,
@@ -863,7 +977,7 @@ export class ReservationsService {
     // Mesas. El admin ve el salón y decide, así que puede forzar la mesa
     // compartida sin el ida y vuelta que hace el bot con el cliente.
     try {
-      await this.attachTables(reservation, session, true);
+      await this.attachTables(reservation, session, true, true);
     } catch (err) {
       reservation.status = ReservationStatus.CANCELLED;
       reservation.cancelledAt = new Date();
@@ -881,7 +995,7 @@ export class ReservationsService {
         this.mapToSalePaymentMethod(dto.paymentMethod),
       );
     }
-    await this.joinGroup(reservation._id);
+    await this.afterConfirmed(reservation._id);
 
     return this.publicView(reservation);
   }
@@ -1139,6 +1253,8 @@ export class ReservationsService {
     sessionId: string | Types.ObjectId,
     qty: number,
     allowedStatuses: SessionStatus[],
+    /** Alta del admin: puede pasar el cupo (un cumple de 25). */
+    force = false,
   ): Promise<ExperienceSessionDocument> {
     if (!Types.ObjectId.isValid(String(sessionId)))
       throw new BadRequestException('sessionId inválido');
@@ -1148,7 +1264,9 @@ export class ReservationsService {
         _id: sessionId,
         status: { $in: allowedStatuses },
         deletedAt: { $exists: false },
-        $expr: { $gte: [{ $subtract: ['$capacity', '$seatsTaken'] }, qty] },
+        ...(force
+          ? {}
+          : { $expr: { $gte: [{ $subtract: ['$capacity', '$seatsTaken'] }, qty] } }),
       },
       { $inc: { seatsTaken: qty }, $set: { updatedAt: new Date() } },
       { new: true },
@@ -1190,6 +1308,8 @@ export class ReservationsService {
     reservation: ReservationDocument,
     session: ExperienceSessionDocument,
     sharedAccepted?: boolean,
+    /** Si el grupo no entra, toma todas las mesas libres (alta del admin). */
+    takeAllIfShort?: boolean,
   ): Promise<void> {
     // Horario PROPIO: el lugar físico lo aparta un bloqueo semanal de mesas;
     // la reserva cuenta contra el cupo de la experiencia y no toma mesas.
@@ -1200,6 +1320,7 @@ export class ReservationsService {
       startAt: session.startAt,
       durationMinutes: session.durationMinutes,
       sharedAccepted,
+      takeAllIfShort,
     });
     reservation.tableCodes = assignment.tables.map((t) => t.code);
     reservation.sharedTable = assignment.shared;
@@ -1448,15 +1569,7 @@ export class ReservationsService {
         customerEmail: reservation.customerEmail,
         customerPhone: reservation.customerPhone,
         items: [
-          {
-            productId: String(productId),
-            quantity: reservation.quantity,
-            // Cortesía: la experiencia no se cobra (sólo sus adicionales).
-            unitPrice:
-              reservation.paymentMethod === ReservationPaymentMethod.COURTESY
-                ? 0
-                : reservation.unitPrice,
-          },
+          ...this.experienceLines(reservation, String(productId)),
           // Adicionales sumados a la reserva (p. ej. de sus piezas).
           ...(reservation.extras ?? []).map((x) => ({
             productName: x.label,
@@ -1638,7 +1751,7 @@ export class ReservationsService {
     if (!won) return this.publicView(await this.findByIdOrThrow(id));
     await this.tables.release(won._id as Types.ObjectId, won.startAt);
     await this.releaseSeats(won.sessionId, won.quantity);
-    await this.leaveGroup(won._id);
+    await this.afterCancelled(won);
     if (
       wasConfirmed &&
       won.paymentMethod === ReservationPaymentMethod.MERCADOPAGO
@@ -1680,12 +1793,24 @@ export class ReservationsService {
       r,
       this.mapToSalePaymentMethod(r.paymentMethod),
     );
-    await this.joinGroup(r._id);
+    await this.afterConfirmed(r._id);
     return this.publicView(r);
   }
 
   async adminUpdate(id: string, dto: AdminUpdateReservationDto) {
     const r = await this.findByIdOrThrow(id);
+    const before = {
+      quantity: r.quantity,
+      diet: [...(r.dietaryTags ?? []), r.dietaryNotes ?? ''].join('|'),
+      kitchen: r.kitchenNotes ?? '',
+    };
+    let creditDue = 0;
+    if (
+      (dto.quantity !== undefined && dto.quantity !== r.quantity) ||
+      (dto.freeSpots !== undefined && dto.freeSpots !== (r.freeSpots ?? 0))
+    ) {
+      creditDue = await this.changeQuantity(r, dto.quantity ?? r.quantity, dto.freeSpots);
+    }
     if (dto.customerName !== undefined) r.customerName = dto.customerName;
     if (dto.customerEmail !== undefined) r.customerEmail = dto.customerEmail;
     if (dto.customerPhone !== undefined) r.customerPhone = dto.customerPhone;
@@ -1696,7 +1821,27 @@ export class ReservationsService {
     if (dto.kitchenNotes !== undefined) r.kitchenNotes = dto.kitchenNotes;
     r.updatedAt = new Date();
     await r.save();
-    return this.publicView(r);
+
+    const changes: string[] = [];
+    if (r.quantity !== before.quantity) {
+      changes.push(`Ahora son ${r.quantity} (antes ${before.quantity})`);
+    }
+    const diet = [...(r.dietaryTags ?? []), r.dietaryNotes ?? ''].join('|');
+    if (diet !== before.diet || (r.kitchenNotes ?? '') !== before.kitchen) {
+      changes.push(this.kitchenDetail({ ...r.toObject(), isBirthday: false, cakes: [] }));
+    }
+    if (changes.length) {
+      await this.notifyKitchen(
+        r,
+        r.quantity > before.quantity
+          ? 'Se suman personas'
+          : r.quantity < before.quantity
+            ? 'Bajan personas'
+            : 'Cambios para cocina',
+        changes.filter(Boolean).join('\n'),
+      );
+    }
+    return { ...this.publicView(r), ...(creditDue > 0 && { creditDue }) };
   }
 
   /**
@@ -1729,6 +1874,11 @@ export class ReservationsService {
     ];
     fresh.updatedAt = new Date();
     await fresh.save();
+    await this.notifyKitchen(
+      fresh,
+      'Torta nueva',
+      [qty > 1 ? `${label} x${qty}` : label, dto.notes?.trim()].filter(Boolean).join(' · '),
+    );
     return this.publicView(fresh);
   }
 
@@ -1782,13 +1932,14 @@ export class ReservationsService {
    */
   async removeCake(id: string, cakeId: string) {
     const r = await this.findByIdOrThrow(id);
-    const before = r.cakes?.length ?? 0;
-    r.cakes = (r.cakes ?? []).filter((c) => String(c._id) !== cakeId);
-    if (r.cakes.length === before) {
+    const removed = (r.cakes ?? []).find((c) => String(c._id) === cakeId);
+    if (!removed) {
       throw new NotFoundException('Esa torta ya no está en la reserva.');
     }
+    r.cakes = (r.cakes ?? []).filter((c) => String(c._id) !== cakeId);
     r.updatedAt = new Date();
     await r.save();
+    await this.notifyKitchen(r, 'Torta quitada', removed.label);
     return this.publicView(r);
   }
 
@@ -1894,6 +2045,7 @@ export class ReservationsService {
           `Código: *${r.code}*\n\n¡Te esperamos! 💛`,
       );
     }
+    await this.notifyKitchen(r, 'Reserva reprogramada', `Antes: ${this.fmtWhen(oldStartAt)}`);
     return this.publicView(r);
   }
 
@@ -2047,13 +2199,7 @@ export class ReservationsService {
         r.experienceName,
         r.unitPrice,
       );
-      const courtesy = r.paymentMethod === ReservationPaymentMethod.COURTESY;
-      items.push({
-        productId: String(productId),
-        productName: r.experienceName,
-        quantity: r.quantity,
-        unitPrice: courtesy ? 0 : r.unitPrice,
-      });
+      items.push(...this.experienceLines(r, String(productId)));
       for (const x of r.extras ?? []) {
         items.push({ productName: x.label, quantity: 1, unitPrice: x.amount });
       }
@@ -2175,6 +2321,102 @@ ${dto.notes}` : note,
     return { unitPrice: eff.unitPrice, billableQty: eff.billableQty };
   }
 
+  /**
+   * Líneas de la experiencia en el ticket: las personas que se cobran y, aparte
+   * y en $0, las bonificadas (así el ticket no sale por todas).
+   */
+  private experienceLines(
+    r: {
+      quantity: number;
+      freeSpots?: number;
+      unitPrice: number;
+      paymentMethod?: string;
+      experienceName: string;
+    },
+    productId: string,
+  ) {
+    const courtesy = r.paymentMethod === ReservationPaymentMethod.COURTESY;
+    const free = Math.min(r.quantity, r.freeSpots ?? 0);
+    return [
+      {
+        productId,
+        productName: r.experienceName,
+        quantity: r.quantity - free,
+        // Cortesía: la experiencia no se cobra (sólo sus adicionales).
+        unitPrice: courtesy ? 0 : r.unitPrice,
+      },
+      {
+        productName: `${r.experienceName} · bonificado`,
+        quantity: free,
+        unitPrice: 0,
+      },
+    ].filter((line) => line.quantity > 0);
+  }
+
+  /**
+   * Cambia la cantidad de personas (y/o bonificadas) de una reserva
+   * confirmada: ajusta el cupo del turno, rearma las mesas y suma o resta el
+   * precio de cada persona que se cobra. Si ya hay venta, lo que se suma va
+   * como línea nueva. Devuelve lo cobrado de más (si bajaron personas y ya
+   * habían pagado), para avisar.
+   */
+  private async changeQuantity(
+    r: ReservationDocument,
+    quantity: number,
+    freeSpots?: number,
+  ): Promise<number> {
+    if (r.status !== ReservationStatus.CONFIRMED) {
+      throw new BadRequestException(
+        'Sólo se cambian las personas de una reserva confirmada.',
+      );
+    }
+    const oldQty = r.quantity;
+    const oldFree = Math.min(oldQty, r.freeSpots ?? 0);
+    const newFree = Math.min(quantity, freeSpots ?? oldFree);
+    const delta = quantity - oldQty;
+    if (delta !== 0) {
+      const session = await this.sessionModel.findById(r.sessionId);
+      if (!session) throw new NotFoundException('Turno no encontrado');
+      const sessionId = session._id as Types.ObjectId;
+      const statuses = [SessionStatus.OPEN, SessionStatus.CLOSED, SessionStatus.DRAFT];
+      if (delta > 0) await this.reserveSeats(sessionId, delta, statuses, true);
+      else await this.releaseSeats(sessionId, -delta);
+      r.quantity = quantity;
+      if (!(await this.isOwnScheduleSession(session))) {
+        await this.tables.release(r._id as Types.ObjectId, r.startAt);
+        try {
+          await this.attachTables(r, session, true, true);
+        } catch (err) {
+          // Sin mesas para el nuevo tamaño: queda como estaba.
+          r.quantity = oldQty;
+          if (delta > 0) await this.releaseSeats(sessionId, delta);
+          else await this.reserveSeats(sessionId, -delta, statuses, true);
+          await this.attachTables(r, session, true, true).catch(() => undefined);
+          throw err;
+        }
+      }
+    }
+    r.freeSpots = newFree > 0 ? newFree : undefined;
+
+    const courtesy = r.paymentMethod === ReservationPaymentMethod.COURTESY;
+    const billableDelta = Math.max(0, quantity - newFree) - Math.max(0, oldQty - oldFree);
+    const diff = courtesy ? 0 : Number((r.unitPrice * billableDelta).toFixed(2));
+    if (diff === 0) return 0;
+    await this.linkLegacySale(r);
+    if (diff > 0 && r.saleId) {
+      await this.salesService.addExtraItems(String(r.saleId), [
+        {
+          productName: `${r.experienceName} · ${billableDelta} ${billableDelta === 1 ? 'persona' : 'personas'} más`,
+          unitPrice: diff,
+        },
+      ]);
+    }
+    const balance = (r.balanceDue ?? 0) + diff;
+    r.totalAmount = Number(Math.max(0, (r.totalAmount ?? 0) + diff).toFixed(2));
+    r.balanceDue = Number(Math.max(0, balance).toFixed(2));
+    return balance < 0 ? Number((-balance).toFixed(2)) : 0;
+  }
+
   private async findByIdOrThrow(id: string): Promise<ReservationDocument> {
     if (!Types.ObjectId.isValid(id))
       throw new BadRequestException('id inválido');
@@ -2250,6 +2492,7 @@ ${dto.notes}` : note,
       experienceName: r.experienceName,
       startAt: r.startAt,
       quantity: r.quantity,
+      freeSpots: r.freeSpots,
       unitPrice: r.unitPrice,
       amount: r.amount,
       depositAmount: r.depositAmount,
