@@ -62,3 +62,49 @@ export class ListMakeupsQueryDto {
   @IsMongoId()
   studentId?: string;
 }
+
+/** Sumar a un alumno a una clase extra (otro grupo, un día puntual). */
+export class ScheduleExtraClassDto {
+  @ApiProperty({ description: 'Alumno' })
+  @IsMongoId()
+  studentId: string;
+
+  @ApiProperty({ description: 'Grupo de la clase a la que se suma' })
+  @IsMongoId()
+  groupId: string;
+
+  @ApiProperty({ description: "Día de la clase, 'YYYY-MM-DD'" })
+  @Matches(YMD, { message: 'La fecha va en formato YYYY-MM-DD' })
+  date: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  notes?: string;
+
+  @ApiPropertyOptional({
+    description: 'Quién la suma (cuentas compartidas). Si no viene, el nombre de la cuenta.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  doneBy?: string;
+}
+
+export class ListExtraClassesQueryDto {
+  @ApiPropertyOptional({ description: 'Grupo' })
+  @IsOptional()
+  @IsMongoId()
+  groupId?: string;
+
+  @ApiPropertyOptional({ description: "Día de la clase, 'YYYY-MM-DD'" })
+  @IsOptional()
+  @Matches(YMD, { message: 'La fecha va en formato YYYY-MM-DD' })
+  date?: string;
+
+  @ApiPropertyOptional({ description: 'Alumno' })
+  @IsOptional()
+  @IsMongoId()
+  studentId?: string;
+}

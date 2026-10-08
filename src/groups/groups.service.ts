@@ -28,6 +28,10 @@ import {
   MakeupClassDocument,
 } from '../common/schemas/makeup-class.schema';
 import { ReservationStatus } from '../common/enums/reservation.enum';
+import {
+  ExtraClass,
+  ExtraClassDocument,
+} from '../common/schemas/extra-class.schema';
 
 type GroupRow = { name: string; sortOrder?: number; hasMonthlyPiece?: boolean };
 
@@ -82,6 +86,8 @@ export class GroupsService {
     private readonly reservationModel: Model<ReservationDocument>,
     @InjectModel(MakeupClass.name)
     private readonly makeupModel: Model<MakeupClassDocument>,
+    @InjectModel(ExtraClass.name)
+    private readonly extraModel: Model<ExtraClassDocument>,
   ) {}
 
   /** Admin o encargado: gestionan todos los grupos. */
@@ -254,7 +260,7 @@ export class GroupsService {
     }).weekday;
     if (!Number.isFinite(weekday))
       throw new BadRequestException('date debe ser YYYY-MM-DD');
-    const [groups, trials, makeups] = await Promise.all([
+    const [groups, trials, makeups, extras] = await Promise.all([
       this.groupModel
         .find({ deletedAt: { $exists: false }, isActive: true })
         .select('name schedule studentIds professorName experienceIds')
@@ -264,6 +270,7 @@ export class GroupsService {
         .find({ $or: [{ toDate: dateKey }, { fromDate: dateKey }] })
         .select('fromGroupId fromDate toGroupId toDate')
         .lean(),
+      this.extraModel.find({ date: dateKey }).select('groupId').lean(),
     ]);
     const count = (ids: unknown[]) => {
       const m = new Map<string, number>();
@@ -275,6 +282,7 @@ export class GroupsService {
     const makeupsOf = count(
       makeups.filter((m) => m.toDate === dateKey).map((m) => m.toGroupId),
     );
+    const extrasOf = count(extras.map((x) => x.groupId));
     const awayOf = count(
       makeups.filter((m) => m.fromDate === dateKey).map((m) => m.fromGroupId),
     );
@@ -292,6 +300,8 @@ export class GroupsService {
           trials: trialsOf.get(String(g._id)) ?? 0,
           makeups: makeupsOf.get(String(g._id)) ?? 0,
           away: awayOf.get(String(g._id)) ?? 0,
+          // Alumnos de otros grupos que suman esta clase (doble turno).
+          extras: extrasOf.get(String(g._id)) ?? 0,
           // Sus reservas se muestran acá, no como un turno aparte.
           experienceIds: (g.experienceIds ?? []).map(String),
         };

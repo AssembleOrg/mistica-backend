@@ -35,3 +35,4 @@ export * from './bot-faq.schema';
 export * from './student-monthly-piece.schema';
 export * from './trial-class.schema';
 export * from './makeup-class.schema';
+export * from './extra-class.schema';

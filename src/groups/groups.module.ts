@@ -16,6 +16,10 @@ import {
   MakeupClass,
   MakeupClassSchema,
 } from '../common/schemas/makeup-class.schema';
+import {
+  ExtraClass,
+  ExtraClassSchema,
+} from '../common/schemas/extra-class.schema';
 import { GroupsController } from './groups.controller';
 import { GroupsService } from './groups.service';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
@@ -30,6 +34,7 @@ import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
       { name: TrialClass.name, schema: TrialClassSchema },
       { name: Reservation.name, schema: ReservationSchema },
       { name: MakeupClass.name, schema: MakeupClassSchema },
+      { name: ExtraClass.name, schema: ExtraClassSchema },
     ]),
   ],
   controllers: [GroupsController],

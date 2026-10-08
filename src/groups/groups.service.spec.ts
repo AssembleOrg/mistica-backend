@@ -48,6 +48,7 @@ async function build(opts: {
       { provide: getModelToken('TrialClass'), useValue: {} },
       { provide: getModelToken('Reservation'), useValue: {} },
       { provide: getModelToken('MakeupClass'), useValue: {} },
+      { provide: getModelToken('ExtraClass'), useValue: {} },
     ],
   }).compile();
   return { service: moduleRef.get(GroupsService), groupModel, studentModel };
