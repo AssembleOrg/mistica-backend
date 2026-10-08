@@ -1,6 +1,9 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
+import { StudentDocument } from '../common/schemas/student.schema';
+import { ConversationDocument } from '../common/schemas/conversation.schema';
+import { phoneCore } from '../common/utils/phone';
 import { CreateClientDto, UpdateClientDto, PaginatedDateFilterDto } from '../common/dto';
 import { Client, ClientWithPrepaids, Prepaid, PaginatedResponse } from '../common/interfaces';
 import { 
@@ -27,7 +30,138 @@ export class ClientsService {
     @InjectModel('Reservation')
     private readonly reservationModel: Model<ReservationDocument>,
     private readonly studentsService: StudentsService,
+    @InjectModel('Student') private readonly studentModel: Model<StudentDocument>,
+    @InjectModel('Conversation')
+    private readonly conversationModel: Model<ConversationDocument>,
   ) {}
+
+  // ── Duplicados y fusión ─────────────────────────────────────────────────
+
+  /**
+   * Grupos de clientes que parecen la misma persona: mismo teléfono (últimos
+   * 8 dígitos) y mismo nombre de pila. Dos hermanos con el teléfono de la
+   * familia no se agrupan.
+   */
+  async findDuplicates() {
+    const clients = await this.clientModel
+      .find({ deletedAt: { $exists: false } })
+      .select('fullName phone email createdAt')
+      .lean();
+    const groups = new Map<string, typeof clients>();
+    for (const c of clients) {
+      const core = phoneCore(c.phone);
+      const first = firstNameKey(c.fullName);
+      if (core.length < 6 || !first) continue;
+      const key = `${core.slice(-8)}|${first}`;
+      const arr = groups.get(key);
+      if (arr) arr.push(c);
+      else groups.set(key, [c]);
+    }
+    const dupes = [...groups.values()].filter((g) => g.length > 1);
+    const ids = dupes.flat().map((c) => c._id);
+    const [sales, reservations, students] = await Promise.all([
+      this.saleModel.aggregate<{ _id: Types.ObjectId; n: number }>([
+        { $match: { clientId: { $in: ids }, deletedAt: { $exists: false } } },
+        { $group: { _id: '$clientId', n: { $sum: 1 } } },
+      ]),
+      this.reservationModel.aggregate<{ _id: Types.ObjectId; n: number }>([
+        { $match: { clientId: { $in: ids } } },
+        { $group: { _id: '$clientId', n: { $sum: 1 } } },
+      ]),
+      this.studentModel
+        .find({ clientId: { $in: ids }, deletedAt: { $exists: false } })
+        .select('clientId')
+        .lean(),
+    ]);
+    const count = (rows: { _id: Types.ObjectId; n: number }[]) =>
+      new Map(rows.map((r) => [String(r._id), r.n]));
+    const salesBy = count(sales);
+    const resBy = count(reservations);
+    const studentOf = new Set(students.map((st) => String(st.clientId)));
+    return dupes.map((g) =>
+      g
+        .map((c) => ({
+          id: String(c._id),
+          fullName: c.fullName,
+          phone: c.phone,
+          email: c.email,
+          createdAt: c.createdAt,
+          salesCount: salesBy.get(String(c._id)) ?? 0,
+          reservationsCount: resBy.get(String(c._id)) ?? 0,
+          isStudent: studentOf.has(String(c._id)),
+        }))
+        // Primero el que más historia tiene: sugerido para quedarse.
+        .sort((a, b) => b.salesCount + b.reservationsCount - (a.salesCount + a.reservationsCount)),
+    );
+  }
+
+  /**
+   * Fusiona `fromId` en `keepId`: ventas, reservas, señas, conversaciones y
+   * alumno pasan al que queda; sus datos vacíos se completan con los del
+   * repetido; el repetido se borra (soft delete).
+   */
+  async merge(keepId: string, fromId: string) {
+    if (!Types.ObjectId.isValid(keepId) || !Types.ObjectId.isValid(fromId))
+      throw new BadRequestException('ID de cliente inválido');
+    if (keepId === fromId)
+      throw new BadRequestException('No se puede fusionar un cliente consigo mismo');
+    const [keep, from] = await Promise.all([
+      this.clientModel.findOne({ _id: keepId, deletedAt: { $exists: false } }).exec(),
+      this.clientModel.findOne({ _id: fromId, deletedAt: { $exists: false } }).exec(),
+    ]);
+    if (!keep || !from) throw new NotFoundException('Cliente no encontrado');
+
+    const [keepStudent, fromStudent] = await Promise.all([
+      this.studentModel.findOne({ clientId: keep._id, deletedAt: { $exists: false } }).lean(),
+      this.studentModel.findOne({ clientId: from._id, deletedAt: { $exists: false } }).lean(),
+    ]);
+    if (keepStudent && fromStudent)
+      throw new BadRequestException(
+        'Los dos clientes tienen ficha de alumno: fusioná primero los alumnos',
+      );
+
+    const move = { $set: { clientId: keep._id } };
+    const byFrom = { clientId: from._id };
+    const [sales, reservations, prepaids, conversations, students] = await Promise.all([
+      this.saleModel.updateMany(byFrom, move),
+      this.reservationModel.updateMany(byFrom, move),
+      this.prepaidModel.updateMany(byFrom, move),
+      this.conversationModel.updateMany(byFrom, move),
+      this.studentModel.updateMany(byFrom, {
+        $set: { clientId: keep._id, clientName: keep.fullName },
+      }),
+    ]);
+
+    if (!keep.phone && from.phone) keep.phone = from.phone;
+    if (!keep.email && from.email) keep.email = from.email;
+    if (!keep.cuit && from.cuit) keep.cuit = from.cuit;
+    if (from.notes && from.notes !== keep.notes)
+      keep.notes = keep.notes ? `${keep.notes}\n${from.notes}` : from.notes;
+    const labels = new Set([...(keep.labels ?? []), ...(from.labels ?? [])].map(String));
+    keep.labels = [...labels].map((l) => new Types.ObjectId(l));
+    keep.updatedAt = new Date();
+    await keep.save();
+
+    from.deletedAt = new Date();
+    from.notes = [from.notes, `Fusionado en ${keep.fullName} (${String(keep._id)})`]
+      .filter(Boolean)
+      .join('\n');
+    // Libera email/CUIT únicos del repetido (sigue borrado, sin perder rastro).
+    if (from.email && from.email === keep.email) from.email = undefined;
+    if (from.cuit && from.cuit === keep.cuit) from.cuit = undefined;
+    await from.save();
+
+    return {
+      keepId: String(keep._id),
+      moved: {
+        sales: sales.modifiedCount,
+        reservations: reservations.modifiedCount,
+        prepaids: prepaids.modifiedCount,
+        conversations: conversations.modifiedCount,
+        students: students.modifiedCount,
+      },
+    };
+  }
 
   private mapToClientResponse(client: ClientDocument, prepaidAmount?: number, transactionCount?: number): Client {
     const clientObj = client.toObject();
@@ -481,4 +615,13 @@ export class ClientsService {
 
     return prepaids.map(prepaid => this.mapToPrepaidResponse(prepaid));
   }
+}
+
+function firstNameKey(name?: string): string {
+  return (name ?? '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)[0];
 }

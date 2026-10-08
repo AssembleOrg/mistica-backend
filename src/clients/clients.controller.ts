@@ -113,6 +113,26 @@ export class ClientsController {
     };
   }
 
+  @Get('duplicates')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Clientes repetidos (mismo teléfono y nombre de pila)' })
+  async duplicates() {
+    return { success: true, data: await this.clientsService.findDuplicates() };
+  }
+
+  @Post(':id/merge')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Auditory({ entity: 'Client', action: 'UPDATE' })
+  @ApiOperation({ summary: 'Fusionar otro cliente en este (el otro se borra)' })
+  async merge(@Param('id') id: string, @Body() body: { fromId: string }) {
+    return {
+      success: true,
+      data: await this.clientsService.merge(id, body?.fromId),
+    };
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener cliente por ID' })
   @ApiParam({ name: 'id', description: 'ID del cliente' })

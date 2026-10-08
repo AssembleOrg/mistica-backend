@@ -12,6 +12,12 @@ import {
   ReservationSchema,
 } from '../common/schemas/reservation.schema';
 
+import { Student, StudentSchema } from '../common/schemas/student.schema';
+import {
+  Conversation,
+  ConversationSchema,
+} from '../common/schemas/conversation.schema';
+
 @Module({
   imports: [
     StudentsModule,
@@ -22,6 +28,9 @@ import {
       { name: ClientLabel.name, schema: ClientLabelSchema },
       // Solo lectura: contexto del cliente para el bot (reservas por teléfono).
       { name: Reservation.name, schema: ReservationSchema },
+      // Fusión de clientes repetidos: se reasignan alumno y conversaciones.
+      { name: Student.name, schema: StudentSchema },
+      { name: Conversation.name, schema: ConversationSchema },
     ]),
   ],
   controllers: [ClientsController],
