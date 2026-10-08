@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { StudentDocument } from '../common/schemas/student.schema';
@@ -22,7 +22,9 @@ import { StudentsService } from '../students/students.service';
 import { PrepaidStatus, ReservationStatus } from '../common/enums';
 
 @Injectable()
-export class ClientsService {
+export class ClientsService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(ClientsService.name);
+
   constructor(
     @InjectModel('Client') private readonly clientModel: Model<ClientDocument>,
     @InjectModel('Prepaid') private readonly prepaidModel: Model<PrepaidDocument>,
@@ -90,8 +92,43 @@ export class ClientsService {
           reservationsCount: resBy.get(String(c._id)) ?? 0,
           isStudent: studentOf.has(String(c._id)),
         }))
-        // Primero el que más historia tiene: sugerido para quedarse.
-        .sort((a, b) => b.salesCount + b.reservationsCount - (a.salesCount + a.reservationsCount)),
+        // Primero el que se queda: el alumno, después el de más historia,
+        // después el más viejo.
+        .sort(
+          (a, b) =>
+            Number(b.isStudent) - Number(a.isStudent) ||
+            b.salesCount + b.reservationsCount - (a.salesCount + a.reservationsCount) ||
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        ),
+    );
+  }
+
+  /**
+   * Fusiona solos los clientes repetidos en el original (el primero de cada
+   * grupo de findDuplicates). Corre al arrancar: un cliente repetido rompe
+   * "es alumno / no es alumno" en caja. Si no se puede (p. ej. los dos son
+   * alumnos), lo deja y lo loguea.
+   */
+  async mergeAllDuplicates() {
+    const groups = await this.findDuplicates();
+    let merged = 0;
+    for (const [keep, ...rest] of groups) {
+      for (const dup of rest) {
+        try {
+          await this.merge(keep.id, dup.id);
+          merged++;
+          this.logger.log(`Cliente repetido fusionado: ${dup.fullName} (${dup.id}) → ${keep.fullName} (${keep.id})`);
+        } catch (err) {
+          this.logger.warn(`No se fusionó ${dup.fullName} (${dup.id}) → ${keep.id}: ${String((err as Error)?.message ?? err)}`);
+        }
+      }
+    }
+    return merged;
+  }
+
+  async onApplicationBootstrap() {
+    void this.mergeAllDuplicates().catch((err) =>
+      this.logger.error(`Fusión de repetidos: ${String(err)}`),
     );
   }
 
