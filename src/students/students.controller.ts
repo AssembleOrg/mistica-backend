@@ -205,6 +205,15 @@ export class StudentsController {
     return this.service.linkStudentsWithoutClient();
   }
 
+  @Post('ensure-all-clients')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Todo cliente es alumno: crea/vincula y lista los dudosos (idempotente)',
+  })
+  ensureAllClients() {
+    return this.service.ensureStudentsForAllClients();
+  }
+
   @Post()
   @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Crear alumno' })

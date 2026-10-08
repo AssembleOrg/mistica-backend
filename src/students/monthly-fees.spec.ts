@@ -361,6 +361,39 @@ describe('Cuotas mensuales de alumnos', () => {
     expect(String(studentModel.docs[0].clientId)).toBe(String(clientModel.docs[0]._id));
   });
 
+  it('todo cliente es alumno: crea, vincula y deja los dudosos sin tocar', async () => {
+    const id = () => new Types.ObjectId();
+    const nuevo = { _id: id(), fullName: 'Ana Pérez', phone: '11 1111-2222' };
+    const suelta = student({ name: 'Bea Gómez', phone: '+54 9 11 3333-4444' });
+    const conAlumno = { _id: id(), fullName: 'Caro Ruiz', phone: '11 5555-6666' };
+    const yaVinculada = student({ name: 'Caro Ruiz', clientId: conAlumno._id });
+    // Cliente duplicado de Caro: su alumna ya es de otro cliente → dudoso.
+    const duplicada = { _id: id(), fullName: 'Caro R.', phone: '1155556666' };
+    const { service, studentModel } = build({
+      students: [suelta, yaVinculada],
+      clients: [
+        nuevo,
+        { _id: id(), fullName: 'Bea Gomez', phone: '11 3333-4444' },
+        conAlumno,
+        duplicada,
+      ],
+    });
+    // Fija la alumna de Caro con teléfono para que el duplicado la encuentre.
+    yaVinculada.phone = '11 5555-6666';
+
+    const r = await service.ensureStudentsForAllClients();
+    expect(r.created).toBe(1);
+    expect(r.linked).toBe(1);
+    expect(r.ambiguous.map((a) => a.name)).toEqual(['Caro R.']);
+    expect(studentModel.docs).toHaveLength(3);
+    expect(studentModel.docs.find((d) => d.name === 'Ana Pérez')?.clientId).toEqual(nuevo._id);
+    expect(suelta.clientId).toBeDefined();
+
+    const again = await service.ensureStudentsForAllClients();
+    expect(again.created + again.linked).toBe(0);
+    expect(studentModel.docs).toHaveLength(3);
+  });
+
   it('si el cliente no existe, la venta no toca nada', async () => {
     const { service, paymentModel } = build({ students: [student()] });
     const paid = await service.payFeesFromSale({

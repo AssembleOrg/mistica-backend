@@ -15,6 +15,7 @@ import {
   ReservationDocument,
 } from '../common/schemas';
 import { buildDateFilter } from '../common/utils';
+import { StudentsService } from '../students/students.service';
 import { PrepaidStatus, ReservationStatus } from '../common/enums';
 
 @Injectable()
@@ -25,6 +26,7 @@ export class ClientsService {
     @InjectModel('Sale') private readonly saleModel: Model<SaleDocument>,
     @InjectModel('Reservation')
     private readonly reservationModel: Model<ReservationDocument>,
+    private readonly studentsService: StudentsService,
   ) {}
 
   private mapToClientResponse(client: ClientDocument, prepaidAmount?: number, transactionCount?: number): Client {
@@ -108,6 +110,11 @@ export class ClientsService {
       if (!client || !client._id) {
         throw new BadRequestException('Error al crear el cliente');
       }
+
+      // Todo cliente es también alumno. Un error acá no tumba el alta.
+      await this.studentsService
+        .ensureStudentForClient(client)
+        .catch((err) => console.warn(`Alumno del cliente ${String(client._id)}: ${String(err)}`));
 
       // Crear prepaids si se proporcionan
       let prepaids: Prepaid[] = [];

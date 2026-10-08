@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ClientsController } from './clients.controller';
 import { ClientsService } from './clients.service';
+import { StudentsModule } from '../students/students.module';
 import { Client, ClientSchema } from '../common/schemas/client.schema';
 import { Prepaid, PrepaidSchema } from '../common/schemas/prepaid.schema';
 import { Sale, SaleSchema } from '../common/schemas/sale.schema';
@@ -13,6 +14,7 @@ import {
 
 @Module({
   imports: [
+    StudentsModule,
     MongooseModule.forFeature([
       { name: Client.name, schema: ClientSchema },
       { name: Prepaid.name, schema: PrepaidSchema },

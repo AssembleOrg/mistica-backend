@@ -208,6 +208,109 @@ export class StudentsService implements OnApplicationBootstrap {
     return { linked: orphans.length };
   }
 
+  /**
+   * Todo cliente es también alumno. Si el cliente no tiene alumno vinculado:
+   * - un único alumno con su teléfono y su nombre de pila, sin cliente → se vincula;
+   * - ninguno → se crea el alumno (sin grupo: no genera cuotas);
+   * - casos dudosos (varios candidatos, o el candidato ya es de otro cliente,
+   *   o cliente sin teléfono con un alumno suelto de igual nombre) → no se toca
+   *   y se devuelve `ambiguous` para revisarlo a mano.
+   */
+  async ensureStudentForClient(client: {
+    _id: unknown;
+    fullName: string;
+    phone?: string;
+    email?: string;
+  }): Promise<'exists' | 'linked' | 'created' | 'ambiguous'> {
+    const clientId = new Types.ObjectId(String(client._id));
+    const has = await this.studentModel.exists({
+      clientId,
+      deletedAt: { $exists: false },
+    });
+    if (has) return 'exists';
+
+    const key = firstNameKey(client.fullName);
+    const pattern = phoneTailPattern(client.phone);
+    let candidates: { _id: unknown; clientId?: unknown }[] = [];
+    if (pattern) {
+      candidates = (
+        await this.studentModel
+          .find({ deletedAt: { $exists: false }, phone: { $regex: pattern } })
+          .select('name clientId')
+          .lean()
+      ).filter((st) => !!key && firstNameKey(st.name) === key);
+    } else {
+      const full = nameKey(client.fullName);
+      candidates = (
+        await this.studentModel
+          .find({ deletedAt: { $exists: false }, clientId: { $exists: false } })
+          .select('name clientId')
+          .lean()
+      ).filter((st) => !!full && nameKey(st.name) === full);
+    }
+
+    if (candidates.length === 0) {
+      await this.studentModel.create({
+        name: client.fullName.trim(),
+        phone: client.phone?.trim() || undefined,
+        email: client.email?.trim().toLowerCase() || undefined,
+        clientId,
+        clientName: client.fullName,
+        joinedAt: new Date(),
+      });
+      return 'created';
+    }
+    if (candidates.length === 1 && !candidates[0].clientId && pattern) {
+      await this.studentModel.updateOne(
+        { _id: candidates[0]._id },
+        {
+          $set: {
+            clientId,
+            clientName: client.fullName,
+            updatedAt: new Date(),
+          },
+        },
+      );
+      return 'linked';
+    }
+    return 'ambiguous';
+  }
+
+  /** Recorre todos los clientes y les asegura su alumno. Idempotente. */
+  async ensureStudentsForAllClients() {
+    const linkedIds = new Set(
+      (
+        await this.studentModel
+          .find({ deletedAt: { $exists: false }, clientId: { $exists: true } })
+          .select('clientId')
+          .lean()
+      ).map((st) => String(st.clientId)),
+    );
+    const clients = await this.clientModel
+      .find({ deletedAt: { $exists: false } })
+      .select('fullName phone email')
+      .lean();
+    const report = { created: 0, linked: 0, ambiguous: [] as { clientId: string; name: string; phone?: string }[] };
+    for (const c of clients) {
+      if (linkedIds.has(String(c._id)) || !c.fullName?.trim()) continue;
+      try {
+        const r = await this.ensureStudentForClient(c);
+        if (r === 'created') report.created++;
+        else if (r === 'linked') report.linked++;
+        else if (r === 'ambiguous')
+          report.ambiguous.push({ clientId: String(c._id), name: c.fullName, phone: c.phone });
+      } catch (err) {
+        this.logger.warn(`Alumno para cliente ${String(c._id)}: ${String(err)}`);
+      }
+    }
+    this.logger.log(
+      `Clientes → alumnos: ${report.created} creados, ${report.linked} vinculados, ${report.ambiguous.length} dudosos`,
+    );
+    for (const a of report.ambiguous)
+      this.logger.warn(`Cliente dudoso (sin alumno): ${a.name} · ${a.phone ?? 'sin tel.'} · ${a.clientId}`);
+    return report;
+  }
+
   private async clientFor(id?: string) {
     if (!id) return undefined;
     if (!Types.ObjectId.isValid(id))
@@ -820,6 +923,9 @@ export class StudentsService implements OnApplicationBootstrap {
   /** Recalcula vencimientos y avisa una vez al equipo: a 3 días y al vencer. */
   @Cron('5 9 * * *', { timeZone: 'America/Argentina/Buenos_Aires' })
   async dailyPaymentFollowUp() {
+    await this.ensureStudentsForAllClients().catch((err) =>
+      this.logger.error(`Clientes → alumnos: ${String(err)}`),
+    );
     // Primero la cuota del mes de cada alumno, así su vencimiento ya entra en
     // los avisos de hoy.
     await this.ensureMonthlyFees().catch((err) =>
@@ -898,6 +1004,11 @@ export class StudentsService implements OnApplicationBootstrap {
     // cron de la mañana. No bloquea el arranque.
     void this.ensureMonthlyFees().catch((err) =>
       this.logger.error(`Cuotas del mes al iniciar: ${String(err)}`),
+    );
+    // Todo cliente es alumno: cubre clientes viejos y los creados por caminos
+    // que no pasan por ClientsService (reservas, grupos). No bloquea.
+    void this.ensureStudentsForAllClients().catch((err) =>
+      this.logger.error(`Clientes → alumnos al iniciar: ${String(err)}`),
     );
     // La pieza del mes era una por alumno y mes (índice único); ahora pueden
     // ser varias. Se borra el índice viejo (si ya no está, no pasa nada).
@@ -1928,6 +2039,16 @@ function feeStudent(s: {
 }
 
 /** Nombre de pila sin tildes ni mayúsculas ("Andrea Tau" → "andrea"). */
+/** Nombre completo normalizado (sin tildes, minúsculas, espacios simples). */
+function nameKey(name?: string): string {
+  return (name ?? '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
 function firstNameKey(name?: string): string {
   return (name ?? '')
     .normalize('NFD')
