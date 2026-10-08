@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { DateTime } from 'luxon';
@@ -86,7 +87,7 @@ export interface AvailableShift {
  * ese (experiencia, día, hora de inicio).
  */
 @Injectable()
-export class AvailabilityService {
+export class AvailabilityService implements OnModuleInit {
   private readonly logger = new Logger(AvailabilityService.name);
 
   constructor(
@@ -98,6 +99,60 @@ export class AvailabilityService {
     private readonly tables: TablesService,
     private readonly closedDates: ClosedDatesService,
   ) {}
+
+  /**
+   * Una sola vez: los turnos de hoy en adelante toman el cupo actual de su
+   * experiencia (los cupos se cambiaron antes de que esto se sincronizara).
+   */
+  onModuleInit() {
+    void this.syncAllCapacitiesOnce().catch((err) =>
+      this.logger.error(`No se pudieron sincronizar los cupos: ${String(err)}`),
+    );
+  }
+
+  private async syncAllCapacitiesOnce() {
+    const flags = this.sessionModel.db.collection('app_settings');
+    const key = 'capacitySync:2026-10-08';
+    if (await flags.findOne({ key })) return;
+    const exps = await this.experienceModel
+      .find({ deletedAt: { $exists: false } })
+      .select('_id')
+      .lean();
+    let n = 0;
+    for (const e of exps) n += await this.syncFutureCapacity(String(e._id));
+    await flags.updateOne(
+      { key },
+      { $set: { key, value: String(n), updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
+      { upsert: true },
+    );
+    this.logger.log(`Cupos sincronizados en ${n} turnos de hoy en adelante.`);
+  }
+
+  /**
+   * Lleva el cupo de la experiencia a sus turnos de hoy en adelante, que se
+   * crearon con el cupo de ese momento. Nunca queda por debajo de lo ya
+   * reservado. Devuelve cuántos turnos cambiaron.
+   */
+  async syncFutureCapacity(experienceId: string): Promise<number> {
+    if (!Types.ObjectId.isValid(experienceId)) return 0;
+    const exp = await this.experienceModel
+      .findById(experienceId)
+      .select('defaultCapacity')
+      .lean();
+    const cap = Number(exp?.defaultCapacity);
+    if (!exp || !(cap > 0)) return 0;
+    const today = DateTime.now().setZone(envConfig.timezone).startOf('day').toJSDate();
+    const res = await this.sessionModel.updateMany(
+      {
+        experienceId: exp._id,
+        startAt: { $gte: today },
+        deletedAt: { $exists: false },
+        capacity: { $ne: cap },
+      },
+      [{ $set: { capacity: { $max: [cap, '$seatsTaken', 1] } } }],
+    );
+    return res.modifiedCount;
+  }
 
   /**
    * Días y horarios donde se puede reservar una experiencia, entre dos fechas.
