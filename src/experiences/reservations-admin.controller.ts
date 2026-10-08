@@ -22,6 +22,7 @@ import {
   ListReservationsQueryDto,
   ResolveReviewDto,
   ScheduleSaleDto,
+  PreviewTablesDto,
 } from '../common/dto/reservation.dto';
 import { AddSalePaymentsDto, CreateSaleDto } from '../common/dto/sale.dto';
 import { UserRole } from '../common/enums/user-role.enum';
@@ -52,6 +53,16 @@ export class ReservationsAdminController {
     @Req() req: AuthRequest,
   ) {
     return this.reservationsService.adminCreateReservation(dto, req.user?.id);
+  }
+
+  // Verificación del panel: como la pública, pero puede cruzar turnos y sumar
+  // hora extra (lo que después permite el alta del admin).
+  @Post('preview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @ApiOperation({ summary: '¿Entra el grupo a esa hora? (panel: cruza turnos, hora extra)' })
+  async preview(@Body() dto: PreviewTablesDto) {
+    return this.reservationsService.previewTables(dto, { admin: true });
   }
 
   @Post('from-sale/:saleId')

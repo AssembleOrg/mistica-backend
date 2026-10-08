@@ -54,6 +54,11 @@ export class Reservation {
   @Prop({ type: Number, min: 0 })
   freeSpots?: number;
 
+  // Hora extra (p. ej. un cumple de 17 a 20 con una experiencia de 2 h): se
+  // suma a la duración del turno y las mesas quedan ocupadas hasta el final.
+  @Prop({ type: Number, min: 0 })
+  extraMinutes?: number;
+
   // `amount` = lo que se COBRA en esta operación (la seña en reservas públicas;
   // lo que cobró el admin en reservas de admin). Es lo que va a MercadoPago y a
   // caja. Se mantiene por compatibilidad histórica.

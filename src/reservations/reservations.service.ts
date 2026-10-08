@@ -58,7 +58,7 @@ import { computeReservationAmounts } from './reservation-amounts';
 import { SalesService } from '../sales/sales.service';
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { TablesService } from '../tables/tables.service';
-import { businessDateKey } from '../tables/shifts';
+import { businessBounds, businessDateKey } from '../tables/shifts';
 import { AvailabilityService } from './availability.service';
 import { GroupsService } from '../groups/groups.service';
 import { InAppNotificationsService } from '../in-app-notifications/in-app-notifications.service';
@@ -111,6 +111,14 @@ type KitchenReservation = {
   kitchenNotes?: string;
   cakes?: Array<{ label: string; qty?: number }>;
 };
+
+/** "1 h", "1 h 30", "30 min". */
+function extraLabel(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (!h) return `${m} min`;
+  return m ? `${h} h ${m}` : `${h} h`;
+}
 
 @Injectable()
 export class ReservationsService {
@@ -384,13 +392,16 @@ export class ReservationsService {
    * reservó ese día en ese bloque), se arma uno EN MEMORIA con los datos de la
    * experiencia: consultar disponibilidad no debe crear nada en la base.
    */
-  private async sessionForPreview(dto: {
-    sessionId?: string;
-    experienceId?: string;
-    date?: string;
-    startTime?: string;
-    shiftKey?: string;
-  }): Promise<{
+  private async sessionForPreview(
+    dto: {
+      sessionId?: string;
+      experienceId?: string;
+      date?: string;
+      startTime?: string;
+      shiftKey?: string;
+    },
+    opts: { acrossShifts?: boolean } = {},
+  ): Promise<{
     startAt: Date;
     durationMinutes: number;
     capacity: number;
@@ -423,6 +434,7 @@ export class ReservationsService {
       dto.experienceId,
       dto.date,
       time,
+      opts,
     );
     const existing = await this.sessionModel
       .findOne({
@@ -454,13 +466,16 @@ export class ReservationsService {
    * admin cargó a mano), o el trío (experiencia, día, bloque), en cuyo caso el
    * turno se crea solo la primera vez que alguien reserva ahí.
    */
-  private async resolveSessionId(dto: {
-    sessionId?: string;
-    experienceId?: string;
-    date?: string;
-    startTime?: string;
-    shiftKey?: string;
-  }): Promise<string> {
+  private async resolveSessionId(
+    dto: {
+      sessionId?: string;
+      experienceId?: string;
+      date?: string;
+      startTime?: string;
+      shiftKey?: string;
+    },
+    opts: { acrossShifts?: boolean } = {},
+  ): Promise<string> {
     if (dto.sessionId) return dto.sessionId;
     const time = dto.startTime ?? dto.shiftKey;
     if (!dto.experienceId || !dto.date || !time) {
@@ -472,6 +487,7 @@ export class ReservationsService {
       dto.experienceId,
       dto.date,
       time,
+      opts,
     );
     return String(session._id);
   }
@@ -482,22 +498,30 @@ export class ReservationsService {
    * cliente: entra normal, entra sólo compartiendo mesa grande (hay que
    * preguntarle), o no entra.
    */
-  async previewTables(dto: {
-    sessionId?: string;
-    experienceId?: string;
-    date?: string;
-    startTime?: string;
-    shiftKey?: string;
-    quantity: number;
-    acceptSharedTable?: boolean;
-    isBirthday?: boolean;
-  }) {
+  async previewTables(
+    dto: {
+      sessionId?: string;
+      experienceId?: string;
+      date?: string;
+      startTime?: string;
+      shiftKey?: string;
+      quantity: number;
+      acceptSharedTable?: boolean;
+      isBirthday?: boolean;
+      extraMinutes?: number;
+    },
+    /** Desde el panel: puede cruzar turnos y sumar hora extra. */
+    opts: { admin?: boolean } = {},
+  ) {
     const qty = dto.quantity;
     const acceptShared = dto.acceptSharedTable ?? false;
 
     // Igual que el hold: por turno existente o por (experiencia, día, hora).
     // Acá NO se crea nada: sólo se calcula dónde caería.
-    const session = await this.sessionForPreview(dto);
+    const base = await this.sessionForPreview(dto, { acrossShifts: opts.admin });
+    const extra = opts.admin ? (dto.extraMinutes ?? 0) : 0;
+    if (extra > 0) this.assertEndsBeforeClose(base.startAt, base.durationMinutes + extra);
+    const session = { ...base, durationMinutes: base.durationMinutes + extra };
 
     // Horario PROPIO de la experiencia: el lugar es el cupo, no las mesas.
     if (await this.isOwnScheduleSession(session)) {
@@ -907,7 +931,7 @@ export class ReservationsService {
     fromSale?: { saleId: string; total: number; paid: number },
   ) {
     const qty = dto.quantity;
-    const sessionId = await this.resolveSessionId(dto);
+    const sessionId = await this.resolveSessionId(dto, { acrossShifts: true });
     // El admin ve el salón y decide: puede cargar más personas que el cupo
     // del turno o las mesas libres (un cumple de 25).
     const session = await this.reserveSeats(
@@ -927,7 +951,18 @@ export class ReservationsService {
     // Bonificados a mano: entran (piezas, cocina) pero no se cobran.
     const freeSpots = Math.min(qty, dto.freeSpots ?? 0);
     const billable = Math.max(0, Math.min(billableQty, qty - freeSpots));
-    const total = fromSale ? fromSale.total : unitPrice * billable;
+    // Hora extra: alarga la reserva; su precio va como adicional.
+    const extraMinutes = dto.extraMinutes ?? 0;
+    const extraAmount = fromSale ? 0 : Number((dto.extraAmount ?? 0).toFixed(2));
+    if (extraMinutes > 0) {
+      try {
+        this.assertEndsBeforeClose(session.startAt, session.durationMinutes + extraMinutes);
+      } catch (err) {
+        await this.releaseSeats(session._id as Types.ObjectId, qty);
+        throw err;
+      }
+    }
+    const total = fromSale ? fromSale.total : unitPrice * billable + extraAmount;
     // El admin puede cobrar el total o una seña (dto.amount). El saldo es el resto.
     if (!fromSale && dto.amount != null && dto.amount > total + 0.01) {
       await this.releaseSeats(session._id as Types.ObjectId, qty);
@@ -949,6 +984,16 @@ export class ReservationsService {
         unitPrice,
         quantity: qty,
         ...(freeSpots > 0 && { freeSpots }),
+        ...(extraMinutes > 0 && { extraMinutes }),
+        ...(extraAmount > 0 && {
+          extras: [
+            {
+              label: `Hora extra (${extraLabel(extraMinutes)})`,
+              amount: extraAmount,
+              createdAt: new Date(),
+            },
+          ],
+        }),
         amount,
         totalAmount: total,
         depositAmount: isCourtesy ? 0 : amount,
@@ -1318,7 +1363,8 @@ export class ReservationsService {
       reservationId: reservation._id as Types.ObjectId,
       qty: reservation.quantity,
       startAt: session.startAt,
-      durationMinutes: session.durationMinutes,
+      // Con hora extra, las mesas quedan ocupadas hasta el final real.
+      durationMinutes: session.durationMinutes + (reservation.extraMinutes ?? 0),
       sharedAccepted,
       takeAllIfShort,
     });
@@ -1811,6 +1857,9 @@ export class ReservationsService {
     ) {
       creditDue = await this.changeQuantity(r, dto.quantity ?? r.quantity, dto.freeSpots);
     }
+    if (dto.extraMinutes !== undefined && dto.extraMinutes !== (r.extraMinutes ?? 0)) {
+      await this.changeExtraTime(r, dto.extraMinutes, dto.extraAmount);
+    }
     if (dto.customerName !== undefined) r.customerName = dto.customerName;
     if (dto.customerEmail !== undefined) r.customerEmail = dto.customerEmail;
     if (dto.customerPhone !== undefined) r.customerPhone = dto.customerPhone;
@@ -1969,7 +2018,7 @@ export class ReservationsService {
       );
     }
 
-    const targetSessionId = await this.resolveSessionId(dto);
+    const targetSessionId = await this.resolveSessionId(dto, { acrossShifts: true });
     if (String(r.sessionId) === targetSessionId) {
       throw new BadRequestException('La reserva ya está en ese turno.');
     }
@@ -2321,6 +2370,58 @@ ${dto.notes}` : note,
     return { unitPrice: eff.unitPrice, billableQty: eff.billableQty };
   }
 
+  /** Con la hora extra, la reserva tiene que seguir terminando antes del cierre. */
+  private assertEndsBeforeClose(startAt: Date, minutes: number) {
+    const { close } = businessBounds(businessDateKey(startAt));
+    const end = new Date(startAt.getTime() + minutes * 60_000);
+    if (end.getTime() > close.getTime()) {
+      const hhmm = (d: Date) =>
+        DateTime.fromJSDate(d).setZone(envConfig.timezone).toFormat('HH:mm');
+      throw new BadRequestException(
+        `Con la hora extra terminaría a las ${hhmm(end)} y el salón cierra a las ${hhmm(close)}.`,
+      );
+    }
+  }
+
+  /**
+   * Cambia la hora extra de una reserva confirmada: rearma las mesas para la
+   * duración nueva y, si viene un precio, lo suma como adicional (también a
+   * la venta, si ya tiene).
+   */
+  private async changeExtraTime(r: ReservationDocument, minutes: number, amount?: number) {
+    if (r.status !== ReservationStatus.CONFIRMED) {
+      throw new BadRequestException('Sólo se suma hora extra a una reserva confirmada.');
+    }
+    const session = await this.sessionModel.findById(r.sessionId);
+    if (!session) throw new NotFoundException('Turno no encontrado');
+    if (minutes > 0) this.assertEndsBeforeClose(r.startAt, session.durationMinutes + minutes);
+    const prev = r.extraMinutes;
+    r.extraMinutes = minutes > 0 ? minutes : undefined;
+    if (!(await this.isOwnScheduleSession(session))) {
+      await this.tables.release(r._id as Types.ObjectId, r.startAt);
+      try {
+        await this.attachTables(r, session, true, true);
+      } catch (err) {
+        r.extraMinutes = prev;
+        await this.attachTables(r, session, true, true).catch(() => undefined);
+        throw err;
+      }
+    }
+    const charge = Number((amount ?? 0).toFixed(2));
+    if (minutes > 0 && charge > 0) {
+      const label = `Hora extra (${extraLabel(minutes)})`;
+      await this.linkLegacySale(r);
+      if (r.saleId) {
+        await this.salesService.addExtraItems(String(r.saleId), [
+          { productName: label, unitPrice: charge },
+        ]);
+      }
+      r.extras = [...(r.extras ?? []), { label, amount: charge, createdAt: new Date() }];
+      r.totalAmount = Number(((r.totalAmount ?? 0) + charge).toFixed(2));
+      r.balanceDue = Number(((r.balanceDue ?? 0) + charge).toFixed(2));
+    }
+  }
+
   /**
    * Líneas de la experiencia en el ticket: las personas que se cobran y, aparte
    * y en $0, las bonificadas (así el ticket no sale por todas).
@@ -2493,6 +2594,7 @@ ${dto.notes}` : note,
       startAt: r.startAt,
       quantity: r.quantity,
       freeSpots: r.freeSpots,
+      extraMinutes: r.extraMinutes,
       unitPrice: r.unitPrice,
       amount: r.amount,
       depositAmount: r.depositAmount,

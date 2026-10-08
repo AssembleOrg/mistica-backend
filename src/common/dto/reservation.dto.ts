@@ -108,6 +108,18 @@ export class PreviewTablesDto {
   quantity: number;
 
   @ApiPropertyOptional({
+    description: 'Sólo desde el panel. Hora extra: minutos que se suman a la duración (alarga la reserva y ocupa las mesas hasta el final).',
+    minimum: 0,
+    maximum: 360,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(360)
+  extraMinutes?: number;
+
+  @ApiPropertyOptional({
     description: 'El cliente ya aceptó compartir mesa grande.',
     default: false,
   })
@@ -377,6 +389,24 @@ export class AdminCreateReservationDto {
   @Min(0)
   freeSpots?: number;
 
+  @ApiPropertyOptional({
+    description: 'Hora extra: minutos que se suman a la duración (alarga la reserva y ocupa las mesas hasta el final).',
+    minimum: 0,
+    maximum: 360,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(360)
+  extraMinutes?: number;
+
+  @ApiPropertyOptional({ description: 'Precio de la hora extra (se suma al total como adicional).', minimum: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @Min(0)
+  extraAmount?: number;
+
   @ApiProperty({ description: 'Nombre y apellido del cliente' })
   @IsString()
   @MaxLength(120)
@@ -524,6 +554,24 @@ export class AdminUpdateReservationDto {
   @IsInt()
   @Min(0)
   freeSpots?: number;
+
+  @ApiPropertyOptional({
+    description: 'Hora extra: minutos que se suman a la duración (alarga la reserva y ocupa las mesas hasta el final).',
+    minimum: 0,
+    maximum: 360,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(360)
+  extraMinutes?: number;
+
+  @ApiPropertyOptional({ description: 'Precio de la hora extra (se suma al total como adicional).', minimum: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @Min(0)
+  extraAmount?: number;
 
   @ApiPropertyOptional({ description: 'Nombre del cliente' })
   @IsOptional()

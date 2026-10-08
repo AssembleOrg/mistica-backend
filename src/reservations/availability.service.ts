@@ -301,6 +301,8 @@ export class AvailabilityService {
     experienceId: string,
     dateKey: string,
     timeOrShift: string,
+    /** Alta desde el panel: puede cruzar de un turno al otro (17 a 20). */
+    opts: { acrossShifts?: boolean } = {},
   ): Promise<{
     startAt: Date;
     startKey: string;
@@ -310,7 +312,7 @@ export class AvailabilityService {
     const exp = await this.experienceOrThrow(experienceId);
     const startTime = this.resolveStartTime(dateKey, timeOrShift);
     const slot = this.slotAt(exp, dateKey, startTime, envConfig.timezone);
-    if (slot) this.assertBookableTime(exp, dateKey, startTime);
+    if (slot) this.assertBookableTime(exp, dateKey, startTime, opts);
     if (!slot) {
       const w = bookingStartWindow(exp.durationMinutes);
       throw new BadRequestException(
@@ -337,13 +339,14 @@ export class AvailabilityService {
     experienceId: string,
     dateKey: string,
     timeOrShift: string,
+    opts: { acrossShifts?: boolean } = {},
   ): Promise<ExperienceSessionDocument> {
     const exp = await this.experienceOrThrow(experienceId);
     const tz = envConfig.timezone;
     const startTime = this.resolveStartTime(dateKey, timeOrShift);
 
     const slot = this.slotAt(exp, dateKey, startTime, tz);
-    if (slot) this.assertBookableTime(exp, dateKey, startTime);
+    if (slot) this.assertBookableTime(exp, dateKey, startTime, opts);
     if (!slot) {
       const w = bookingStartWindow(exp.durationMinutes);
       throw new BadRequestException(
@@ -415,6 +418,7 @@ export class AvailabilityService {
     exp: ExperienceDocument,
     dateKey: string,
     startTime: string,
+    opts: { acrossShifts?: boolean } = {},
   ): void {
     if (hasOwnSchedule(exp.ownSchedule)) {
       if (ownStartsFor(exp.ownSchedule, dateKey).includes(startTime)) return;
@@ -423,6 +427,9 @@ export class AvailabilityService {
         `${exp.name} tiene horario propio: ${cuando}. Elegí uno de esos horarios.`,
       );
     }
+    // El panel decide: una reserva puede ir de 17 a 20 aunque pase de un
+    // turno sugerido al otro (la web y el bot siguen con los turnos).
+    if (opts.acrossShifts) return;
     if (shiftFitting(dateKey, toMinutes(startTime), exp.durationMinutes)) return;
     const dayShifts = this.shifts.forDate(dateKey);
     const opciones = dayShifts
