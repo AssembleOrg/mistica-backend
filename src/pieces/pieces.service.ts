@@ -203,7 +203,8 @@ export class PiecesService implements OnModuleInit {
     }
 
     // 2x1: las dos piezas van en la misma ficha (una paleta), con el
-    // adicional cobrado una vez.
+    // adicional cobrado una vez. Cerámica pide firma y colores; tela,
+    // bastidor, yeso… no (se los llevan en el día).
     for (const entry of dto.entries) {
       const extra = entry.extraId ? catalog.get(entry.extraId) : undefined;
       if (extra?.pair && !entry.pieceType2?.trim()) {
@@ -211,7 +212,18 @@ export class PiecesService implements OnModuleInit {
           `${extra.name}: elegí las dos piezas de ${entry.personName.trim()}.`,
         );
       }
+      if (!extra?.material && (!entry.signature?.trim() || !entry.colorsUsed?.trim())) {
+        throw new BadRequestException(
+          `Completá la firma y los colores de la pieza de ${entry.personName.trim()}.`,
+        );
+      }
     }
+    // Pieza sumada además de la incluida: precio de pieza adicional.
+    const chargeOf = (entry: { extraId?: string; additional?: boolean }) => {
+      const extra = entry.extraId ? catalog.get(entry.extraId) : undefined;
+      if (!extra) return 0;
+      return entry.additional ? (extra.addAmount ?? extra.amount) : extra.amount;
+    };
     const pieceName = (entry: { extraId?: string; pieceType: string; pieceType2?: string }) => {
       const pair = entry.extraId ? catalog.get(entry.extraId)?.pair : false;
       const second = entry.pieceType2?.trim();
@@ -233,14 +245,15 @@ export class PiecesService implements OnModuleInit {
       quantity: 1,
       status: PieceStatus.PENDIENTE,
       personName: entry.personName.trim(),
-      signature: entry.signature.trim(),
+      signature: (entry.signature ?? '').trim(),
       pieceType: pieceName(entry),
-      colorsUsed: entry.colorsUsed.trim(),
+      colorsUsed: (entry.colorsUsed ?? '').trim(),
       registeredByName,
       ...(entry.extraId && {
         extraName: catalog.get(entry.extraId)!.name,
-        extraAmount: catalog.get(entry.extraId)!.amount,
+        extraAmount: chargeOf(entry),
       }),
+      ...(entry.additional && { additional: true }),
       photos: [],
     }));
     const pieces = await this.pieceModel.insertMany(documents);
@@ -250,7 +263,9 @@ export class PiecesService implements OnModuleInit {
     const extras = pieces
       .filter((p) => p.extraName && (p.extraAmount ?? 0) > 0)
       .map((p) => ({
-        label: `Adicional pieza ${p.extraName} (${p.pieceType})`,
+        label: p.additional
+          ? `Pieza adicional ${p.extraName} (${p.pieceType})`
+          : `Adicional pieza ${p.extraName} (${p.pieceType})`,
         amount: p.extraAmount!,
         pieceId: String(p._id),
       }));

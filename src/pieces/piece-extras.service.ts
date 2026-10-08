@@ -34,7 +34,14 @@ export class PieceExtrasService {
   ) {}
 
   private view(x: PieceExtraDocument) {
-    return { id: String(x._id), name: x.name, amount: x.amount, pair: !!x.pair };
+    return {
+      id: String(x._id),
+      name: x.name,
+      amount: x.amount,
+      pair: !!x.pair,
+      ...(x.addAmount != null && { addAmount: x.addAmount }),
+      ...(x.material && { material: x.material }),
+    };
   }
 
   async list() {
@@ -57,22 +64,49 @@ export class PieceExtrasService {
     return new Map(rows.map((x) => [String(x._id), this.view(x)]));
   }
 
-  async create(name: string, amount: number, pair?: boolean) {
+  async create(
+    name: string,
+    amount: number,
+    pair?: boolean,
+    extra: { addAmount?: number; material?: string } = {},
+  ) {
     const clean = name.trim();
     await this.assertFree(clean);
     return this.view(
-      await this.extraModel.create({ name: clean, amount, ...(pair && { pair }) }),
+      await this.extraModel.create({
+        name: clean,
+        amount,
+        ...(pair && { pair }),
+        ...(extra.addAmount != null && { addAmount: extra.addAmount }),
+        ...(extra.material?.trim() && { material: extra.material.trim() }),
+      }),
     );
   }
 
-  async update(id: string, name: string, amount: number, pair?: boolean) {
+  /** `addAmount`/`material`: undefined no los toca; '' en material lo quita. */
+  async update(
+    id: string,
+    name: string,
+    amount: number,
+    pair?: boolean,
+    extra: { addAmount?: number | null; material?: string } = {},
+  ) {
     const clean = name.trim();
     this.assertId(id);
     await this.assertFree(clean, id);
+    const set: Record<string, unknown> = { name: clean, amount };
+    const unset: Record<string, 1> = {};
+    if (pair !== undefined) set.pair = pair;
+    if (extra.addAmount != null) set.addAmount = extra.addAmount;
+    else if (extra.addAmount === null) unset.addAmount = 1;
+    if (extra.material !== undefined) {
+      if (extra.material.trim()) set.material = extra.material.trim();
+      else unset.material = 1;
+    }
     const x = await this.extraModel
       .findOneAndUpdate(
         { _id: id, deletedAt: { $exists: false } },
-        { $set: { name: clean, amount, ...(pair !== undefined && { pair }) } },
+        { $set: set, ...(Object.keys(unset).length && { $unset: unset }) },
         { new: true },
       )
       .exec();

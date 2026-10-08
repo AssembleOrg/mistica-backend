@@ -87,6 +87,11 @@ export class Piece {
   @Prop({ min: 0 })
   extraAmount?: number;
 
+  // Pieza sumada además de la incluida en la entrada (se cobra entera, no
+  // como upgrade).
+  @Prop({ type: Boolean })
+  additional?: boolean;
+
   // Registro fotográfico: URLs de fotos de la pieza (evolución del trabajo).
   @Prop({ type: [String], default: [] })
   photos: string[];

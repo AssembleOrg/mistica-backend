@@ -20,6 +20,19 @@ export class PieceExtra {
   @Prop({ type: Boolean })
   pair?: boolean;
 
+  // `amount` es el upgrade sobre la pieza incluida en la entrada (estándar
+  // $0, especial +4.000…). Esto es lo que se cobra si la pieza se SUMA
+  // además de la incluida (estándar +7.000, especial +11.000…). Sin valor,
+  // se cobra `amount`.
+  @Prop({ min: 0 })
+  addAmount?: number;
+
+  // Material que no es cerámica (Tela, Bastidor, Fibrofácil, Yeso, 3D): se
+  // lo llevan en el día, así que la ficha no pide firma ni colores. Se carga
+  // para el seguimiento del retiro y para cobrar el adicional si lo tiene.
+  @Prop({ trim: true })
+  material?: string;
+
   @Prop({ type: Date })
   deletedAt?: Date;
 }

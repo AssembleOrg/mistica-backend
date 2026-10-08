@@ -22,6 +22,7 @@ import {
   ListPiecesQueryDto,
 } from '../common/dto';
 import {
+  ImportPieceCatalogDto,
   SavePieceExtraDto,
   SavePieceTypeDto,
   SetPieceStatusesDto,
@@ -144,7 +145,10 @@ export class PiecesController {
   @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Agregar un adicional de pieza' })
   createExtra(@Body() dto: SavePieceExtraDto) {
-    return this.pieceExtras.create(dto.name, dto.amount, dto.pair);
+    return this.pieceExtras.create(dto.name, dto.amount, dto.pair, {
+      addAmount: dto.addAmount,
+      material: dto.material,
+    });
   }
 
   @Patch('extras/:id')
@@ -152,7 +156,20 @@ export class PiecesController {
   @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Editar título o monto de un adicional' })
   updateExtra(@Param('id') id: string, @Body() dto: SavePieceExtraDto) {
-    return this.pieceExtras.update(id, dto.name, dto.amount, dto.pair);
+    return this.pieceExtras.update(id, dto.name, dto.amount, dto.pair, {
+      addAmount: dto.addAmount,
+      material: dto.material,
+    });
+  }
+
+  @Post('catalog/import')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Importar el catálogo de piezas y categorías (crea o actualiza por nombre, no borra)',
+  })
+  importCatalog(@Body() dto: ImportPieceCatalogDto) {
+    return this.pieceTypes.importCatalog(dto);
   }
 
   @Delete('extras/:id')

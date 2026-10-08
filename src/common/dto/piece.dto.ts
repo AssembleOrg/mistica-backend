@@ -22,9 +22,11 @@ export class ReservationPieceEntryDto {
   @MaxLength(120)
   personName: string;
 
-  @ApiProperty({ description: 'Firma colocada físicamente en la pieza' })
+  @ApiProperty({
+    description:
+      'Firma colocada físicamente en la pieza (obligatoria en cerámica; tela, bastidor, yeso… no la llevan)',
+  })
   @IsString()
-  @IsNotEmpty()
   @MaxLength(120)
   signature: string;
 
@@ -34,11 +36,18 @@ export class ReservationPieceEntryDto {
   @MaxLength(120)
   pieceType: string;
 
-  @ApiProperty({ description: 'Colores utilizados' })
+  @ApiProperty({ description: 'Colores utilizados (obligatorios en cerámica)' })
   @IsString()
-  @IsNotEmpty()
   @MaxLength(300)
   colorsUsed: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Pieza sumada además de la incluida: se cobra el precio de pieza adicional de su categoría.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  additional?: boolean;
 
   @ApiPropertyOptional({
     description:
@@ -403,4 +412,66 @@ export class SavePieceExtraDto {
   @IsOptional()
   @IsBoolean()
   pair?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Precio si la pieza se suma además de la incluida (sin valor: el monto)',
+    minimum: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'El monto de pieza adicional debe ser un número' })
+  @Min(0)
+  addAmount?: number;
+
+  @ApiPropertyOptional({
+    description: "Material que no es cerámica (Tela, Bastidor…): sin firma ni colores. '' = cerámica.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  material?: string;
+}
+
+/** Una categoría del catálogo a importar (se busca por nombre). */
+export class ImportPieceCategoryDto {
+  @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(80) name: string;
+
+  @ApiProperty({ minimum: 0 })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  amount: number;
+
+  @ApiPropertyOptional({ minimum: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  addAmount?: number;
+
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() pair?: boolean;
+
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(40) material?: string;
+}
+
+/** Una pieza del catálogo a importar con el nombre de su categoría. */
+export class ImportPieceTypeDto {
+  @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(120) name: string;
+
+  @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(80) category: string;
+}
+
+/** Importar el catálogo de piezas: crea o actualiza por nombre, no borra. */
+export class ImportPieceCatalogDto {
+  @ApiProperty({ type: [ImportPieceCategoryDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ImportPieceCategoryDto)
+  categories: ImportPieceCategoryDto[];
+
+  @ApiProperty({ type: [ImportPieceTypeDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ImportPieceTypeDto)
+  types: ImportPieceTypeDto[];
 }

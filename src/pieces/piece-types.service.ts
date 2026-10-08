@@ -19,6 +19,16 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** Clave para comparar nombres: sin mayúsculas, tildes ni espacios de más. */
+function key(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Catálogo de piezas (taza, bowl, plato…) para el selector de "Pieza elegida".
  * La ficha guarda el nombre como texto, así que editar o borrar un ítem del
@@ -82,6 +92,70 @@ export class PieceTypesService {
       .exec();
     if (!t) throw new NotFoundException('Pieza no encontrada');
     return this.view(t);
+  }
+
+  /**
+   * Importa el catálogo completo (categorías con sus precios + piezas con su
+   * categoría). Busca por nombre sin mayúsculas ni tildes: lo que existe se
+   * actualiza, lo que falta se crea, nada se borra. Las fichas ya cargadas no
+   * cambian (guardan nombre y monto).
+   */
+  async importCatalog(dto: {
+    categories: Array<{ name: string; amount: number; addAmount?: number; pair?: boolean; material?: string }>;
+    types: Array<{ name: string; category: string }>;
+  }) {
+    const summary = { categoriesCreated: 0, categoriesUpdated: 0, typesCreated: 0, typesUpdated: 0 };
+    const extras = await this.extraModel.find({ deletedAt: { $exists: false } }).exec();
+    const extraByKey = new Map(extras.map((x) => [key(x.name), x]));
+    for (const c of dto.categories) {
+      const name = c.name.trim();
+      const fields = {
+        amount: c.amount,
+        pair: !!c.pair,
+        ...(c.addAmount != null ? { addAmount: c.addAmount } : {}),
+        ...(c.material?.trim() ? { material: c.material.trim() } : {}),
+      };
+      const found = extraByKey.get(key(name));
+      if (found) {
+        await this.extraModel.updateOne(
+          { _id: found._id },
+          {
+            $set: { name, ...fields },
+            $unset: {
+              ...(c.addAmount == null ? { addAmount: 1 } : {}),
+              ...(c.material?.trim() ? {} : { material: 1 }),
+            },
+          },
+        );
+        summary.categoriesUpdated++;
+      } else {
+        const created = await this.extraModel.create({ name, ...fields });
+        extraByKey.set(key(name), created);
+        summary.categoriesCreated++;
+      }
+    }
+    const types = await this.typeModel.find({ deletedAt: { $exists: false } }).exec();
+    const typeByKey = new Map(types.map((t) => [key(t.name), t]));
+    for (const t of dto.types) {
+      const name = t.name.trim();
+      const category = extraByKey.get(key(t.category));
+      if (!category) {
+        throw new BadRequestException(`La pieza "${name}" usa la categoría "${t.category}", que no está en la lista.`);
+      }
+      const found = typeByKey.get(key(name));
+      if (found) {
+        await this.typeModel.updateOne(
+          { _id: found._id },
+          { $set: { extraId: category._id } },
+        );
+        summary.typesUpdated++;
+      } else {
+        const created = await this.typeModel.create({ name, extraId: category._id });
+        typeByKey.set(key(name), created);
+        summary.typesCreated++;
+      }
+    }
+    return summary;
   }
 
   async remove(id: string) {
