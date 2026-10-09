@@ -695,6 +695,42 @@ export class CashboxService {
   }
 
   /**
+   * Recalcula esperado/discrepancia de las cajas cerradas que contienen esas
+   * fechas (p. ej. tras sacar ventas). Deja un registro en `editHistory`.
+   */
+  async recomputeClosedSessionsAt(dates: Date[], reason: string): Promise<void> {
+    const done = new Set<string>();
+    for (const at of dates) {
+      const session = await this.cashSessionModel
+        .findOne({
+          status: 'CLOSED',
+          openedAt: { $lte: at },
+          closedAt: { $gte: at },
+        })
+        .exec();
+      if (!session || !session.closedAt || done.has(String(session._id))) continue;
+      done.add(String(session._id));
+      const newExpected = await this.computeExpectedClosingCash(
+        session.openingCash,
+        session.openedAt,
+        session.closedAt,
+      );
+      const newCounted = session.countedClosingCash ?? 0;
+      session.expectedClosingCash = newExpected;
+      session.countedClosingCash = newCounted;
+      session.discrepancy = Number((newCounted - newExpected).toFixed(2));
+      session.editHistory.push({
+        editedAt: new Date(),
+        reason,
+        addedEgresses: [],
+        addedIncomes: [],
+        removedEgresses: [],
+      });
+      await session.save();
+    }
+  }
+
+  /**
    * Ajusta la caja CERRADA afectada cuando se borra un egreso retroactivamente.
    *
    * IMPORTANTE: el egreso ya debe estar soft-deleteado (`deletedAt` seteado)

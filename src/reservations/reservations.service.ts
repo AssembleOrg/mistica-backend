@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnApplicationBootstrap,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomInt } from 'node:crypto';
@@ -121,7 +122,7 @@ function extraLabel(minutes: number): string {
 }
 
 @Injectable()
-export class ReservationsService {
+export class ReservationsService implements OnApplicationBootstrap {
   private readonly logger = new Logger(ReservationsService.name);
 
   constructor(
@@ -696,7 +697,6 @@ export class ReservationsService {
     }
 
     if (dto.approved) {
-      await this.createSaleForReservation(won, PaymentMethod.TRANSFER);
       await this.afterConfirmed(won._id);
     } else {
       // Igual que el flujo de revisión existente: el cupo se libera y
@@ -835,7 +835,6 @@ export class ReservationsService {
       { new: true },
     );
     if (won) {
-      await this.createSaleForReservation(won, PaymentMethod.MERCADOPAGO);
       await this.notifyConfirmed(won);
       await this.afterConfirmed(won._id);
       return;
@@ -872,7 +871,6 @@ export class ReservationsService {
         r.confirmedAt = now;
         await r.save();
         this.logger.log(`Reserva ${reservationId} re-tomada tras pago tardío`);
-        await this.createSaleForReservation(r, PaymentMethod.MERCADOPAGO);
         await this.afterConfirmed(r._id);
       } catch {
         // Sin cupo o sin mesas: marcar para revisión y reembolsar.
@@ -922,7 +920,8 @@ export class ReservationsService {
 
   /**
    * Crea una reserva desde el panel admin (nace CONFIRMED). Descuenta cupo
-   * atómico igual. Si el método no es COURTESY, impacta caja con un ingreso.
+   * atómico igual. Lo cobrado queda en la reserva: no genera venta ni pasa
+   * por caja.
    */
   async adminCreateReservation(
     dto: AdminCreateReservationDto,
@@ -1031,15 +1030,6 @@ export class ReservationsService {
       throw err;
     }
 
-    // Registrar la VENTA (experiencia como servicio + pago de seña/total). Para
-    // control. Cortesía no genera venta. Si la caja está cerrada, queda diferida.
-    // Agendada desde una venta, la venta ya existe.
-    if (!fromSale && !isCourtesy && amount > 0) {
-      await this.createSaleForReservation(
-        reservation,
-        this.mapToSalePaymentMethod(dto.paymentMethod),
-      );
-    }
     await this.afterConfirmed(reservation._id);
 
     return this.publicView(reservation);
@@ -1066,13 +1056,6 @@ export class ReservationsService {
       );
     }
     const sum = valid.reduce((acc, x) => acc + x.amount, 0);
-    await this.linkLegacySale(r);
-    if (r.saleId) {
-      await this.salesService.addExtraItems(
-        String(r.saleId),
-        valid.map((x) => ({ productName: x.label, unitPrice: x.amount })),
-      );
-    }
     r.extras = [
       ...(r.extras ?? []),
       ...valid.map((x) => ({
@@ -1578,100 +1561,22 @@ export class ReservationsService {
     return created._id as Types.ObjectId;
   }
 
-  /**
-   * Registra una VENTA para la reserva (experiencia como servicio + pago parcial
-   * de la seña). Nace PARTIAL si queda saldo, así sobrevive al cierre de caja y
-   * el saldo se cobra luego por el flujo POS (`addPayments`).
-   *
-   * Si la caja está cerrada (típico en webhooks 24/7), NO crea la venta: marca
-   * `salePending` y un cron la crea al abrir caja. Nunca lanza: un fallo de venta
-   * no debe tumbar la confirmación de la reserva.
-   */
-  private async createSaleForReservation(
-    reservation: ReservationDocument,
-    method: PaymentMethod,
-  ): Promise<void> {
-    if (reservation.saleId) return; // ya tiene venta
-    if (!reservation.depositAmount || reservation.depositAmount <= 0) return;
-
-    const openSession = await this.cashbox.findOpenSession();
-    if (!openSession) {
-      reservation.salePending = true;
-      await reservation.save();
-      this.logger.log(
-        `Reserva ${reservation.code}: caja cerrada ⇒ venta diferida`,
-      );
-      return;
-    }
-
-    try {
-      const productId = await this.ensureExperienceProduct(
-        reservation.experienceId,
-        reservation.experienceName,
-        reservation.unitPrice,
-      );
-      const dto: CreateSaleDto = {
-        customerName: reservation.customerName,
-        customerEmail: reservation.customerEmail,
-        customerPhone: reservation.customerPhone,
-        items: [
-          ...this.experienceLines(reservation, String(productId)),
-          // Adicionales sumados a la reserva (p. ej. de sus piezas).
-          ...(reservation.extras ?? []).map((x) => ({
-            productName: x.label,
-            quantity: 1,
-            unitPrice: x.amount,
-          })),
-        ],
-        payments: [{ method, amount: reservation.depositAmount }],
-        // Con saldo, la venta nace PARTIAL. Saldada, venta normal: si la línea
-        // quedó por encima de lo cobrado (lugares bonificados de cumpleaños),
-        // la diferencia va como ajuste en vez de quedar como saldo fantasma.
-        isPartial: (reservation.balanceDue ?? 0) > 0.01,
-        seller: 'Reservas',
-        notes: `Reserva ${reservation.code} · ${reservation.experienceName}`,
-      };
-      const sale = await this.salesService.create(dto);
-      // create() devuelve la vista de la venta: trae `id`, no `_id`.
-      reservation.saleId = new Types.ObjectId(sale.id);
-      reservation.salePending = false;
-      await reservation.save();
-      this.logger.log(`Reserva ${reservation.code}: venta registrada`);
-    } catch (err) {
-      reservation.salePending = true;
-      await reservation.save();
-      this.logger.error(
-        `Reserva ${reservation.code}: no se pudo registrar la venta: ${String(err)}`,
-      );
-    }
-  }
-
-  /**
-   * Cron: registra las ventas pendientes de reservas confirmadas, una vez que la
-   * caja está abierta. Idempotente (cada venta se crea una sola vez).
-   */
-  async processPendingReservationSales(): Promise<number> {
-    const openSession = await this.cashbox.findOpenSession();
-    if (!openSession) return 0;
-    const pending = await this.reservationModel
-      .find({
-        salePending: true,
-        saleId: { $exists: false },
-        status: ReservationStatus.CONFIRMED,
-        deletedAt: { $exists: false },
-      })
-      .limit(50)
-      .exec();
-    let created = 0;
-    for (const r of pending) {
-      await this.createSaleForReservation(
-        r,
-        this.mapToSalePaymentMethod(r.paymentMethod),
-      );
-      if (r.saleId) created++;
-    }
-    if (created) this.logger.log(`Ventas de reservas registradas: ${created}`);
-    return created;
+  /** Saca de caja las ventas que generaron las reservas desde el 8/10. */
+  onApplicationBootstrap() {
+    void (async () => {
+      const since = DateTime.fromISO('2026-10-08', {
+        zone: envConfig.timezone,
+      }).toJSDate();
+      const dates = await this.detachReservationSalesSince(since);
+      if (dates.length) {
+        await this.cashbox.recomputeClosedSessionsAt(
+          dates,
+          'Ventas de reservas sacadas de caja (las reservas no pasan por caja)',
+        );
+      }
+    })().catch((err) =>
+      this.logger.error(`No se pudieron sacar las reservas de caja: ${String(err)}`),
+    );
   }
 
   // ───────────────────────── Notificaciones ─────────────────────────
@@ -1821,7 +1726,7 @@ export class ReservationsService {
       }
       return this.publicView(r);
     }
-    // confirm: re-tomar cupo y mesas, y registrar venta.
+    // confirm: re-tomar cupo y mesas.
     const session = await this.reserveSeats(String(r.sessionId), r.quantity, [
       SessionStatus.OPEN,
       SessionStatus.CLOSED,
@@ -1835,10 +1740,6 @@ export class ReservationsService {
     r.status = ReservationStatus.CONFIRMED;
     r.confirmedAt = new Date();
     await r.save();
-    await this.createSaleForReservation(
-      r,
-      this.mapToSalePaymentMethod(r.paymentMethod),
-    );
     await this.afterConfirmed(r._id);
     return this.publicView(r);
   }
@@ -2099,11 +2000,12 @@ export class ReservationsService {
   }
 
   /**
-   * Cobra el saldo pendiente, todo o una parte, sobre la venta vinculada
-   * (flujo POS). Lo que no se cobra queda como saldo para otro cobro.
+   * Cobra el saldo pendiente, todo o una parte. El cobro queda en la reserva
+   * (lo cobrado sube, el saldo baja): no genera venta ni pasa por caja.
    *
-   * Si la reserva todavía no tiene venta (se cargó sin cobrar nada, o la venta
-   * quedó diferida con la caja cerrada), este cobro la crea.
+   * Si la reserva quedó vinculada a una venta con saldo (reservas viejas, o
+   * agendada desde una venta del POS), esa venta se da por saldada sin sumarle
+   * pagos, así no queda como deuda en Ventas ni toca el arqueo.
    */
   async adminCollectBalance(id: string, dto: AddSalePaymentsDto) {
     const r = await this.findByIdOrThrow(id);
@@ -2117,60 +2019,76 @@ export class ReservationsService {
         `Lo cobrado ($${paid}) supera el saldo pendiente ($${balance}).`,
       );
     }
-    if (!(await this.cashbox.findOpenSession())) {
-      throw new BadRequestException('Abrí la caja para cobrar el saldo.');
-    }
 
     const newBalance = Number(Math.max(0, balance - paid).toFixed(2));
-    let pending = dto.payments;
-    await this.linkLegacySale(r);
-
-    const hadDeposit = (r.depositAmount ?? 0) > 0;
-    // Venta diferida con seña ya cobrada: se registra ahora, antes del cobro.
-    if (!r.saleId && hadDeposit) {
-      await this.createSaleForReservation(
-        r,
-        this.mapToSalePaymentMethod(r.paymentMethod),
-      );
-    }
-    // Sin nada cobrado todavía: el primer pago de este cobro abre la venta.
-    if (!r.saleId && !hadDeposit) {
-      const [first, ...rest] = dto.payments;
-      r.depositAmount = first.amount;
-      // Con markCompleted (panel viejo) la venta nace saldada: lo que falta va
-      // como ajuste, igual que al cerrar una venta con saldo.
-      r.balanceDue = dto.markCompleted
-        ? 0
-        : Number(Math.max(0, balance - first.amount).toFixed(2));
-      await this.createSaleForReservation(r, first.method);
-      if (!r.saleId) {
-        // No se registró: la reserva vuelve a quedar sin cobrar.
-        r.depositAmount = 0;
-        r.balanceDue = balance;
-        r.salePending = false;
-        await r.save();
-      }
-      pending = rest;
-    }
-    if (!r.saleId) {
-      throw new BadRequestException(
-        'No se pudo registrar la venta de la reserva. Probá de nuevo.',
-      );
-    }
-
-    if (pending.length > 0) {
-      await this.salesService.addPayments(String(r.saleId), {
-        payments: pending,
-        // Saldada la reserva, se cierra la venta (una diferencia contra la
-        // línea, p. ej. lugares bonificados, queda como ajuste).
-        markCompleted: dto.markCompleted ?? newBalance <= 0.01,
-      });
-    }
-    // markCompleted explícito (panel viejo): la venta se cerró y lo que faltó
-    // quedó como descuento, así que la reserva queda saldada.
+    r.depositAmount = Number(((r.depositAmount ?? 0) + paid).toFixed(2));
+    // markCompleted explícito (panel viejo): lo que falta se perdona.
     r.balanceDue = dto.markCompleted ? 0 : newBalance;
     await r.save();
+    if (r.balanceDue <= 0.01 && r.saleId) await this.settleLinkedSale(r);
     return this.publicView(r);
+  }
+
+  /**
+   * Da por saldada la venta vinculada a una reserva ya cobrada: el saldo que le
+   * quedaba va como descuento (igual que al cerrar caja), sin agregar pagos.
+   */
+  private async settleLinkedSale(r: ReservationDocument): Promise<void> {
+    const sale = await this.saleModel.findById(r.saleId).exec();
+    if (
+      !sale ||
+      sale.deletedAt ||
+      (sale.status !== SaleStatus.PENDING && sale.status !== SaleStatus.PARTIAL)
+    ) {
+      return;
+    }
+    const due = Number((sale.balanceDue ?? 0).toFixed(2));
+    if (due > 0.01) {
+      sale.discount = Number(((sale.discount || 0) + due).toFixed(2));
+      sale.total = Number(Math.max(0, sale.total - due).toFixed(2));
+    }
+    sale.balanceDue = 0;
+    sale.status = SaleStatus.COMPLETED;
+    await sale.save();
+  }
+
+  /**
+   * Arreglo único (oct 2026): las reservas dejaron de generar ventas. Las
+   * ventas que generaron desde `since` se borran (soft) y se desvinculan de su
+   * reserva, que conserva lo cobrado. Devuelve las fechas de esas ventas para
+   * recalcular las cajas cerradas. Idempotente: las borradas no vuelven a
+   * aparecer y ya no se crean ventas de reservas.
+   */
+  async detachReservationSalesSince(since: Date): Promise<Date[]> {
+    const sales = await this.saleModel
+      .find({
+        seller: 'Reservas',
+        createdAt: { $gte: since },
+        deletedAt: { $exists: false },
+      })
+      .select('_id saleNumber notes createdAt')
+      .lean();
+    // Ventas diferidas por caja cerrada que ya no se van a crear.
+    await this.reservationModel.updateMany(
+      { salePending: true },
+      { $set: { salePending: false } },
+    );
+    if (!sales.length) return [];
+    const ids = sales.map((x) => x._id);
+    await this.saleModel.updateMany(
+      { _id: { $in: ids } },
+      { $set: { deletedAt: new Date() } },
+    );
+    await this.reservationModel.updateMany(
+      { saleId: { $in: ids } },
+      { $unset: { saleId: 1 }, $set: { salePending: false } },
+    );
+    this.logger.log(
+      `Ventas de reservas sacadas de caja: ${sales.length} (${sales
+        .map((x) => x.saleNumber)
+        .join(', ')})`,
+    );
+    return sales.map((x) => x.createdAt);
   }
 
   /**
@@ -2410,12 +2328,6 @@ ${dto.notes}` : note,
     const charge = Number((amount ?? 0).toFixed(2));
     if (minutes > 0 && charge > 0) {
       const label = `Hora extra (${extraLabel(minutes)})`;
-      await this.linkLegacySale(r);
-      if (r.saleId) {
-        await this.salesService.addExtraItems(String(r.saleId), [
-          { productName: label, unitPrice: charge },
-        ]);
-      }
       r.extras = [...(r.extras ?? []), { label, amount: charge, createdAt: new Date() }];
       r.totalAmount = Number(((r.totalAmount ?? 0) + charge).toFixed(2));
       r.balanceDue = Number(((r.balanceDue ?? 0) + charge).toFixed(2));
@@ -2503,15 +2415,6 @@ ${dto.notes}` : note,
     const billableDelta = Math.max(0, quantity - newFree) - Math.max(0, oldQty - oldFree);
     const diff = courtesy ? 0 : Number((r.unitPrice * billableDelta).toFixed(2));
     if (diff === 0) return 0;
-    await this.linkLegacySale(r);
-    if (diff > 0 && r.saleId) {
-      await this.salesService.addExtraItems(String(r.saleId), [
-        {
-          productName: `${r.experienceName} · ${billableDelta} ${billableDelta === 1 ? 'persona' : 'personas'} más`,
-          unitPrice: diff,
-        },
-      ]);
-    }
     const balance = (r.balanceDue ?? 0) + diff;
     r.totalAmount = Number(Math.max(0, (r.totalAmount ?? 0) + diff).toFixed(2));
     r.balanceDue = Number(Math.max(0, balance).toFixed(2));
