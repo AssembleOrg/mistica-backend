@@ -16,6 +16,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import {
   ReservationPaymentMethod,
@@ -333,6 +334,27 @@ export class ScheduleSaleDto {
   @IsString()
   @MaxLength(500)
   kitchenNotes?: string;
+
+  @ApiPropertyOptional({
+    description: 'Personas bonificadas (entran pero no se cobran)',
+    minimum: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  freeSpots?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Tortas vendidas en la venta, para cocina. No suman al total: ya están en la venta.',
+    type: () => [AddReservationCakeDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AddReservationCakeDto)
+  cakes?: AddReservationCakeDto[];
 }
 
 /**

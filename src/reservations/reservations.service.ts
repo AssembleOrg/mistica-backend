@@ -927,7 +927,13 @@ export class ReservationsService implements OnApplicationBootstrap {
     dto: AdminCreateReservationDto,
     userId?: string,
     /** Reserva de una venta ya hecha en el POS: la plata sale de la venta. */
-    fromSale?: { saleId: string; total: number; paid: number },
+    fromSale?: {
+      saleId: string;
+      total: number;
+      paid: number;
+      /** Tortas de la venta: van a cocina, su precio ya está en la venta. */
+      cakes?: AddReservationCakeDto[];
+    },
   ) {
     const qty = dto.quantity;
     const sessionId = await this.resolveSessionId(dto, { acrossShifts: true });
@@ -1012,6 +1018,15 @@ export class ReservationsService implements OnApplicationBootstrap {
         createdById: userId,
         confirmedAt: new Date(),
         ...(fromSale && { saleId: new Types.ObjectId(fromSale.saleId) }),
+        ...(!!fromSale?.cakes?.length && {
+          cakes: fromSale.cakes.map((c) => ({
+            label: c.label.trim(),
+            qty: c.qty ?? 1,
+            amount: Number((c.amount ?? 0).toFixed(2)),
+            notes: c.notes?.trim() || undefined,
+            createdAt: new Date(),
+          })),
+        }),
       });
     } catch (err) {
       await this.releaseSeats(session._id as Types.ObjectId, qty);
@@ -1115,9 +1130,15 @@ export class ReservationsService implements OnApplicationBootstrap {
         dietaryTags: dto.dietaryTags,
         dietaryNotes: dto.dietaryNotes,
         kitchenNotes: dto.kitchenNotes,
+        freeSpots: dto.freeSpots,
       },
       userId,
-      { saleId, total, paid: Number(Math.max(0, total - balance).toFixed(2)) },
+      {
+        saleId,
+        total,
+        paid: Number(Math.max(0, total - balance).toFixed(2)),
+        cakes: dto.cakes,
+      },
     );
   }
 
