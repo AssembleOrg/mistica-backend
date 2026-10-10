@@ -5,6 +5,7 @@ import {
   IsBoolean,
   IsEnum,
   IsInt,
+  IsMongoId,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -126,6 +127,161 @@ export class OwnSlotDto {
   date?: string;
 }
 
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Horario de una edición especial. Ver SpecialSlot en el schema. */
+export class SpecialSlotDto {
+  @ApiProperty({ description: "Hora de inicio 'HH:mm'", example: '18:00' })
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+    message: "start debe ser una hora 'HH:mm'",
+  })
+  start: string;
+
+  @ApiPropertyOptional({
+    description:
+      "'YYYY-MM-DD': el horario vale sólo ese día. Sin fecha, todos los días de la edición.",
+  })
+  @IsOptional()
+  @Matches(YMD_RE, { message: "date debe ser una fecha 'YYYY-MM-DD'" })
+  date?: string;
+}
+
+/** Extra opcional con precio de una edición especial. */
+export class SpecialExtraDto {
+  @ApiProperty({ description: 'Nombre del extra' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  name: string;
+
+  @ApiProperty({ description: 'Precio en ARS', minimum: 0 })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  price: number;
+
+  @ApiPropertyOptional({ description: 'Detalle del extra' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  description?: string;
+}
+
+/**
+ * Edición especial de una experiencia (Halloween, Navidad…). Entre dateFrom y
+ * dateTo la experiencia es esta edición. Ver SpecialEdition en el schema.
+ */
+export class SpecialEditionDto {
+  @ApiPropertyOptional({
+    description: 'Id de la edición (al editar una existente)',
+  })
+  @IsOptional()
+  @IsMongoId()
+  _id?: string;
+
+  @ApiProperty({ description: "Nombre ('Especial Halloween')" })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  name: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      "Activadores del bot: cómo la piden ('halloween', 'noche de brujas')",
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(60, { each: true })
+  aliases?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Texto de la edición (reemplaza la descripción)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  description?: string;
+
+  @ApiProperty({ description: "Primer día en que se hace, 'YYYY-MM-DD'" })
+  @Matches(YMD_RE, { message: "dateFrom debe ser una fecha 'YYYY-MM-DD'" })
+  dateFrom: string;
+
+  @ApiProperty({ description: "Último día en que se hace, 'YYYY-MM-DD'" })
+  @Matches(YMD_RE, { message: "dateTo debe ser una fecha 'YYYY-MM-DD'" })
+  dateTo: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Desde qué día se ofrece y se reserva ('YYYY-MM-DD'). Sin valor, apenas se carga.",
+  })
+  @IsOptional()
+  @Matches(/^(\d{4}-\d{2}-\d{2})?$/, {
+    message: "announceFrom debe ser una fecha 'YYYY-MM-DD'",
+  })
+  announceFrom?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Precio por persona de la edición. Sin valor, el de la experiencia.',
+    minimum: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  price?: number;
+
+  @ApiPropertyOptional({
+    type: [PriceVariantDto],
+    description:
+      'Bonos de la edición (promos por cantidad, lugares bonificados). Reemplazan a las promos habituales.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PriceVariantDto)
+  priceVariants?: PriceVariantDto[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Lo que incluye sin costo',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  included?: string[];
+
+  @ApiPropertyOptional({
+    type: [SpecialExtraDto],
+    description:
+      'Extras opcionales con precio (los suma el equipo a la reserva)',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SpecialExtraDto)
+  extras?: SpecialExtraDto[];
+
+  @ApiPropertyOptional({
+    type: [SpecialSlotDto],
+    description:
+      'Horarios especiales. Vacío = los horarios habituales de la experiencia.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SpecialSlotDto)
+  schedule?: SpecialSlotDto[];
+
+  @ApiPropertyOptional({ default: true })
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
+
 export class CreateExperienceDto {
   @ApiProperty({ description: 'Nombre de la experiencia' })
   @IsString()
@@ -174,6 +330,18 @@ export class CreateExperienceDto {
   @ValidateNested({ each: true })
   @Type(() => OwnSlotDto)
   ownSchedule?: OwnSlotDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Ediciones especiales por fecha (Halloween, Navidad…): entre sus fechas la ' +
+      'experiencia es esa edición (texto, precio, bonos, extras y horarios propios).',
+    type: [SpecialEditionDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SpecialEditionDto)
+  specials?: SpecialEditionDto[];
 
   @ApiProperty({ description: 'Duración en minutos', minimum: 1 })
   @IsInt()

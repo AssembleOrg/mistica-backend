@@ -269,3 +269,88 @@ describe('AvailabilityService · la reserva no se pasa de un turno al otro', () 
     expect(t2).toMatchObject({ windowStart: '17:30', windowEnd: '20:00', latestStart: '19:00' });
   });
 });
+
+describe('AvailabilityService · ediciones especiales', () => {
+  const dia = (n: number) =>
+    DateTime.now().setZone(TZ).plus({ days: n }).toISODate() as string;
+  const AYER = dia(6);
+  const MANANA = dia(8);
+  // Edición que rige sólo el día DAY.
+  const edicion = (extra: Record<string, unknown> = {}) => ({
+    specials: [
+      {
+        _id: 'sp1',
+        name: 'Especial Halloween',
+        aliases: ['halloween'],
+        dateFrom: DAY,
+        dateTo: DAY,
+        price: 60000,
+        active: true,
+        ...extra,
+      },
+    ],
+  });
+  const rango = (service: AvailabilityService) =>
+    service.forExperience({ experienceId: EXP_ID, from: AYER, to: MANANA });
+
+  it('en sus fechas se ofrece con el nombre y el precio de la edición; fuera, la versión normal', async () => {
+    const slots = await rango(await build([], 120, edicion()));
+
+    const delDia = slots.filter((s) => s.dateKey === DAY);
+    expect(delDia.length).toBeGreaterThanOrEqual(1);
+    for (const s of delDia) {
+      expect(s.price).toBe(60000);
+      expect(s.special).toEqual({ id: 'sp1', name: 'Especial Halloween' });
+    }
+    const otros = slots.filter((s) => s.dateKey !== DAY);
+    expect(otros.length).toBeGreaterThanOrEqual(1);
+    for (const s of otros) {
+      expect(s.price).toBe(42000);
+      expect(s.special).toBeUndefined();
+    }
+  });
+
+  it('con horarios especiales sólo se ofrece a esas horas y por cupo', async () => {
+    const extra = { ...edicion({ schedule: [{ start: '16:00' }] }), defaultCapacity: 12 };
+    const todoOcupado = (dateKey: string) =>
+      dateKey === DAY ? TABLE_ROWS.map((t) => busy(t.code, '15:00', '20:00', dateKey)) : [];
+    const slots = await rango(await build(todoOcupado, 120, extra));
+
+    const delDia = slots.filter((s) => s.dateKey === DAY);
+    expect(delDia.map((s) => s.startTime)).toEqual(['16:00']);
+    expect(delDia[0]).toMatchObject({ ownSchedule: true, maxPartySize: 12, price: 60000 });
+    // Los otros días siguen con los turnos generales.
+    expect(slots.some((s) => s.dateKey !== DAY && s.shiftKey === 'T1')).toBe(true);
+  });
+
+  it('otra hora que no sea la de la edición se rechaza', async () => {
+    const service = await build([], 120, edicion({ schedule: [{ start: '16:00' }] }));
+    await expect(service.slotOrThrow(EXP_ID, DAY, '16:00')).resolves.toMatchObject({
+      startKey: '16:00',
+    });
+    await expect(service.slotOrThrow(EXP_ID, DAY, '15:00')).rejects.toThrow(
+      /Especial Halloween y se hace a las 16:00/,
+    );
+  });
+
+  it('antes de abrir reservas esos días no se ofrecen, salvo desde el panel', async () => {
+    const service = await build([], 120, edicion({ announceFrom: dia(2) }));
+
+    const slots = await rango(service);
+    expect(slots.some((s) => s.dateKey === DAY)).toBe(false);
+    expect(slots.some((s) => s.dateKey !== DAY)).toBe(true);
+
+    await expect(service.slotOrThrow(EXP_ID, DAY, '15:00')).rejects.toThrow(
+      /Especial Halloween y sus reservas abren el/,
+    );
+    await expect(
+      service.slotOrThrow(EXP_ID, DAY, '15:00', { acrossShifts: true }),
+    ).resolves.toMatchObject({ startKey: '15:00' });
+  });
+
+  it('una edición apagada no cambia nada', async () => {
+    const slots = await offer(await build([], 120, edicion({ active: false })));
+    expect(slots.length).toBeGreaterThanOrEqual(1);
+    expect(slots.every((s) => s.price === 42000 && !s.special)).toBe(true);
+  });
+});

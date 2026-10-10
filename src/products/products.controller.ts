@@ -153,7 +153,7 @@ export class ProductsController {
 
   @Patch(':id/stock/subtract')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   @Auditory({ entity: 'Product', action: 'UPDATE_STOCK' })
   @ApiOperation({ summary: 'Restar stock del producto' })
   @ApiResponse({ status: 200, description: 'Stock actualizado exitosamente' })

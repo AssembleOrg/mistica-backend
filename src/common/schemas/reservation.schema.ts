@@ -120,6 +120,14 @@ export class Reservation {
   @Prop({ trim: true })
   kitchenNotes?: string;
 
+  // Edición especial de la experiencia que regía el día de la reserva
+  // (Halloween, Navidad…): con qué texto, precio y bonos se vendió.
+  @Prop({ trim: true })
+  specialId?: string;
+
+  @Prop({ trim: true })
+  specialName?: string;
+
   // Tortas a preparar para la reserva: la simbólica de regalo (cumples de 10
   // o más, o como estrategia de venta) y las que se venden aparte. Las que
   // tienen precio además se sumaron como adicional (extras) al total.

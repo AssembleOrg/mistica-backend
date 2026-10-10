@@ -650,6 +650,31 @@ export class AdminUpdateReservationDto {
   kitchenNotes?: string;
 }
 
+/** Adicional con precio sumado a mano a una reserva (sube el total y el saldo). */
+export class AddReservationExtraDto {
+  @ApiProperty({
+    description: "Qué se suma ('Pieza temática', 'Copa de bienvenida')",
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  label: string;
+
+  @ApiProperty({ description: 'Precio unitario (mayor a 0)' })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.01)
+  amount: number;
+
+  @ApiPropertyOptional({ description: 'Cantidad', default: 1, minimum: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  qty?: number;
+}
+
 /** Torta para cocina; con precio, también suma como adicional al total. */
 export class AddReservationCakeDto {
   @ApiProperty({ description: "Qué torta ('Torta simbólica', 'Torta grande')" })

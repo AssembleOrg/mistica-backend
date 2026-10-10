@@ -30,9 +30,18 @@ import {
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { aliasKeys, cleanAliases, normalizeAlias } from './alias';
 import { normalizeOwnSchedule, ownScheduleError } from './own-schedule';
+import {
+  normalizeSpecials,
+  publicSpecials,
+  specialKeys,
+  specialOn,
+  specialsError,
+  type SpecialLike,
+} from './specials';
 import { TablesService } from '../tables/tables.service';
 import {
   bookingStartWindow,
+  businessDateKey,
   checkBookingWindow,
   suggestedShiftFor,
 } from '../tables/shifts';
@@ -55,10 +64,18 @@ export class ExperiencesService {
   async createExperience(dto: CreateExperienceDto) {
     this.assertOwnSchedule(dto.ownSchedule, dto.durationMinutes);
     const aliases = await this.validAliases(dto.aliases, dto.name, null);
+    const specials = await this.validSpecials(
+      dto.specials,
+      dto.name,
+      aliases,
+      dto.durationMinutes,
+      null,
+    );
     return this.experienceModel.create({
       ...dto,
       ownSchedule: normalizeOwnSchedule(dto.ownSchedule),
       aliases,
+      ...(specials ? { specials } : {}),
     });
   }
 
@@ -66,6 +83,16 @@ export class ExperiencesService {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (!includeInactive) filter.isActive = true;
     return this.experienceModel.find(filter).sort({ name: 1 }).lean();
+  }
+
+  /**
+   * Catálogo para el bot y la landing: las experiencias activas, con sus
+   * ediciones especiales ya filtradas (sin las apagadas ni las que terminaron
+   * hace mucho) y con su estado de hoy (PROXIMA / VIGENTE / FINALIZADA).
+   */
+  async listPublicExperiences() {
+    const list = await this.listExperiences(false);
+    return list.map((e) => ({ ...e, specials: publicSpecials(e.specials) }));
   }
 
   async getExperience(id: string) {
@@ -84,15 +111,33 @@ export class ExperiencesService {
         dto.durationMinutes ?? exp.durationMinutes,
       );
     }
-    if (dto.aliases !== undefined || dto.name !== undefined) {
-      const aliases = await this.validAliases(
-        dto.aliases ?? exp.aliases,
-        dto.name ?? exp.name,
-        String(exp._id),
-      );
-      Object.assign(exp, dto, { aliases });
-    } else {
-      Object.assign(exp, dto);
+    const aliases =
+      dto.aliases !== undefined || dto.name !== undefined
+        ? await this.validAliases(
+            dto.aliases ?? exp.aliases,
+            dto.name ?? exp.name,
+            String(exp._id),
+          )
+        : undefined;
+    // Las ediciones se revalidan si cambian ellas o algo de lo que dependen
+    // (la duración para sus horarios; el nombre y los apodos para sus activadores).
+    const specials =
+      dto.specials !== undefined ||
+      dto.durationMinutes !== undefined ||
+      aliases !== undefined
+        ? await this.validSpecials(
+            dto.specials ??
+              (exp.toObject() as { specials?: SpecialLike[] }).specials,
+            dto.name ?? exp.name,
+            aliases ?? exp.aliases,
+            dto.durationMinutes ?? exp.durationMinutes,
+            String(exp._id),
+          )
+        : undefined;
+    Object.assign(exp, dto);
+    if (aliases !== undefined) exp.aliases = aliases;
+    if (dto.specials !== undefined && specials !== undefined) {
+      exp.set('specials', specials);
     }
     exp.updatedAt = new Date();
     await exp.save();
@@ -109,9 +154,55 @@ export class ExperiencesService {
   }
 
   /**
+   * Ediciones especiales listas para guardar. Además de sus reglas propias
+   * (fechas, superposición, horarios: ver specialsError), sus nombres y
+   * activadores no pueden coincidir con el nombre o un apodo de NINGUNA
+   * experiencia: "halloween" tiene que llevar a la edición, no a otra cosa.
+   * Sí pueden repetirse entre ediciones de experiencias distintas (el Halloween
+   * de dos experiencias): ahí el bot pregunta de cuál.
+   */
+  private async validSpecials(
+    raw: SpecialLike[] | undefined,
+    name: string,
+    aliases: string[],
+    durationMinutes: number,
+    ignoreId: string | null,
+  ): Promise<SpecialLike[] | undefined> {
+    const specials = normalizeSpecials(raw);
+    if (!specials?.length) return specials;
+    const err = specialsError(specials, durationMinutes);
+    if (err) throw new BadRequestException(err);
+
+    const others = await this.experienceModel
+      .find({ deletedAt: { $exists: false } })
+      .select('name aliases')
+      .lean();
+    const taken = new Map<string, string>();
+    for (const key of aliasKeys(name, aliases)) taken.set(key, name);
+    for (const o of others) {
+      if (ignoreId && (o._id as Types.ObjectId).toHexString() === ignoreId)
+        continue;
+      for (const key of aliasKeys(o.name, o.aliases ?? []))
+        taken.set(key, o.name);
+    }
+    for (const s of specials) {
+      for (const key of specialKeys(s)) {
+        const clash = taken.get(key);
+        if (clash) {
+          throw new BadRequestException(
+            `La edición "${s.name}" usa un nombre o activador que ya nombra a la experiencia "${clash}". Elegí uno que la distinga (por ejemplo "especial halloween").`,
+          );
+        }
+      }
+    }
+    return specials;
+  }
+
+  /**
    * Limpia los apodos y verifica que ninguno choque con el nombre o el apodo de
    * OTRA experiencia: si dos respondieran al mismo apodo, el bot no tendría
-   * forma de saber a cuál se refiere el cliente.
+   * forma de saber a cuál se refiere el cliente. Tampoco con el nombre o un
+   * activador de una edición especial (de cualquier experiencia).
    */
   private async validAliases(
     raw: string[] | undefined,
@@ -123,11 +214,17 @@ export class ExperiencesService {
 
     const others = await this.experienceModel
       .find({ deletedAt: { $exists: false } })
-      .select('name aliases')
+      .select('name aliases specials.name specials.aliases')
       .lean();
 
     const taken = new Map<string, string>();
     for (const o of others) {
+      // Las ediciones especiales cuentan todas, también las propias.
+      for (const sp of o.specials ?? []) {
+        for (const key of specialKeys(sp)) {
+          taken.set(key, `${sp.name} (edición de ${o.name})`);
+        }
+      }
       if (ignoreId && (o._id as Types.ObjectId).toHexString() === ignoreId)
         continue;
       for (const key of aliasKeys(o.name, o.aliases ?? [])) {
@@ -249,9 +346,15 @@ export class ExperiencesService {
     const expIds = [...new Set(sessions.map((s) => String(s.experienceId)))];
     const exps = await this.experienceModel
       .find({ _id: { $in: expIds } })
-      .select('color')
+      .select('color specials')
       .lean();
     const colorByExp = new Map(exps.map((e) => [String(e._id), e.color]));
+    const specialsByExp = new Map(
+      exps.map((e) => [
+        (e._id as Types.ObjectId).toHexString(),
+        e.specials as SpecialLike[],
+      ]),
+    );
 
     // Personas CONFIRMADAS por turno. `seatsTaken` incluye reservas pendientes
     // (holds del bot/landing) para no sobrevender; la Agenda, en cambio, es la
@@ -283,6 +386,7 @@ export class ExperiencesService {
           s as unknown as SessionLike,
           colorByExp.get(String(s.experienceId)),
           confirmedBySession.get(String(s._id)) ?? 0,
+          specialsByExp.get(String(s.experienceId)),
         );
         if (!checkBookingWindow(s.startAt, s.durationMinutes).ok) {
           // Turno mal cargado (fuera de la ventana del negocio): no se puede
@@ -400,10 +504,13 @@ export class ExperiencesService {
     s: SessionLike,
     experienceColor?: string,
     confirmedSeats?: number,
+    /** Ediciones especiales de la experiencia: rotulan el turno y su precio. */
+    specials?: SpecialLike[] | null,
   ) {
     // El turno sugerido se deriva de la hora de inicio y la duración. Es una
     // etiqueta: un horario fuera de todo turno es válido igual.
     const placed = suggestedShiftFor(s.startAt, s.durationMinutes);
+    const special = specialOn(specials, businessDateKey(s.startAt));
     return {
       id: String(s._id),
       shiftKey: placed?.shift.key,
@@ -412,7 +519,9 @@ export class ExperiencesService {
       experienceName: s.experienceName,
       experienceColor: experienceColor ?? '#9d684e',
       durationMinutes: s.durationMinutes,
-      price: s.price,
+      // En un día de edición especial se muestra su nombre y su precio.
+      price: special?.price ?? s.price,
+      specialName: special?.name,
       depositPct: s.depositPct ?? 50,
       startAt: s.startAt,
       endAt: s.endAt,

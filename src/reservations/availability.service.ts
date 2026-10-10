@@ -33,12 +33,25 @@ import {
   startWindow,
   toMinutes,
 } from '../tables/shifts';
-import { hasOwnSchedule, ownSlotLabel, ownStartsFor } from '../experiences/own-schedule';
+import { ownSlotLabel } from '../experiences/own-schedule';
+import {
+  dayPlan,
+  specialDatesLabel,
+  specialIdOf,
+  specialOn,
+} from '../experiences/specials';
 
 /** Error de clave duplicada de MongoDB. */
 const DUP_KEY = 11000;
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** 'YYYY-MM-DD' → 'd/m' para los mensajes al cliente. */
+function fmtYmd(ymd?: string): string {
+  if (!ymd) return '';
+  const d = DateTime.fromISO(ymd);
+  return d.isValid ? `${d.day}/${d.month}` : ymd;
+}
 
 /** Un horario sugerido reservable de un día concreto. */
 export interface AvailableShift {
@@ -75,6 +88,11 @@ export interface AvailableShift {
   windowStart?: string;
   windowEnd?: string;
   latestStart?: string;
+  /**
+   * Edición especial de la experiencia que rige ese día (Halloween…): el
+   * `price` ya es el de la edición. Ver experiences/specials.ts.
+   */
+  special?: { id?: string; name: string };
 }
 
 /**
@@ -209,15 +227,21 @@ export class AvailabilityService implements OnModuleInit {
       own: boolean;
       window: { windowStart: string; windowEnd: string; latestStart: string };
     }> = [];
-    const own = hasOwnSchedule(exp.ownSchedule);
+    const today = now.toISODate() as string;
     days.forEach((d, i) => {
       if (closedFlags[i].closed) return;
       const dateKey = d.toISODate() as string;
+      // Cómo se ofrece ese día: manda la edición especial que lo cubra.
+      const plan = dayPlan(exp, dateKey, today);
+      // La edición del día todavía no abrió reservas: no se ofrece (tampoco
+      // como la versión normal, que esos días no existe).
+      if (plan.notAnnounced) return;
 
-      // Horario PROPIO: la experiencia se ofrece sólo en sus días y horas, y
-      // nunca en los turnos generales (ej. Escuelita: miércoles 18:00).
-      if (own) {
-        for (const start of ownStartsFor(exp.ownSchedule, dateKey)) {
+      // Horario PROPIO (o especial de la edición): la experiencia se ofrece
+      // sólo en sus días y horas, y nunca en los turnos generales (ej.
+      // Escuelita: miércoles 18:00).
+      if (plan.own) {
+        for (const start of plan.starts) {
           const slot = this.slotAt(exp, dateKey, start, tz);
           if (!slot) continue; // fuera de la ventana del negocio
           if (DateTime.fromJSDate(slot.startAt) <= now) continue;
@@ -475,8 +499,23 @@ export class AvailabilityService implements OnModuleInit {
     startTime: string,
     opts: { acrossShifts?: boolean } = {},
   ): void {
-    if (hasOwnSchedule(exp.ownSchedule)) {
-      if (ownStartsFor(exp.ownSchedule, dateKey).includes(startTime)) return;
+    const plan = dayPlan(exp, dateKey);
+    // La edición especial del día todavía no abrió reservas. Desde el panel
+    // (acrossShifts) sí se puede cargar antes.
+    if (plan.notAnnounced && plan.special && !opts.acrossShifts) {
+      throw new BadRequestException(
+        `Ese día es ${plan.special.name} y sus reservas abren el ${fmtYmd(plan.special.announceFrom)}.`,
+      );
+    }
+    if (plan.own) {
+      if (plan.starts.includes(startTime)) return;
+      if (plan.special?.schedule?.length) {
+        throw new BadRequestException(
+          plan.starts.length
+            ? `Ese día es ${plan.special.name} y se hace a las ${plan.starts.join(' y ')}. Elegí uno de esos horarios.`
+            : `${plan.special.name} (${specialDatesLabel(plan.special)}) no se hace ese día. Elegí otra fecha.`,
+        );
+      }
       const cuando = exp.ownSchedule.map((s) => ownSlotLabel(s)).join(', ');
       throw new BadRequestException(
         `${exp.name} tiene horario propio: ${cuando}. Elegí uno de esos horarios.`,
@@ -526,13 +565,18 @@ export class AvailabilityService implements OnModuleInit {
     );
     if (!checked.ok) return null;
 
+    // En una edición especial el precio que se muestra es el de la edición.
+    const special = specialOn(exp.specials, dateKey);
     return {
       dateKey,
       startTime,
       startAt: startAt.toJSDate(),
       endAt: startAt.plus({ minutes: exp.durationMinutes }).toJSDate(),
-      price: exp.basePrice,
+      price: special?.price ?? exp.basePrice,
       depositPct: exp.depositPct ?? 50,
+      ...(special
+        ? { special: { id: specialIdOf(special), name: special.name } }
+        : {}),
     };
   }
 

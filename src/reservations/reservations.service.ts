@@ -15,6 +15,7 @@ import { envConfig } from '../config/env.config';
 import {
   ResolveTransferReceiptDto,
   AddReservationCakeDto,
+  AddReservationExtraDto,
   AdminCreateReservationDto,
   AdminRescheduleReservationDto,
   AdminUpdateReservationDto,
@@ -43,7 +44,7 @@ import {
   Experience,
   ExperienceDocument,
 } from '../common/schemas/experience.schema';
-import { effectiveUnitPrice } from '../common/pricing';
+import { effectiveUnitPrice, type PriceVariantLike } from '../common/pricing';
 import {
   Reservation,
   ReservationDocument,
@@ -64,7 +65,12 @@ import { AvailabilityService } from './availability.service';
 import { GroupsService } from '../groups/groups.service';
 import { InAppNotificationsService } from '../in-app-notifications/in-app-notifications.service';
 import { User, UserDocument } from '../common/schemas/user.schema';
-import { isOwnSlot } from '../experiences/own-schedule';
+import {
+  dayPlan,
+  specialIdOf,
+  specialOn,
+  type SpecialLike,
+} from '../experiences/specials';
 import { UserRole } from '../common/enums/user-role.enum';
 
 // Minutos que vive un hold esperando el comprobante de transferencia antes de
@@ -563,17 +569,22 @@ export class ReservationsService implements OnApplicationBootstrap {
             freeSpots?: number;
           }
         | undefined;
+      // Edición especial que rige ese día (el precio ya es el suyo).
+      let specialName: string | undefined;
       if (session.price != null) {
-        const variants = await this.variantsFor(
+        const ctx = await this.pricingFor(
           session.experienceId,
+          session.price,
+          session.startAt,
           dto.isBirthday,
         );
         const eff = effectiveUnitPrice(
-          variants,
-          session.price,
+          ctx.variants,
+          ctx.basePrice,
           qty,
           businessDateKey(session.startAt),
         );
+        specialName = ctx.special?.name;
         const amounts = computeReservationAmounts(
           eff.unitPrice,
           eff.billableQty,
@@ -599,6 +610,7 @@ export class ReservationsService implements OnApplicationBootstrap {
         sharedTable: preview.plan.shared,
         maxPartySize: Math.min(remaining, seatsLeftInSession),
         pricing,
+        ...(specialName ? { specialName } : {}),
       };
     }
 
@@ -1086,6 +1098,18 @@ export class ReservationsService implements OnApplicationBootstrap {
     return this.publicView(r);
   }
 
+  /** Suma UN adicional a mano desde el panel (p. ej. un extra de la edición especial). */
+  async adminAddExtra(id: string, dto: AddReservationExtraDto) {
+    const qty = dto.qty ?? 1;
+    const label = dto.label.trim();
+    return this.addExtras(id, [
+      {
+        label: qty > 1 ? `${label} x${qty}` : label,
+        amount: Number((dto.amount * qty).toFixed(2)),
+      },
+    ]);
+  }
+
   /**
    * Agenda una venta hecha en el local (POS): crea la reserva CONFIRMED en el
    * turno elegido, vinculada a esa venta. No cobra nada: el total y lo pagado
@@ -1167,6 +1191,8 @@ export class ReservationsService implements OnApplicationBootstrap {
       sessionId: r.sessionId,
       experienceId: r.experienceId,
       experienceName: r.experienceName,
+      // Cocina y taller preparan distinto una edición especial (Halloween…).
+      specialName: r.specialName,
       customerName: r.customerName,
       startAt: r.startAt,
       quantity: r.quantity,
@@ -1390,9 +1416,15 @@ export class ReservationsService implements OnApplicationBootstrap {
     if (!session?.experienceId) return false;
     const exp = await this.experienceModel
       .findById(session.experienceId)
-      .select('ownSchedule')
+      .select('ownSchedule specials')
       .lean();
-    return isOwnSlot(exp?.ownSchedule, session.startAt);
+    if (!exp) return false;
+    // Horario propio de la experiencia o especial de la edición de ese día.
+    const local = DateTime.fromJSDate(session.startAt).setZone(
+      envConfig.timezone,
+    );
+    const plan = dayPlan(exp, businessDateKey(session.startAt));
+    return plan.own && plan.starts.includes(local.toFormat('HH:mm'));
   }
 
   /** Preview de un horario propio: entra si alcanza el cupo del turno. */
@@ -1429,14 +1461,21 @@ export class ReservationsService implements OnApplicationBootstrap {
           freeSpots?: number;
         }
       | undefined;
+    let specialName: string | undefined;
     if (session.price != null) {
-      const variants = await this.variantsFor(session.experienceId, isBirthday);
-      const eff = effectiveUnitPrice(
-        variants,
+      const ctx = await this.pricingFor(
+        session.experienceId,
         session.price,
+        session.startAt,
+        isBirthday,
+      );
+      const eff = effectiveUnitPrice(
+        ctx.variants,
+        ctx.basePrice,
         qty,
         businessDateKey(session.startAt),
       );
+      specialName = ctx.special?.name;
       const amounts = computeReservationAmounts(
         eff.unitPrice,
         eff.billableQty,
@@ -1458,6 +1497,7 @@ export class ReservationsService implements OnApplicationBootstrap {
       sharedTable: false,
       maxPartySize: left,
       pricing,
+      ...(specialName ? { specialName } : {}),
     };
   }
 
@@ -1489,6 +1529,14 @@ export class ReservationsService implements OnApplicationBootstrap {
     const base: Partial<Reservation> = { ...rest };
     if (clientId) base.clientId = new Types.ObjectId(clientId);
     if (createdById) base.createdById = new Types.ObjectId(createdById);
+    // Si ese día rige una edición especial, la reserva queda rotulada con ella.
+    if (base.startAt && base.specialName === undefined) {
+      const special = await this.specialAt(base.experienceId, base.startAt);
+      if (special) {
+        base.specialId = specialIdOf(special);
+        base.specialName = special.name;
+      }
+    }
 
     for (let attempt = 0; attempt < 6; attempt++) {
       try {
@@ -1983,6 +2031,10 @@ export class ReservationsService implements OnApplicationBootstrap {
       r.experienceId = target.experienceId;
       r.experienceName = target.experienceName;
       r.startAt = target.startAt;
+      // La edición especial es la del día nuevo (o ninguna).
+      const special = await this.specialAt(target.experienceId, target.startAt);
+      r.set('specialId', specialIdOf(special));
+      r.set('specialName', special?.name);
       r.rescheduledAt = now;
       // Re-armar el recordatorio para la nueva fecha.
       r.set('reminderSentAt', undefined);
@@ -2298,15 +2350,59 @@ ${dto.notes}` : note,
     startAt: Date,
     isBirthday?: boolean,
   ): Promise<{ unitPrice: number; billableQty: number }> {
-    const variants = await this.variantsFor(experienceId, isBirthday);
-    if (!variants.length) return { unitPrice: sessionPrice, billableQty: qty };
-    const eff = effectiveUnitPrice(
-      variants,
+    const ctx = await this.pricingFor(
+      experienceId,
       sessionPrice,
+      startAt,
+      isBirthday,
+    );
+    const eff = effectiveUnitPrice(
+      ctx.variants,
+      ctx.basePrice,
       qty,
       businessDateKey(startAt),
     );
     return { unitPrice: eff.unitPrice, billableQty: eff.billableQty };
+  }
+
+  /**
+   * Con qué se calcula el precio de una reserva ese día: el precio base y las
+   * promos que pueden aplicar. Si el día cae en una EDICIÓN ESPECIAL de la
+   * experiencia (Halloween…), mandan su precio — si lo tiene — y sus bonos, y
+   * las promos habituales de la experiencia no participan. En un CUMPLEAÑOS
+   * los beneficios son siempre los del doc Cumpleaños (ver variantsFor),
+   * sobre el precio que corresponda al día.
+   */
+  private async pricingFor(
+    experienceId: Types.ObjectId | string | undefined,
+    sessionPrice: number,
+    startAt: Date,
+    isBirthday?: boolean,
+  ): Promise<{
+    basePrice: number;
+    variants: PriceVariantLike[];
+    special?: SpecialLike;
+  }> {
+    const special = await this.specialAt(experienceId, startAt);
+    const variants = isBirthday
+      ? await this.variantsFor(experienceId, true)
+      : special
+        ? (special.priceVariants ?? [])
+        : await this.variantsFor(experienceId, false);
+    return { basePrice: special?.price ?? sessionPrice, variants, special };
+  }
+
+  /** Edición especial de la experiencia que rige el día de `startAt`, si hay. */
+  private async specialAt(
+    experienceId: Types.ObjectId | string | undefined,
+    startAt: Date,
+  ): Promise<SpecialLike | undefined> {
+    if (!experienceId) return undefined;
+    const exp = await this.experienceModel
+      .findById(experienceId)
+      .select('specials')
+      .lean();
+    return specialOn(exp?.specials, businessDateKey(startAt));
   }
 
   /** Con la hora extra, la reserva tiene que seguir terminando antes del cierre. */
@@ -2466,6 +2562,7 @@ ${dto.notes}` : note,
       totalAmount: r.totalAmount,
       balanceDue: r.balanceDue,
       quantity: r.quantity,
+      specialName: r.specialName,
       expiresAt: r.expiresAt,
       paymentMethod: r.paymentMethod,
       holdMinutes: TRANSFER_HOLD_MINUTES,
@@ -2515,6 +2612,8 @@ ${dto.notes}` : note,
       code: r.code,
       status: r.status,
       experienceName: r.experienceName,
+      specialId: r.specialId,
+      specialName: r.specialName,
       startAt: r.startAt,
       quantity: r.quantity,
       freeSpots: r.freeSpots,

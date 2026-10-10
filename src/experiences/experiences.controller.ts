@@ -35,7 +35,7 @@ export class ExperiencesController {
   @Public()
   @ApiOperation({ summary: 'Experiencias activas (público)' })
   async listPublic() {
-    return this.experiencesService.listExperiences(false);
+    return this.experiencesService.listPublicExperiences();
   }
 
   // ── Admin ──

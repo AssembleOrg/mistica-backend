@@ -15,6 +15,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
   AddReservationCakeDto,
+  AddReservationExtraDto,
   AdminCreateReservationDto,
   ResolveTransferReceiptDto,
   AdminRescheduleReservationDto,
@@ -122,6 +123,17 @@ export class ReservationsAdminController {
   @ApiOperation({ summary: 'Editar datos de una reserva' })
   async update(@Param('id') id: string, @Body() dto: AdminUpdateReservationDto) {
     return this.reservationsService.adminUpdate(id, dto);
+  }
+
+  @Post(':id/extras')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @ApiOperation({
+    summary:
+      'Sumar un adicional con precio a la reserva (p. ej. un extra de la edición especial)',
+  })
+  async addExtra(@Param('id') id: string, @Body() dto: AddReservationExtraDto) {
+    return this.reservationsService.adminAddExtra(id, dto);
   }
 
   @Post(':id/cakes')

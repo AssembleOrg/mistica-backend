@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 export type ExperienceDocument = Experience & Document;
 
@@ -86,6 +86,100 @@ export class OwnSlot {
 
 export const OwnSlotSchema = SchemaFactory.createForClass(OwnSlot);
 
+/** Horario de una edición especial: hora de inicio, todos los días de la
+ * edición o (con `date`) sólo ese día. */
+@Schema({ _id: false })
+export class SpecialSlot {
+  // Hora local de inicio, 'HH:mm'. La duración es la de la experiencia.
+  @Prop({ required: true, trim: true })
+  start: string;
+
+  // 'YYYY-MM-DD': el horario vale sólo ese día. Sin fecha, todos los días.
+  @Prop({ trim: true })
+  date?: string;
+}
+
+export const SpecialSlotSchema = SchemaFactory.createForClass(SpecialSlot);
+
+/** Extra OPCIONAL con precio de una edición especial (lo suma el equipo). */
+@Schema({ _id: false })
+export class SpecialExtra {
+  @Prop({ required: true, trim: true })
+  name: string;
+
+  @Prop({ required: true, min: 0 })
+  price: number;
+
+  @Prop({ trim: true })
+  description?: string;
+}
+
+export const SpecialExtraSchema = SchemaFactory.createForClass(SpecialExtra);
+
+/**
+ * EDICIÓN ESPECIAL de una experiencia (Halloween, Navidad…): entre `dateFrom`
+ * y `dateTo` la experiencia ES esta edición — su texto, su precio, sus bonos,
+ * sus extras y, si los tiene, sus horarios — y la versión normal no se ofrece
+ * esos días. Fuera de esas fechas no tiene efecto: se activa y se apaga sola.
+ * Ver experiences/specials.ts.
+ */
+@Schema({ _id: true })
+export class SpecialEdition {
+  _id?: Types.ObjectId;
+
+  // Nombre de la edición ('Especial Halloween').
+  @Prop({ required: true, trim: true })
+  name: string;
+
+  // Activadores del bot: cómo la piden los clientes ('halloween', 'noche de
+  // brujas'). Misma normalización que los apodos (experiences/alias.ts).
+  @Prop({ type: [String], default: [] })
+  aliases: string[];
+
+  // Texto de la edición: reemplaza a la descripción de la experiencia.
+  @Prop({ trim: true })
+  description?: string;
+
+  // Primer y último día en que se HACE ('YYYY-MM-DD'; iguales = un solo día).
+  @Prop({ required: true, trim: true })
+  dateFrom: string;
+
+  @Prop({ required: true, trim: true })
+  dateTo: string;
+
+  // Desde qué día se ofrece y se puede reservar. Antes, el bot sólo avisa
+  // cuándo abren las reservas. Sin valor, se ofrece apenas se carga.
+  @Prop({ trim: true })
+  announceFrom?: string;
+
+  // Precio por persona de la edición. Sin valor, el de la experiencia.
+  @Prop({ min: 0 })
+  price?: number;
+
+  // Bonos de la edición (promos por cantidad, lugares bonificados…). Durante
+  // la edición reemplazan a las promos habituales de la experiencia.
+  @Prop({ type: [PriceVariantSchema], default: [] })
+  priceVariants: PriceVariant[];
+
+  // Lo que la edición INCLUYE sin costo ('copa de bienvenida').
+  @Prop({ type: [String], default: [] })
+  included: string[];
+
+  // Extras OPCIONALES con precio: el bot los informa, los suma el equipo.
+  @Prop({ type: [SpecialExtraSchema], default: [] })
+  extras: SpecialExtra[];
+
+  // Horarios especiales. Vacío = los horarios habituales de la experiencia.
+  @Prop({ type: [SpecialSlotSchema], default: [] })
+  schedule: SpecialSlot[];
+
+  @Prop({ type: Boolean, default: true })
+  active: boolean;
+}
+
+export const SpecialEditionSchema =
+  SchemaFactory.createForClass(SpecialEdition);
+
 /**
  * Plantilla de experiencia (taller de torno, cumpleaños, buffet+cerámica, etc.).
  * NO tiene fecha: es la definición reutilizable. Los turnos concretos (con fecha,
@@ -153,6 +247,10 @@ export class Experience {
    */
   @Prop({ type: [OwnSlotSchema], default: [] })
   ownSchedule: OwnSlot[];
+
+  // Ediciones especiales por fecha (Halloween, Navidad…). Ver SpecialEdition.
+  @Prop({ type: [SpecialEditionSchema], default: [] })
+  specials: SpecialEdition[];
 
   // ¿Se reserva online por acá (genera turnos + seña)? Si es false, es un
   // servicio que se COORDINA: el bot/web solo informa y capta la consulta
