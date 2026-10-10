@@ -1,8 +1,10 @@
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -215,6 +217,18 @@ export class UpdateBotFaqDto {
   order?: number;
 }
 
+/** Un turno previo de la charla de prueba. */
+export class BotTryTurnDto {
+  @ApiProperty({ enum: ['user', 'assistant'] })
+  @IsIn(['user', 'assistant'])
+  role: 'user' | 'assistant';
+
+  @ApiProperty()
+  @IsString()
+  @MaxLength(8000)
+  content: string;
+}
+
 export class BotTryDto {
   @ApiProperty({ description: 'Mensaje del cliente a probar' })
   @IsString()
@@ -222,10 +236,16 @@ export class BotTryDto {
   @MaxLength(2000)
   message: string;
 
+  // Con clase propia y @Type: el pipe global convierte tipos implícitamente y,
+  // sin esto, cada turno llegaba al bot como un array vacío (charla sin memoria).
   @ApiPropertyOptional({
-    description: 'Turnos previos de la charla de prueba [{role, content}]',
+    description: 'Turnos previos de la charla de prueba',
+    type: [BotTryTurnDto],
   })
   @IsOptional()
   @IsArray()
-  history?: { role: 'user' | 'assistant'; content: string }[];
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => BotTryTurnDto)
+  history?: BotTryTurnDto[];
 }
