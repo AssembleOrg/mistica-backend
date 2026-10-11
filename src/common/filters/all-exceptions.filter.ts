@@ -68,7 +68,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
       );
       void this.maybeAlert(`${req.method} ${req.url}`, msg);
     } else {
-      this.logger.warn(`${req.method} ${req.url} → ${status}`);
+      // Con el motivo: un "→ 400" pelado no dice qué rechazó el pedido, y el
+      // panel no siempre se lo muestra a la persona.
+      const reason =
+        typeof payload === 'string'
+          ? payload
+          : (payload as { message?: unknown }).message;
+      const text = (
+        Array.isArray(reason) ? reason.join('; ') : String(reason ?? '')
+      ).slice(0, 300);
+      this.logger.warn(
+        `${req.method} ${req.url} → ${status}${text ? `: ${text}` : ''}`,
+      );
     }
 
     res.status(status).json(
