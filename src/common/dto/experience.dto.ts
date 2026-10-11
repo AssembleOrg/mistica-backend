@@ -353,13 +353,17 @@ export class CreateExperienceDto {
   @Min(0)
   basePrice: number;
 
-  @ApiProperty({
-    description: 'Cupo por defecto al generar turnos',
-    minimum: 1,
+  @ApiPropertyOptional({
+    description:
+      'Cupo por turno. No es obligatorio: vacío (ausente, null o 0) = 40.',
+    minimum: 0,
+    default: 40,
+    nullable: true,
   })
+  @IsOptional()
   @IsInt()
-  @Min(1)
-  defaultCapacity: number;
+  @Min(0)
+  defaultCapacity?: number | null;
 
   @ApiPropertyOptional({
     description: 'Seña (%) que se cobra al reservar. Default 50.',

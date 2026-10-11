@@ -38,6 +38,7 @@ import {
   specialsError,
   type SpecialLike,
 } from './specials';
+import { capacityOrDefault } from './capacity';
 import { TablesService } from '../tables/tables.service';
 import {
   bookingStartWindow,
@@ -73,6 +74,7 @@ export class ExperiencesService {
     );
     return this.experienceModel.create({
       ...dto,
+      defaultCapacity: capacityOrDefault(dto.defaultCapacity),
       ownSchedule: normalizeOwnSchedule(dto.ownSchedule),
       aliases,
       ...(specials ? { specials } : {}),
@@ -104,6 +106,10 @@ export class ExperiencesService {
     const exp = await this.findExperienceOrThrow(id);
     if (dto.ownSchedule !== undefined) {
       dto = { ...dto, ownSchedule: normalizeOwnSchedule(dto.ownSchedule) };
+    }
+    // Cupo vaciado en el formulario (null o 0): vuelve al cupo por defecto.
+    if (dto.defaultCapacity !== undefined) {
+      dto = { ...dto, defaultCapacity: capacityOrDefault(dto.defaultCapacity) };
     }
     if (dto.ownSchedule !== undefined || dto.durationMinutes !== undefined) {
       this.assertOwnSchedule(

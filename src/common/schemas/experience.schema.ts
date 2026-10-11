@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { DEFAULT_EXPERIENCE_CAPACITY } from '../../experiences/capacity';
 
 export type ExperienceDocument = Experience & Document;
 
@@ -206,7 +207,8 @@ export class Experience {
   basePrice: number;
 
   // Cupo por defecto al generar turnos. Cada turno guarda su propio `capacity`.
-  @Prop({ required: true, min: 1 })
+  // No es obligatorio cargarlo: vacío = DEFAULT_EXPERIENCE_CAPACITY.
+  @Prop({ min: 1, default: DEFAULT_EXPERIENCE_CAPACITY })
   defaultCapacity: number;
 
   // Porcentaje de SEÑA que se cobra al reservar (el resto es saldo pendiente).
