@@ -24,6 +24,7 @@ import { PrepaidsService } from '../prepaids/prepaids.service';
 import { CashboxService } from '../cashbox/cashbox.service';
 import { StudentsService } from '../students/students.service';
 import { buildDateFilter } from '../common/utils';
+import { settledTotal } from './settled';
 
 /** Medio de pago en palabras, para el historial de pagos del alumno. */
 const PAYMENT_METHOD_LABEL: Record<string, string> = {
@@ -1577,13 +1578,20 @@ export class SalesService implements OnApplicationBootstrap {
         // Validar que prepaidUsed no sea mayor al total
         this.validatePrepaidUsed(currentPrepaidUsed, currentSubtotal, currentTaxPercent, currentDiscountFlat);
 
-        // Calcular nuevo total
+        // Calcular nuevo total. El saldo de ventas anteriores que esta venta ya
+        // cobró (settledLines) no es un producto: se vuelve a sumar, igual que
+        // al crearla. Sin esto, editar la venta (p. ej. para cambiar el medio
+        // de pago) la dejaba cobrando sólo los productos, con la línea del
+        // saldo todavía impresa en el ticket.
         const totals = this.calculateTotal(currentSubtotal, currentTaxPercent, currentDiscountFlat, currentPrepaidUsed);
-        updateData.total = totals.total;
+        const newTotal = Number(
+          (totals.total + settledTotal(existingSale.settledLines)).toFixed(2),
+        );
+        updateData.total = newTotal;
 
         // Si cambió el total, los pagos vigentes ya no cuadran. Exigimos que
         // el caller reenvíe `payments` con la nueva distribución.
-        if (totals.total !== existingSale.total && !updateSaleDto.payments) {
+        if (newTotal !== existingSale.total && !updateSaleDto.payments) {
           throw new BadRequestException(
             'Cambió el total de la venta. Reenvía `payments` con la nueva distribución por método de pago.',
           );
