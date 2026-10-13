@@ -96,6 +96,7 @@ export class BotControlController {
     return this.call('/try', 'POST', {
       message: dto.message,
       history: dto.history ?? [],
+      session: dto.session ?? '',
     });
   }
 }

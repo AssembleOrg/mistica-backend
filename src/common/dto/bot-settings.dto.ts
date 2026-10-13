@@ -248,4 +248,12 @@ export class BotTryDto {
   @ValidateNested({ each: true })
   @Type(() => BotTryTurnDto)
   history?: BotTryTurnDto[];
+
+  // Id de la charla de prueba: con él el bot mantiene la sesión entre
+  // mensajes (turnos ofrecidos, etapa de la reserva), igual que en WhatsApp.
+  @ApiPropertyOptional({ description: 'Id de la charla de prueba' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  session?: string;
 }

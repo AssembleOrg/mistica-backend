@@ -8,7 +8,7 @@ export const BUSINESS_DEFAULT: BotBusiness = {
   name: 'Mística Auténtica',
   address: 'Videla 57, Quilmes, Buenos Aires',
   maps: 'https://www.google.com/maps/search/?api=1&query=Videla+57+Quilmes',
-  hours: 'Martes a Domingo de 10:00 a 20:00 hs',
+  hours: 'Martes a Sábado de 10:00 a 20:00 hs (domingos y lunes cerrado)',
   instagram: 'https://instagram.com/mistica.autentica',
   facebook: 'https://www.facebook.com/mistica.autentica',
 };
