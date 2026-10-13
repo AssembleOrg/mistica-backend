@@ -255,7 +255,17 @@ function pickShareable(
 
 /** Personas máximas que admite el salón con estas mesas libres. */
 export function maxPartySize(free: FreeTables): number {
-  return seatsOf(free.large.length, free.small.length);
+  // Con mesas enteras libres o, si rinde más, sumándose a una mesa grande que
+  // ya tiene un grupo chico: esos lugares vacíos también se pueden vender.
+  const sharing = Math.max(
+    0,
+    ...free.shareableLarge
+      .filter((l) => l.holderQty <= SHARE_MAX_PER_RESERVATION)
+      .map((l) =>
+        Math.min(SHARE_MAX_PER_RESERVATION, SHARE_MAX_TOTAL - l.holderQty),
+      ),
+  );
+  return Math.max(seatsOf(free.large.length, free.small.length), sharing);
 }
 
 /**
