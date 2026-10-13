@@ -38,7 +38,7 @@ import {
   specialsError,
   type SpecialLike,
 } from './specials';
-import { capacityOrDefault } from './capacity';
+import { capacityFor } from './capacity';
 import { TablesService } from '../tables/tables.service';
 import {
   bookingStartWindow,
@@ -74,7 +74,7 @@ export class ExperiencesService {
     );
     return this.experienceModel.create({
       ...dto,
-      defaultCapacity: capacityOrDefault(dto.defaultCapacity),
+      defaultCapacity: capacityFor(dto.sharedTableCodes, await this.tables.listTables()),
       ownSchedule: normalizeOwnSchedule(dto.ownSchedule),
       aliases,
       ...(specials ? { specials } : {}),
@@ -107,10 +107,6 @@ export class ExperiencesService {
     if (dto.ownSchedule !== undefined) {
       dto = { ...dto, ownSchedule: normalizeOwnSchedule(dto.ownSchedule) };
     }
-    // Cupo vaciado en el formulario (null o 0): vuelve al cupo por defecto.
-    if (dto.defaultCapacity !== undefined) {
-      dto = { ...dto, defaultCapacity: capacityOrDefault(dto.defaultCapacity) };
-    }
     if (dto.ownSchedule !== undefined || dto.durationMinutes !== undefined) {
       this.assertOwnSchedule(
         dto.ownSchedule ?? exp.ownSchedule,
@@ -141,6 +137,11 @@ export class ExperiencesService {
           )
         : undefined;
     Object.assign(exp, dto);
+    // El cupo no se carga: sale de la mesa asignada o es el límite del local.
+    exp.defaultCapacity = capacityFor(
+      exp.sharedTableCodes,
+      await this.tables.listTables(),
+    );
     if (aliases !== undefined) exp.aliases = aliases;
     if (dto.specials !== undefined && specials !== undefined) {
       exp.set('specials', specials);

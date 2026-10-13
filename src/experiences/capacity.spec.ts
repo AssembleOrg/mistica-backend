@@ -1,6 +1,6 @@
 import { ArgumentMetadata, ValidationPipe } from '@nestjs/common';
 import { CreateExperienceDto } from '../common/dto/experience.dto';
-import { DEFAULT_EXPERIENCE_CAPACITY, capacityOrDefault } from './capacity';
+import { DEFAULT_EXPERIENCE_CAPACITY, capacityFor } from './capacity';
 
 // Mismas opciones que el pipe global de main.ts.
 const pipe = new ValidationPipe({
@@ -18,16 +18,25 @@ const base = {
 };
 
 describe('cupo de una experiencia', () => {
-  it('vacío es el cupo por defecto: 40', () => {
+  const MESAS = [
+    { code: 'M1', seats: 2 },
+    { code: 'G1', seats: 10 },
+    { code: 'G2', seats: 10 },
+  ];
+
+  it('sin mesa asignada rige el límite del local: 40', () => {
     expect(DEFAULT_EXPERIENCE_CAPACITY).toBe(40);
-    expect(capacityOrDefault(undefined)).toBe(40);
-    expect(capacityOrDefault(null)).toBe(40);
-    expect(capacityOrDefault(0)).toBe(40);
+    expect(capacityFor(undefined, MESAS)).toBe(40);
+    expect(capacityFor([], MESAS)).toBe(40);
   });
 
-  it('respeta el cupo cargado', () => {
-    expect(capacityOrDefault(8)).toBe(8);
-    expect(capacityOrDefault(60)).toBe(60);
+  it('con mesa asignada el límite son los lugares de esa mesa', () => {
+    expect(capacityFor(['G2'], MESAS)).toBe(10);
+    expect(capacityFor(['g1', 'G2'], MESAS)).toBe(20);
+  });
+
+  it('una mesa que ya no existe no deja la experiencia sin lugar', () => {
+    expect(capacityFor(['G9'], MESAS)).toBe(40);
   });
 
   it.each([
@@ -36,13 +45,7 @@ describe('cupo de una experiencia', () => {
     ['con 0 (campo vaciado en el panel)', { defaultCapacity: 0 }],
     ['con un cupo', { defaultCapacity: 12 }],
   ])('se puede crear %s', async (_nombre, extra) => {
-    const dto = (await pipe.transform(
-      { ...base, ...extra },
-      meta,
-    )) as CreateExperienceDto;
-    expect(capacityOrDefault(dto.defaultCapacity)).toBe(
-      (extra as { defaultCapacity?: number | null }).defaultCapacity || 40,
-    );
+    await expect(pipe.transform({ ...base, ...extra }, meta)).resolves.toBeDefined();
   });
 
   it('rechaza un cupo negativo o con decimales', async () => {

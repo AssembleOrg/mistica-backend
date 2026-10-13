@@ -1,3 +1,4 @@
+import { capacityFor } from '../experiences/capacity';
 import {
   BadRequestException,
   ConflictException,
@@ -130,14 +131,23 @@ export class AvailabilityService implements OnModuleInit {
 
   private async syncAllCapacitiesOnce() {
     const flags = this.sessionModel.db.collection('app_settings');
-    const key = 'capacitySync:2026-10-08';
+    // 2026-10-13: se saca el cupo cargado a mano; rige la mesa asignada o,
+    // sin mesa, el límite del local.
+    const key = 'capacitySync:2026-10-13';
     if (await flags.findOne({ key })) return;
     const exps = await this.experienceModel
       .find({ deletedAt: { $exists: false } })
-      .select('_id')
+      .select('_id sharedTableCodes')
       .lean();
+    const tables = await this.tables.listTables();
     let n = 0;
-    for (const e of exps) n += await this.syncFutureCapacity(String(e._id));
+    for (const e of exps) {
+      await this.experienceModel.updateOne(
+        { _id: e._id },
+        { $set: { defaultCapacity: capacityFor(e.sharedTableCodes, tables) } },
+      );
+      n += await this.syncFutureCapacity(String(e._id));
+    }
     await flags.updateOne(
       { key },
       { $set: { key, value: String(n), updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },

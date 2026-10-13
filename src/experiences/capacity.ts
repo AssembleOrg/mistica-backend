@@ -1,12 +1,20 @@
 /**
- * Cupo por turno de una experiencia cuando no se carga ninguno. El cupo no es
- * obligatorio: vacío (ausente, null o 0) significa este límite.
+ * Límite del local: el cupo por turno de una experiencia que no tiene mesa
+ * asignada. No se carga a mano ningún cupo por experiencia.
  */
 export const DEFAULT_EXPERIENCE_CAPACITY = 40;
 
-/** El cupo cargado o, si vino vacío, el cupo por defecto. */
-export function capacityOrDefault(value: number | null | undefined): number {
-  return typeof value === 'number' && value >= 1
-    ? value
-    : DEFAULT_EXPERIENCE_CAPACITY;
+/**
+ * Cupo por turno de una experiencia: si tiene mesa/s asignadas (mesa
+ * compartida), los lugares de esas mesas; si no, el límite del local.
+ */
+export function capacityFor(
+  sharedTableCodes: string[] | null | undefined,
+  tables: Array<{ code: string; seats: number }>,
+): number {
+  const codes = new Set((sharedTableCodes ?? []).map((c) => c.toUpperCase()));
+  const seats = tables
+    .filter((t) => codes.has(t.code.toUpperCase()))
+    .reduce((sum, t) => sum + t.seats, 0);
+  return seats > 0 ? seats : DEFAULT_EXPERIENCE_CAPACITY;
 }
