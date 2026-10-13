@@ -196,23 +196,36 @@ describe('planTables · mesa grande compartida', () => {
     }
   });
 
-  it('no comparte con un grupo de más de 4', () => {
+  it('un grupo de más de 4 también entra si quedan lugares', () => {
     const r = planTables(5, shareable(3), { sharedAccepted: true });
-    expect(r).toEqual({ ok: false, reason: 'NO_TABLES' });
+    expect(r).toMatchObject({ ok: true, shared: true, tables: [{ code: 'G1' }] });
   });
 
-  it('no comparte si el que ya está es de más de 4', () => {
-    const r = planTables(3, shareable(5), { sharedAccepted: true });
-    expect(r).toEqual({ ok: false, reason: 'NO_TABLES' });
+  it('se suma aunque el que ya está sea de más de 4', () => {
+    expect(planTables(3, shareable(5), { sharedAccepted: true }).ok).toBe(true);
   });
 
-  it('no deja pasar de 8 personas entre las dos reservas', () => {
-    // 4 + 4 = 8 entra; con un holder de 4 un grupo de 4 es el tope.
-    expect(planTables(4, shareable(4), { sharedAccepted: true }).ok).toBe(true);
-    // 5 + 4 = 9 no entra, y además el grupo de 5 excede el máximo por reserva.
-    expect(planTables(5, shareable(4), { sharedAccepted: true }).ok).toBe(
-      false,
+  it('la mesa se llena hasta sus 10 lugares, no más', () => {
+    // 4 + 6 = 10 entra justo.
+    expect(planTables(6, shareable(4), { sharedAccepted: true }).ok).toBe(true);
+    // 4 + 7 = 11 no entra.
+    expect(planTables(7, shareable(4), { sharedAccepted: true }).ok).toBe(false);
+  });
+
+  it('un grupo que no entra en mesas de 2 va ENTERO a la grande, nunca partido', () => {
+    // Queda una sola mesa de 2 y la grande tiene 4: los 4 nuevos van todos a
+    // la grande; la mesa de 2 no se toca.
+    const r = planTables(
+      4,
+      {
+        small: ['M10'],
+        large: [],
+        shareableLarge: [{ code: 'G2', holderQty: 4, holderReservationId: 'x' }],
+      },
+      { sharedAccepted: true },
     );
+    expect(r).toMatchObject({ ok: true, shared: true });
+    expect(r.ok && r.tables.map((t) => t.code)).toEqual(['G2']);
   });
 });
 

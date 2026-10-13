@@ -11,9 +11,10 @@
  * - Más de 10 se combina mesa grande + mesas de 2. Al unir una mesa a la grande
  *   se pierde uno de sus lugares, así que la grande aporta 9 en vez de 10.
  * - Se pueden combinar las dos grandes (9 + 9) más las mesas de 2 necesarias.
- * - Compartir una mesa grande entre dos reservas es el ÚLTIMO recurso: sólo si
- *   no quedan mesas de 2, cada reserva es de hasta 4 personas y entre las dos
- *   no superan 8. Requiere aviso y aceptación explícita del cliente.
+ * - Compartir una mesa grande: cuando el grupo no entra en mesas de 2, va
+ *   ENTERO a una mesa grande que ya tiene gente, mientras queden lugares (10
+ *   entre todos). Nunca se parte un grupo entre una mesa de 2 y la grande.
+ *   Requiere aviso y aceptación explícita del cliente.
  * - Un grupo chico que no entra en ningún lado se rechaza (no se le da una mesa
  *   grande entera) salvo que se habilite `smallGroupCanTakeLarge`.
  */
@@ -25,13 +26,15 @@ export interface TableRef {
   kind: TableKind;
 }
 
-/** Mesa grande ocupada por UNA sola reserva, candidata a compartirse. */
+/** Mesa grande ya ocupada por reservas, con lugares libres para sumar otra. */
 export interface ShareableLarge {
   code: string;
-  /** Personas de la reserva que ya está en esa mesa. */
+  /** Personas ya sentadas en esa mesa, sumando todas sus reservas. */
   holderQty: number;
-  /** Reserva que la ocupa (para la guarda atómica al asignar). */
+  /** Primera reserva que la ocupa (con quién se comparte, para avisar). */
   holderReservationId: string;
+  /** Todas las reservas que la ocupan (para la guarda atómica al asignar). */
+  holderReservationIds?: string[];
 }
 
 /** Mesas libres de un turno concreto, ya ordenadas por preferencia. */
@@ -69,6 +72,8 @@ export type PlanResult =
       shared: boolean;
       /** Reserva con la que comparte (sólo si shared). */
       sharedWithReservationId?: string;
+      /** Todas las reservas que ya están en esa mesa. */
+      sharedWithReservationIds?: string[];
       /** Lugares que aporta la combinación elegida. */
       seats: number;
     }
@@ -83,12 +88,11 @@ export const SMALL_SEATS = 2;
 export const LARGE_SEATS = 10;
 /** Una mesa grande pierde un lugar cuando se le une otra mesa. */
 export const LARGE_SEATS_JOINED = 9;
-/** Máximo de personas por reserva para poder compartir una mesa grande. */
-export const SHARE_MAX_PER_RESERVATION = 4;
-/** Máximo de personas sumando las dos reservas de una mesa grande compartida. */
-export const SHARE_MAX_TOTAL = 8;
-/** Una mesa grande admite como mucho dos reservas distintas. */
-export const SHARE_MAX_RESERVATIONS = 2;
+/**
+ * Personas que entran en una mesa grande compartida, sumando todas sus
+ * reservas: se llena hasta sus lugares. (Antes: 4 por reserva, 8 entre dos.)
+ */
+export const SHARE_MAX_TOTAL = LARGE_SEATS;
 
 /** Mesas de 2 necesarias para un grupo, sin mesa grande de por medio. */
 export function smallTablesNeeded(qty: number): number {
@@ -143,25 +147,11 @@ export function planTables(
         seats: need * SMALL_SEATS,
       };
     }
-    // Sin mesas de 2: la compartida es la única alternativa, y sólo hasta 4.
+    // No alcanzan las mesas de 2: el grupo va ENTERO a una mesa grande que
+    // todavía tenga lugar (nunca partido entre una mesa de 2 y la grande).
     if (shareOffer) {
-      if (!opts.sharedAccepted) {
-        return {
-          ok: false,
-          reason: 'NEEDS_SHARED_CONSENT',
-          offer: {
-            tables: [{ code: shareOffer.code, kind: 'LARGE' }],
-            sharedWithReservationId: shareOffer.holderReservationId,
-          },
-        };
-      }
-      return {
-        ok: true,
-        tables: [{ code: shareOffer.code, kind: 'LARGE' }],
-        shared: true,
-        sharedWithReservationId: shareOffer.holderReservationId,
-        seats: LARGE_SEATS,
-      };
+      if (!opts.sharedAccepted) return needsConsent(shareOffer);
+      return shareWith(shareOffer);
     }
     if (opts.smallGroupCanTakeLarge && free.large.length >= 1) {
       return {
@@ -192,6 +182,10 @@ export function planTables(
         shared: false,
         seats: need * SMALL_SEATS,
       };
+    }
+    // Último recurso: sumarse a una grande con lugar (7 + un grupo de 3).
+    if (shareOffer) {
+      return opts.sharedAccepted ? shareWith(shareOffer) : needsConsent(shareOffer);
     }
     return { ok: false, reason: 'NO_TABLES' };
   }
@@ -240,30 +234,48 @@ export function planTables(
   return { ok: false, reason: 'NO_TABLES' };
 }
 
-/** Primera mesa grande compartible con este grupo, si el grupo califica. */
+/**
+ * Mesa grande con gente donde este grupo entra entero. Se elige la que queda
+ * más llena, para no dejar lugares sueltos en dos mesas.
+ */
 function pickShareable(
   qty: number,
   free: FreeTables,
 ): ShareableLarge | undefined {
-  if (qty > SHARE_MAX_PER_RESERVATION) return undefined;
-  return free.shareableLarge.find(
-    (l) =>
-      l.holderQty <= SHARE_MAX_PER_RESERVATION &&
-      l.holderQty + qty <= SHARE_MAX_TOTAL,
-  );
+  return free.shareableLarge
+    .filter((l) => l.holderQty + qty <= SHARE_MAX_TOTAL)
+    .sort((a, b) => b.holderQty - a.holderQty)[0];
+}
+
+function shareWith(l: ShareableLarge): PlanResult {
+  return {
+    ok: true,
+    tables: [{ code: l.code, kind: 'LARGE' }],
+    shared: true,
+    sharedWithReservationId: l.holderReservationId,
+    sharedWithReservationIds: l.holderReservationIds ?? [l.holderReservationId],
+    seats: LARGE_SEATS,
+  };
+}
+
+function needsConsent(l: ShareableLarge): PlanResult {
+  return {
+    ok: false,
+    reason: 'NEEDS_SHARED_CONSENT',
+    offer: {
+      tables: [{ code: l.code, kind: 'LARGE' }],
+      sharedWithReservationId: l.holderReservationId,
+    },
+  };
 }
 
 /** Personas máximas que admite el salón con estas mesas libres. */
 export function maxPartySize(free: FreeTables): number {
   // Con mesas enteras libres o, si rinde más, sumándose a una mesa grande que
-  // ya tiene un grupo chico: esos lugares vacíos también se pueden vender.
+  // ya tiene gente: esos lugares vacíos también se pueden vender.
   const sharing = Math.max(
     0,
-    ...free.shareableLarge
-      .filter((l) => l.holderQty <= SHARE_MAX_PER_RESERVATION)
-      .map((l) =>
-        Math.min(SHARE_MAX_PER_RESERVATION, SHARE_MAX_TOTAL - l.holderQty),
-      ),
+    ...free.shareableLarge.map((l) => SHARE_MAX_TOTAL - l.holderQty),
   );
   return Math.max(seatsOf(free.large.length, free.small.length), sharing);
 }

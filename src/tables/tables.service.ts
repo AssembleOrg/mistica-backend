@@ -28,6 +28,7 @@ import {
   PlanResult,
   TableRef,
   maxPartySize,
+  SHARE_MAX_TOTAL,
   planTables,
   seatsForSelection,
 } from './table-allocation';
@@ -394,18 +395,23 @@ export class TablesService {
         else freeTables.large.push(t.code);
         continue;
       }
-      // Una grande con un solo ocupante (que sea una reserva, no un bloqueo
-      // manual) puede compartirse. El planificador decide si califica.
-      if (
-        t.kind === 'LARGE' &&
-        holders.length === 1 &&
-        holders[0].reservationId
-      ) {
-        freeTables.shareableLarge.push({
-          code: t.code,
-          holderQty: holders[0].qty,
-          holderReservationId: String(holders[0].reservationId),
-        });
+      // Una grande ocupada sólo por reservas (ningún bloqueo) y con lugares
+      // libres puede sumar otra. El planificador decide si el grupo entra.
+      if (t.kind === 'LARGE' && holders.every((h) => h.reservationId)) {
+        const byReservation = new Map<string, number>();
+        for (const h of holders) {
+          byReservation.set(String(h.reservationId), h.qty);
+        }
+        const seated = [...byReservation.values()].reduce((a, b) => a + b, 0);
+        if (seated < SHARE_MAX_TOTAL) {
+          const ids = [...byReservation.keys()];
+          freeTables.shareableLarge.push({
+            code: t.code,
+            holderQty: seated,
+            holderReservationId: ids[0],
+            holderReservationIds: ids,
+          });
+        }
       }
     }
     return freeTables;
@@ -682,7 +688,7 @@ export class TablesService {
         interval,
         codes,
         slots,
-        shared: plan.shared ? plan.sharedWithReservationId : undefined,
+        shared: plan.shared ? plan.sharedWithReservationIds : undefined,
       });
 
       if (won) {
@@ -719,8 +725,8 @@ export class TablesService {
     interval: OccupancyInterval;
     codes: string[];
     slots: Record<string, unknown>[];
-    /** Reserva con la que se comparte la mesa grande, si aplica. */
-    shared?: string;
+    /** Reservas con las que se comparte la mesa grande, si aplica. */
+    shared?: string[];
   }): Promise<boolean> {
     const { interval, codes, slots, shared } = params;
 
@@ -731,33 +737,22 @@ export class TablesService {
     };
 
     // Caso normal: ninguna de las mesas puede tener un slot que pise el
-    // intervalo. Caso compartido: la mesa grande DEBE seguir teniendo
-    // exactamente al ocupante conocido (con ≤4 personas) pisando el intervalo
-    // y a nadie más.
-    const guard: Record<string, unknown> = shared
+    // intervalo. Caso compartido: en la mesa grande sólo pueden estar las
+    // reservas que el plan ya contó; si se sumó otra mientras tanto (o un
+    // bloqueo), los lugares libres cambiaron y hay que replanificar.
+    const guard: Record<string, unknown> = shared?.length
       ? {
           date: interval.dateKey,
-          $and: [
-            {
-              slots: {
-                $not: {
-                  $elemMatch: {
-                    ...clash,
-                    reservationId: { $ne: new Types.ObjectId(shared) },
-                  },
+          slots: {
+            $not: {
+              $elemMatch: {
+                ...clash,
+                reservationId: {
+                  $nin: shared.map((id) => new Types.ObjectId(id)),
                 },
               },
             },
-            {
-              slots: {
-                $elemMatch: {
-                  ...clash,
-                  reservationId: new Types.ObjectId(shared),
-                  qty: { $lte: 4 },
-                },
-              },
-            },
-          ],
+          },
         }
       : {
           date: interval.dateKey,
@@ -772,12 +767,12 @@ export class TablesService {
         { $push: { slots: { $each: slots } } },
         // upsert sólo tiene sentido en el caso normal: si el día no existe, no
         // puede haber una mesa compartida esperando.
-        { upsert: !shared },
+        { upsert: !shared?.length },
       );
       if (res.matchedCount > 0 || res.upsertedCount > 0) {
         // Al compartir, marcamos también al ocupante original para que la
         // agenda muestre las dos reservas como compartidas.
-        if (shared) await this.markShared(interval, codes);
+        if (shared?.length) await this.markShared(interval, codes);
         return true;
       }
       return false;

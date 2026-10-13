@@ -270,7 +270,12 @@ describe('TablesService · disponibilidad por intervalos', () => {
     const free = await service.freeTablesFor(interval(service, '15:00'));
     expect(free.large).toEqual(['G2']);
     expect(free.shareableLarge).toEqual([
-      { code: 'G1', holderQty: 4, holderReservationId: String(holder) },
+      {
+        code: 'G1',
+        holderQty: 4,
+        holderReservationId: String(holder),
+        holderReservationIds: [String(holder)],
+      },
     ]);
   });
 
@@ -286,17 +291,69 @@ describe('TablesService · disponibilidad por intervalos', () => {
   });
 
   it('remainingPartySize es el grupo más grande que entra, no la suma de asientos', async () => {
-    // Quedan 3 mesas de 2 y ninguna grande: el tope de UNA reserva es 6.
+    // Quedan 3 mesas de 2 y las grandes están llenas: el tope de UNA reserva es 6.
     const busy = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'G1', 'G2'].map(
       (table) =>
         slotAt(table, '15:00', '17:00', {
           reservationId: new Types.ObjectId(),
+          ...(table.startsWith('G') ? { qty: 10 } : {}),
         }),
     );
     const service = await build(dayModelMock(busy));
     expect(
       await service.remainingPartySize(at('2026-08-01', '15:00'), 120),
     ).toBe(6);
+  });
+});
+
+describe('TablesService · mesa grande compartida entre varias reservas', () => {
+  const interval = (service: TablesService, startHH: string, dur = 120) =>
+    service.intervalFor(at('2026-08-01', startHH), dur);
+
+  it('con un bloqueo en la mesa (taller, escuelita) no se comparte aunque sobren lugares', async () => {
+    const service = await build(
+      dayModelMock([
+        slotAt('G1', '15:00', '17:00', { qty: 4, reservationId: new Types.ObjectId() }),
+        slotAt('G1', '15:00', '17:00', { qty: 0, label: 'Escuelita' }),
+        ...['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10', 'G2'].map((t) =>
+          slotAt(t, '15:00', '17:00', {
+            reservationId: new Types.ObjectId(),
+            ...(t === 'G2' ? { qty: 10 } : {}),
+          }),
+        ),
+      ]),
+    );
+    const free = await service.freeTablesFor(interval(service, '15:00'));
+    expect(free.shareableLarge).toEqual([]);
+    expect(await service.remainingPartySize(at('2026-08-01', '15:00'), 120)).toBe(0);
+  });
+
+  it('una grande con dos grupos sigue compartible mientras queden lugares', async () => {
+    const a = new Types.ObjectId();
+    const b = new Types.ObjectId();
+    const service = await build(
+      dayModelMock([
+        slotAt('G1', '15:00', '17:00', { qty: 4, reservationId: a }),
+        slotAt('G1', '15:00', '17:00', { qty: 3, reservationId: b }),
+        ...['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10', 'G2'].map((t) =>
+          slotAt(t, '15:00', '17:00', {
+            reservationId: new Types.ObjectId(),
+            ...(t === 'G2' ? { qty: 10 } : {}),
+          }),
+        ),
+      ]),
+    );
+    const free = await service.freeTablesFor(interval(service, '15:00'));
+    expect(free.shareableLarge).toEqual([
+      {
+        code: 'G1',
+        holderQty: 7,
+        holderReservationId: String(a),
+        holderReservationIds: [String(a), String(b)],
+      },
+    ]);
+    // Quedan 3 lugares en G1: es el grupo más grande que entra.
+    expect(await service.remainingPartySize(at('2026-08-01', '15:00'), 120)).toBe(3);
   });
 });
 
@@ -455,14 +512,11 @@ describe('TablesService · asignación atómica', () => {
     expect(assignment.tables.map((t) => t.code)).toEqual(['G1']);
     expect(assignment.sharedWithReservationId).toBe(String(holder));
 
-    // La guarda de la compartida verifica que el otro grupo siga ahí y solo.
+    // La guarda de la compartida: en la mesa no puede haberse sumado nadie
+    // más que las reservas que el plan ya contó.
     const [filter] = callArgs(day);
-    expect(filter.$and?.[0].slots.$not?.$elemMatch.reservationId).toEqual({
-      $ne: holder,
-    });
-    expect(filter.$and?.[1].slots.$elemMatch).toMatchObject({
-      reservationId: holder,
-      qty: { $lte: 4 },
+    expect(filter.slots?.$not?.$elemMatch.reservationId).toEqual({
+      $nin: [holder],
     });
   });
 });
