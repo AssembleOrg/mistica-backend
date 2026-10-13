@@ -189,6 +189,8 @@ export class AvailabilityService implements OnModuleInit {
    * anterior, marcado `earlyStart`). Salta los días cerrados. `includeFull`
    * deja pasar los inicios normales que ya no tienen lugar (para mostrarlos
    * agotados en vez de esconderlos); el anticipado sólo aparece con lugar.
+   * `includeStarted` (panel) deja pasar los turnos de hoy que ya empezaron,
+   * con o sin lugar: es para cargar a quien llegó sin reserva.
    */
   async forExperience(params: {
     experienceId: string;
@@ -196,6 +198,7 @@ export class AvailabilityService implements OnModuleInit {
     to?: string;
     days?: number;
     includeFull?: boolean;
+    includeStarted?: boolean;
   }): Promise<AvailableShift[]> {
     const exp = await this.experienceOrThrow(params.experienceId);
     const tz = envConfig.timezone;
@@ -238,6 +241,7 @@ export class AvailabilityService implements OnModuleInit {
       window: { windowStart: string; windowEnd: string; latestStart: string };
     }> = [];
     const today = now.toISODate() as string;
+    const started = (startAt: Date) => DateTime.fromJSDate(startAt) <= now;
     days.forEach((d, i) => {
       if (closedFlags[i].closed) return;
       const dateKey = d.toISODate() as string;
@@ -254,7 +258,7 @@ export class AvailabilityService implements OnModuleInit {
         for (const start of plan.starts) {
           const slot = this.slotAt(exp, dateKey, start, tz);
           if (!slot) continue; // fuera de la ventana del negocio
-          if (DateTime.fromJSDate(slot.startAt) <= now) continue;
+          if (started(slot.startAt) && !params.includeStarted) continue;
           const fin = fmtMinutes(toMinutes(start) + exp.durationMinutes);
           candidates.push({
             slot,
@@ -295,7 +299,7 @@ export class AvailabilityService implements OnModuleInit {
           const slot = this.slotAt(exp, dateKey, st.time, tz);
           if (!slot) continue; // fuera de la ventana del negocio
           // No ofrecemos horarios que ya empezaron.
-          if (DateTime.fromJSDate(slot.startAt) <= now) continue;
+          if (started(slot.startAt) && !params.includeStarted) continue;
           candidates.push({
             slot,
             shiftKey: shift.key,
@@ -343,7 +347,10 @@ export class AvailabilityService implements OnModuleInit {
     // El inicio anticipado es una oportunidad, no un turno: sólo se muestra
     // si hay lugar (nunca como "agotado").
     return enriched.filter(
-      (s) => s.maxPartySize > 0 || (params.includeFull && !s.earlyStart),
+      (s) =>
+        s.maxPartySize > 0 ||
+        ((params.includeFull || DateTime.fromJSDate(s.startAt) <= now) &&
+          !s.earlyStart),
     );
   }
 

@@ -63,6 +63,7 @@ export class ReservationsController {
       to: q.to,
       days: q.days,
       includeFull: q.includeFull,
+      includeStarted: q.includeStarted,
     });
   }
 

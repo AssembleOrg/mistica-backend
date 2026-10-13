@@ -60,6 +60,16 @@ export class AvailabilityQueryDto {
   @Type(() => Boolean)
   @IsBoolean()
   includeFull?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Incluir los turnos de hoy que ya empezaron (panel: gente que llega sin reserva).',
+    default: false,
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  includeStarted?: boolean;
 }
 
 /**
