@@ -212,6 +212,14 @@ export class PiecesController {
     return this.piecesService.list(query);
   }
 
+  @Get('assembly')
+  @ApiOperation({
+    summary: 'Armado de pedidos: grupos con piezas horneadas o listas',
+  })
+  assembly() {
+    return this.piecesService.assembly();
+  }
+
   @Get('counts')
   @ApiOperation({ summary: 'Contar piezas por estado' })
   counts(@Query() query: ListPiecesQueryDto) {

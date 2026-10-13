@@ -6,6 +6,8 @@ export enum PieceStatus {
   PRIMERA_HORNEADA = 'PRIMERA_HORNEADA',
   ESMALTADO = 'ESMALTADO',
   SEGUNDA_HORNEADA = 'SEGUNDA_HORNEADA',
+  // La profe estima que salió del horno; recepción todavía no la verificó.
+  HORNEADA = 'HORNEADA',
   LISTA = 'LISTA',
   RETIRADA = 'RETIRADA',
 }
@@ -27,6 +29,7 @@ export const PIECE_STATUS_LABEL: Record<PieceStatus, string> = {
   [PieceStatus.PRIMERA_HORNEADA]: 'Primera horneada',
   [PieceStatus.ESMALTADO]: 'Esmaltado',
   [PieceStatus.SEGUNDA_HORNEADA]: 'Segunda horneada',
+  [PieceStatus.HORNEADA]: 'Horneada, a verificar',
   [PieceStatus.LISTA]: 'Lista para retirar',
   [PieceStatus.RETIRADA]: 'Retirada',
 };
@@ -49,6 +52,7 @@ export interface PieceStatusConfig {
 export const DEFAULT_PIECE_STATUS_CONFIG: PieceStatusConfig[] =
   [
     { key: PieceStatus.PENDIENTE, label: 'En preparación' },
+    { key: PieceStatus.HORNEADA, label: 'Horneada, a verificar' },
     { key: PieceStatus.LISTA, label: 'Lista para retirar', isReady: true },
     { key: PieceStatus.RETIRADA, label: 'Retirada', isFinal: true },
   ];

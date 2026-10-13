@@ -31,6 +31,15 @@ import { envConfig } from '../config/env.config';
 import { canManage } from '../common/enums/user-role.enum';
 import { DateTime } from 'luxon';
 
+/** Estados que puede poner quien no es admin ni encargado (todo menos el retiro). */
+const STAFF_STATUSES: string[] = [
+  PieceStatus.PENDIENTE,
+  PieceStatus.HORNEADA,
+  PieceStatus.LISTA,
+];
+const STAFF_STATUS_ERROR =
+  'Sólo un encargado puede marcar el retiro o editar la ficha de una pieza.';
+
 /** Día (YYYY-MM-DD) de un instante, en la hora del negocio. */
 export function workDateOf(date: Date): string {
   return DateTime.fromJSDate(date, { zone: envConfig.timezone }).toISODate()!;
@@ -487,16 +496,20 @@ export class PiecesService implements OnModuleInit {
       const changedFields = Object.keys(dto).filter(
         (key) => dto[key as keyof UpdatePieceDto] !== undefined,
       );
-      // La profesora sólo marca "lista para retirar" y carga fotos; el resto
-      // (retiro, datos de la ficha, aviso) queda para el admin.
+      // Sin rol de gestión: fotos y mover la pieza entre los estados previos
+      // al retiro (también volver atrás si se marcó por error). El retiro,
+      // los datos de la ficha y el aviso quedan para admin/encargado.
       const allowed = changedFields.every(
         (key) =>
           key === 'photos' ||
-          (key === 'status' && dto.status === PieceStatus.LISTA),
+          (key === 'status' && STAFF_STATUSES.includes(dto.status ?? '')),
       );
       if (!changedFields.length || !allowed) {
+        throw new BadRequestException(STAFF_STATUS_ERROR);
+      }
+      if (dto.status && piece.status === PieceStatus.RETIRADA) {
         throw new BadRequestException(
-          'La profesora sólo puede marcar una pieza como lista para retirar.',
+          'La pieza ya fue retirada: sólo un encargado puede cambiarla.',
         );
       }
     }
@@ -542,6 +555,11 @@ export class PiecesService implements OnModuleInit {
       const now = new Date();
       if (statusCfg.isReady && !piece.readyAt) piece.readyAt = now;
       if (statusCfg.isFinal && !piece.pickedUpAt) piece.pickedUpAt = now;
+      // Vuelta atrás (se marcó por error): deja de figurar como lista.
+      if (!statusCfg.isReady && !statusCfg.isFinal) {
+        piece.readyAt = undefined;
+        piece.pickedUpAt = undefined;
+      }
     }
 
     await piece.save();
@@ -559,15 +577,17 @@ export class PiecesService implements OnModuleInit {
     actor?: { id?: string; role?: string },
   ): Promise<{ updated: number }> {
     const statusCfg = await this.assertValidStatus(status);
-    if (!canManage(actor?.role) && status !== PieceStatus.LISTA) {
-      throw new BadRequestException(
-        'La profesora sólo puede marcar una pieza como lista para retirar.',
-      );
+    const manager = canManage(actor?.role);
+    if (!manager && !STAFF_STATUSES.includes(status)) {
+      throw new BadRequestException(STAFF_STATUS_ERROR);
     }
     const base = {
       _id: { $in: ids.map((id) => new Types.ObjectId(id)) },
       deletedAt: { $exists: false },
-      status: { $ne: status },
+      // Las retiradas sólo las toca un encargado.
+      status: manager
+        ? { $ne: status }
+        : { $nin: [status, PieceStatus.RETIRADA] },
     };
     const now = new Date();
     // Las fechas de "lista"/"retirada" se conservan si ya estaban.
@@ -583,8 +603,90 @@ export class PiecesService implements OnModuleInit {
         { $set: { pickedUpAt: now } },
       );
     }
-    const res = await this.pieceModel.updateMany(base, { $set: { status } });
+    const back = !statusCfg.isReady && !statusCfg.isFinal;
+    const res = await this.pieceModel.updateMany(base, {
+      $set: { status },
+      ...(back && { $unset: { readyAt: 1, pickedUpAt: 1 } }),
+    });
     return { updated: res.modifiedCount };
+  }
+
+  /**
+   * Armado de pedidos: los grupos (reserva o alumno) con piezas ya horneadas
+   * o listas, con TODAS sus piezas, para verificar el cajón y saber cuándo el
+   * pedido está completo. Salen los que no empezaron (todo en preparación) y
+   * los que ya se avisaron o se retiraron.
+   */
+  async assembly() {
+    const active = await this.pieceModel
+      .find({
+        deletedAt: { $exists: false },
+        status: { $in: [PieceStatus.HORNEADA, PieceStatus.LISTA] },
+      })
+      .select('reservationId studentId')
+      .lean();
+    const reservationIds = [
+      ...new Set(active.map((p) => p.reservationId).filter(Boolean).map(String)),
+    ];
+    const studentIds = [
+      ...new Set(
+        active
+          .filter((p) => !p.reservationId && p.studentId)
+          .map((p) => String(p.studentId)),
+      ),
+    ];
+    const loose = active
+      .filter((p) => !p.reservationId && !p.studentId)
+      .map((p) => p._id);
+    const pieces = await this.pieceModel
+      .find({
+        deletedAt: { $exists: false },
+        $or: [
+          { reservationId: { $in: reservationIds.map((id) => new Types.ObjectId(id)) } },
+          {
+            reservationId: { $exists: false },
+            studentId: { $in: studentIds.map((id) => new Types.ObjectId(id)) },
+          },
+          { _id: { $in: loose } },
+        ],
+      })
+      .sort({ workDate: 1, createdAt: 1, _id: 1 })
+      .lean();
+
+    const groups = new Map<string, typeof pieces>();
+    for (const p of pieces) {
+      const key = p.reservationId
+        ? `r:${String(p.reservationId)}`
+        : p.studentId
+          ? `s:${String(p.studentId)}`
+          : `p:${String(p._id)}`;
+      groups.set(key, [...(groups.get(key) ?? []), p]);
+    }
+    return [...groups.entries()]
+      .map(([key, items]) => {
+        const first = items[0];
+        const ready = items.filter(
+          (p) =>
+            p.status === PieceStatus.LISTA || p.status === PieceStatus.RETIRADA,
+        ).length;
+        return {
+          key,
+          name: first.customerName || first.studentName || first.personName || '',
+          reservationCode: first.reservationCode,
+          experienceName: first.experienceName,
+          workDate: first.workDate,
+          total: items.length,
+          ready,
+          complete: ready === items.length,
+          notified: items.some((p) => !!p.notifiedReadyAt),
+          items,
+        };
+      })
+      .filter(
+        (g) =>
+          !g.items.every((p) => p.status === PieceStatus.RETIRADA) &&
+          !(g.complete && g.notified),
+      );
   }
 
   async notifyReadyByAdmin(id: string) {
@@ -676,7 +778,9 @@ export class PiecesService implements OnModuleInit {
         return {
           experiencia: p.experienceName || null,
           cantidad: p.quantity,
-          estado: cfg?.label ?? p.status,
+          // Al cliente no se le cuentan los pasos internos del taller.
+          estado:
+            cfg?.isReady || cfg?.isFinal ? cfg.label : 'En preparación',
           lista: !!cfg?.isReady,
           retirada: !!cfg?.isFinal,
         };
