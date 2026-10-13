@@ -4,6 +4,7 @@ import {
   normalizeSpecials,
   publicSpecials,
   specialDatesLabel,
+  specialAtInstant,
   specialOn,
   specialStatus,
   specialsError,
@@ -62,6 +63,7 @@ describe('ediciones especiales de una experiencia', () => {
       dayPlan({ specials: [HALLOWEEN] }, '2026-10-20', '2026-10-10'),
     ).toEqual({
       special: undefined,
+      specials: [],
       own: false,
       starts: [],
       notAnnounced: false,
@@ -142,7 +144,7 @@ describe('ediciones especiales de una experiencia', () => {
         ],
         120,
       ),
-    ).toMatch(/se pisan en fechas/);
+    ).toMatch(/coinciden en fechas/);
     // Una apagada no cuenta para la superposición.
     expect(
       specialsError(
@@ -225,5 +227,69 @@ describe('ediciones especiales de una experiencia', () => {
     expect(
       specialDatesLabel({ dateFrom: '2026-10-31', dateTo: '2026-10-31' }),
     ).toBe('el 31/10');
+  });
+});
+
+// Dos ediciones de la misma experiencia el mismo día: cada una a su hora.
+describe('dos ediciones especiales el mismo día', () => {
+  const ALTAR = {
+    _id: 'a1',
+    name: 'Altar de muertos',
+    aliases: ['altar'],
+    dateFrom: '2026-11-01',
+    dateTo: '2026-11-01',
+    price: 50000,
+    schedule: [{ start: '15:30' }],
+  };
+  const NINOS = {
+    _id: 'k1',
+    name: 'Taller de niños',
+    aliases: ['niños'],
+    dateFrom: '2026-11-01',
+    dateTo: '2026-11-01',
+    price: 30000,
+    schedule: [{ start: '17:30' }],
+  };
+  const exp = { ownSchedule: [], specials: [ALTAR, NINOS] };
+
+  it('se pueden cargar si cada una tiene su horario y no comparten hora', () => {
+    expect(specialsError([ALTAR, NINOS], 120)).toBeNull();
+  });
+
+  it('a la misma hora, no', () => {
+    expect(
+      specialsError([ALTAR, { ...NINOS, schedule: [{ start: '15:30' }] }], 120),
+    ).toMatch(/a las 15:30.*horas distintas/);
+  });
+
+  it('sin horarios propios, no: no habría cómo saber cuál rige', () => {
+    expect(specialsError([ALTAR, { ...NINOS, schedule: [] }], 120)).toMatch(
+      /necesita sus horarios especiales/,
+    );
+  });
+
+  it('el día se ofrece en las horas de las dos', () => {
+    const plan = dayPlan(exp, '2026-11-01', '2026-10-20');
+    expect(plan.own).toBe(true);
+    expect(plan.starts).toEqual(['15:30', '17:30']);
+    expect(plan.specials.map((s) => s.name)).toEqual(['Altar de muertos', 'Taller de niños']);
+  });
+
+  it('la hora decide qué edición rige: nombre y precio de cada una', () => {
+    expect(specialOn(exp.specials, '2026-11-01', '15:30')?.name).toBe('Altar de muertos');
+    expect(specialOn(exp.specials, '2026-11-01', '17:30')?.price).toBe(30000);
+    expect(
+      specialAtInstant(exp.specials, new Date('2026-11-01T17:30:00-03:00'), envConfig.timezone)?.name,
+    ).toBe('Taller de niños');
+  });
+
+  it('la que todavía no abrió reservas no aporta su horario', () => {
+    const plan = dayPlan(
+      { ownSchedule: [], specials: [ALTAR, { ...NINOS, announceFrom: '2026-10-25' }] },
+      '2026-11-01',
+      '2026-10-20',
+    );
+    expect(plan.starts).toEqual(['15:30']);
+    expect(plan.notAnnounced).toBe(false);
   });
 });

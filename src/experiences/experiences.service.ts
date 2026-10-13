@@ -34,7 +34,7 @@ import {
   normalizeSpecials,
   publicSpecials,
   specialKeys,
-  specialOn,
+  specialAtInstant,
   specialsError,
   type SpecialLike,
 } from './specials';
@@ -517,7 +517,7 @@ export class ExperiencesService {
     // El turno sugerido se deriva de la hora de inicio y la duración. Es una
     // etiqueta: un horario fuera de todo turno es válido igual.
     const placed = suggestedShiftFor(s.startAt, s.durationMinutes);
-    const special = specialOn(specials, businessDateKey(s.startAt));
+    const special = specialAtInstant(specials, s.startAt);
     return {
       id: String(s._id),
       shiftKey: placed?.shift.key,

@@ -62,14 +62,54 @@ export function todayKey(tz = envConfig.timezone): string {
   return DateTime.now().setZone(tz).toISODate() as string;
 }
 
-/** Edición especial activa que rige ese día, si hay. */
+/** Ediciones activas cuyas fechas cubren ese día (casi siempre, una sola). */
+export function specialsOn<T extends SpecialLike>(
+  specials: T[] | null | undefined,
+  dateKey: string,
+): T[] {
+  return (specials ?? []).filter(
+    (s) => s.active !== false && s.dateFrom <= dateKey && dateKey <= s.dateTo,
+  );
+}
+
+/** Horas de inicio 'HH:mm' de una edición ese día (vacío = usa las habituales). */
+export function specialStartsOn(s: SpecialLike, dateKey: string): string[] {
+  return [
+    ...new Set(
+      (s.schedule ?? [])
+        .filter((slot) => !slot.date || slot.date === dateKey)
+        .map((slot) => slot.start),
+    ),
+  ].sort((a, b) => toMinutes(a) - toMinutes(b));
+}
+
+/**
+ * Edición especial que rige ese día, si hay. Un día puede tener DOS ediciones
+ * de la misma experiencia siempre que cada una tenga sus horarios (el altar a
+ * las 15:30 y el taller de niños a las 17:30): ahí decide la hora de inicio
+ * `startTime` ('HH:mm'). Sin hora, o si la hora no es de ninguna, la primera.
+ */
 export function specialOn<T extends SpecialLike>(
   specials: T[] | null | undefined,
   dateKey: string,
+  startTime?: string,
 ): T | undefined {
-  return (specials ?? []).find(
-    (s) => s.active !== false && s.dateFrom <= dateKey && dateKey <= s.dateTo,
+  const covering = specialsOn(specials, dateKey);
+  if (covering.length <= 1 || !startTime) return covering[0];
+  return (
+    covering.find((s) => specialStartsOn(s, dateKey).includes(startTime)) ??
+    covering[0]
   );
+}
+
+/** Edición que rige un turno concreto: el día y la hora de `startAt`. */
+export function specialAtInstant<T extends SpecialLike>(
+  specials: T[] | null | undefined,
+  startAt: Date,
+  tz = envConfig.timezone,
+): T | undefined {
+  const local = DateTime.fromJSDate(startAt).setZone(tz);
+  return specialOn(specials, local.toISODate() as string, local.toFormat('HH:mm'));
 }
 
 export function specialStatus(s: SpecialLike, today: string): SpecialStatus {
@@ -101,6 +141,8 @@ export interface DayPlan<T extends SpecialLike = SpecialLike> {
    * true = se ofrece sólo en `starts` (horario propio o especial: el lugar es
    * el cupo, no las mesas). false = turnos generales del salón.
    */
+  /** Todas las ediciones de ese día (más de una si conviven por horario). */
+  specials: T[];
   own: boolean;
   /** Horas de inicio 'HH:mm' del día cuando `own`. */
   starts: string[];
@@ -118,27 +160,29 @@ export function dayPlan<T extends SpecialLike>(
   dateKey: string,
   today: string = todayKey(),
 ): DayPlan<T> {
-  const special = specialOn(exp.specials, dateKey);
-  const notAnnounced = !!special && specialStatus(special, today) === 'PROXIMA';
-  if (special?.schedule?.length) {
+  const covering = specialsOn(exp.specials, dateKey);
+  const special = covering[0];
+  // Con varias ediciones el mismo día, las que todavía no abrieron reservas
+  // no aportan horarios; el día recién "no se ofrece" si no abrió ninguna.
+  const open = covering.filter((s) => specialStatus(s, today) !== 'PROXIMA');
+  const notAnnounced = covering.length > 0 && open.length === 0;
+  if (covering.some((s) => s.schedule?.length)) {
+    const from = covering.length > 1 ? open : covering;
     const starts = [
-      ...new Set(
-        special.schedule
-          .filter((s) => !s.date || s.date === dateKey)
-          .map((s) => s.start),
-      ),
+      ...new Set(from.flatMap((s) => specialStartsOn(s, dateKey))),
     ].sort((a, b) => toMinutes(a) - toMinutes(b));
-    return { special, own: true, starts, notAnnounced };
+    return { special, specials: covering, own: true, starts, notAnnounced };
   }
   if (hasOwnSchedule(exp.ownSchedule)) {
     return {
       special,
+      specials: covering,
       own: true,
       starts: ownStartsFor(exp.ownSchedule, dateKey),
       notAnnounced,
     };
   }
-  return { special, own: false, starts: [], notAnnounced };
+  return { special, specials: covering, own: false, starts: [], notAnnounced };
 }
 
 /** "el 31/10" o "del 24/12 al 31/12". */
@@ -232,9 +276,32 @@ export function specialsError(
     for (let j = i + 1; j < active.length; j++) {
       const a = active[i];
       const b = active[j];
-      if (a.dateFrom <= b.dateTo && b.dateFrom <= a.dateTo)
-        return `Las ediciones "${a.name}" y "${b.name}" se pisan en fechas: un día sólo puede tener una edición.`;
+      if (!(a.dateFrom <= b.dateTo && b.dateFrom <= a.dateTo)) continue;
+      // Dos ediciones pueden convivir el mismo día sólo si cada una tiene sus
+      // horarios y no comparten ninguna hora: la hora decide cuál rige.
+      const clash = specialsClash(a, b);
+      if (clash) return `Las ediciones "${a.name}" y "${b.name}" ${clash}`;
     }
+  }
+  return null;
+}
+
+/** Por qué dos ediciones con fechas en común no pueden convivir (null = pueden). */
+function specialsClash(a: SpecialLike, b: SpecialLike): string | null {
+  if (!a.schedule?.length || !b.schedule?.length)
+    return 'coinciden en fechas: para hacerse el mismo día, cada una necesita sus horarios especiales.';
+  const from = a.dateFrom > b.dateFrom ? a.dateFrom : b.dateFrom;
+  const to = a.dateTo < b.dateTo ? a.dateTo : b.dateTo;
+  for (
+    let d = DateTime.fromISO(from);
+    d.toISODate()! <= to;
+    d = d.plus({ days: 1 })
+  ) {
+    const dateKey = d.toISODate() as string;
+    const startsA = specialStartsOn(a, dateKey);
+    const repeated = specialStartsOn(b, dateKey).find((h) => startsA.includes(h));
+    if (repeated)
+      return `coinciden el ${d.day}/${d.month} a las ${repeated}: el mismo día tienen que ser a horas distintas.`;
   }
   return null;
 }

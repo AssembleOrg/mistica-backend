@@ -520,9 +520,10 @@ export class AvailabilityService implements OnModuleInit {
     if (plan.own) {
       if (plan.starts.includes(startTime)) return;
       if (plan.special?.schedule?.length) {
+        const nombres = plan.specials.map((sp) => sp.name).join(' y ');
         throw new BadRequestException(
           plan.starts.length
-            ? `Ese día es ${plan.special.name} y se hace a las ${plan.starts.join(' y ')}. Elegí uno de esos horarios.`
+            ? `Ese día es ${nombres} y se hace a las ${plan.starts.join(' y ')}. Elegí uno de esos horarios.`
             : `${plan.special.name} (${specialDatesLabel(plan.special)}) no se hace ese día. Elegí otra fecha.`,
         );
       }
@@ -576,7 +577,8 @@ export class AvailabilityService implements OnModuleInit {
     if (!checked.ok) return null;
 
     // En una edición especial el precio que se muestra es el de la edición.
-    const special = specialOn(exp.specials, dateKey);
+    // (con dos ediciones el mismo día, la que se hace a esa hora).
+    const special = specialOn(exp.specials, dateKey, startTime);
     return {
       dateKey,
       startTime,

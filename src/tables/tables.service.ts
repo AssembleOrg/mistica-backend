@@ -21,7 +21,7 @@ import {
   ReservationDocument,
 } from '../common/schemas/reservation.schema';
 import { Experience, ExperienceDocument } from '../common/schemas/experience.schema';
-import { dayPlan } from '../experiences/specials';
+import { dayPlan, specialOn } from '../experiences/specials';
 import { Table, TableDocument } from '../common/schemas/table.schema';
 import {
   FreeTables,
@@ -300,6 +300,11 @@ export class TablesService {
     for (const exp of exps) {
       const plan = dayPlan(exp, dateKey);
       if (!plan.own) continue;
+      // Con dos ediciones el mismo día, cada horario lleva el nombre de la suya.
+      const labelOf = (start: string) => {
+        const special = specialOn(exp.specials, dateKey, start);
+        return special?.name ? `${exp.name} · ${special.name}` : exp.name;
+      };
       for (const start of plan.starts) {
         const startAt = this.atTime(dateKey, start);
         const endAt = new Date(startAt.getTime() + exp.durationMinutes * 60_000);
@@ -311,7 +316,7 @@ export class TablesService {
             endAt,
             busyUntil: endAt,
             shared: false,
-            label: plan.special?.name ? `${exp.name} · ${plan.special.name}` : exp.name,
+            label: labelOf(start),
             recurring: true,
           });
         }

@@ -68,7 +68,7 @@ import { User, UserDocument } from '../common/schemas/user.schema';
 import {
   dayPlan,
   specialIdOf,
-  specialOn,
+  specialAtInstant,
   type SpecialLike,
 } from '../experiences/specials';
 import { UserRole } from '../common/enums/user-role.enum';
@@ -2405,7 +2405,7 @@ ${dto.notes}` : note,
     return { basePrice: special?.price ?? sessionPrice, variants, special };
   }
 
-  /** Edición especial de la experiencia que rige el día de `startAt`, si hay. */
+  /** Edición especial que rige el turno de `startAt` (su día y su hora), si hay. */
   private async specialAt(
     experienceId: Types.ObjectId | string | undefined,
     startAt: Date,
@@ -2415,7 +2415,7 @@ ${dto.notes}` : note,
       .findById(experienceId)
       .select('specials')
       .lean();
-    return specialOn(exp?.specials, businessDateKey(startAt));
+    return specialAtInstant(exp?.specials, startAt);
   }
 
   /** Con la hora extra, la reserva tiene que seguir terminando antes del cierre. */
