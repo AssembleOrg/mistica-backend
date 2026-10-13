@@ -25,6 +25,7 @@ import {
   ImportPieceCatalogDto,
   SavePieceExtraDto,
   SavePieceTypeDto,
+  BulkPieceStatusDto,
   SetPieceStatusesDto,
 } from '../common/dto/piece.dto';
 import { PieceTypesService } from './piece-types.service';
@@ -215,6 +216,13 @@ export class PiecesController {
   @ApiOperation({ summary: 'Contar piezas por estado' })
   counts(@Query() query: ListPiecesQueryDto) {
     return this.piecesService.counts(query);
+  }
+
+  // Va ANTES de ':id' para que no lo capture.
+  @Patch('bulk-status')
+  @ApiOperation({ summary: 'Cambiar el estado de varias piezas a la vez' })
+  bulkStatus(@Body() dto: BulkPieceStatusDto, @Req() req: AuthRequest) {
+    return this.piecesService.bulkStatus(dto.ids, dto.status, req.user);
   }
 
   @Patch(':id')

@@ -11,6 +11,8 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
+  ArrayMaxSize,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -359,6 +361,11 @@ export class ListPiecesQueryDto {
   @MaxLength(80)
   search?: string;
 
+  @ApiPropertyOptional({ description: 'Día de trabajo (YYYY-MM-DD)' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  workDate?: string;
+
   @ApiPropertyOptional({ default: 1, minimum: 1 })
   @IsOptional()
   @Type(() => Number)
@@ -372,6 +379,21 @@ export class ListPiecesQueryDto {
   @IsInt()
   @Min(1)
   limit?: number;
+}
+
+/** Cambio de estado de varias piezas a la vez (la tanda de un día). */
+export class BulkPieceStatusDto {
+  @ApiProperty({ type: [String] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @IsMongoId({ each: true })
+  ids: string[];
+
+  @ApiProperty({ description: 'Clave de estado (ver GET /pieces/statuses)' })
+  @IsString()
+  @MaxLength(40)
+  status: string;
 }
 
 /** Alta / edición de una pieza del catálogo. */

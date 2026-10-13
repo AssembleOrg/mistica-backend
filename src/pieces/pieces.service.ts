@@ -29,6 +29,12 @@ import {
 import { NotificationsService } from '../notifications/notifications.service';
 import { envConfig } from '../config/env.config';
 import { canManage } from '../common/enums/user-role.enum';
+import { DateTime } from 'luxon';
+
+/** Día (YYYY-MM-DD) de un instante, en la hora del negocio. */
+export function workDateOf(date: Date): string {
+  return DateTime.fromJSDate(date, { zone: envConfig.timezone }).toISODate()!;
+}
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -76,6 +82,39 @@ export class PiecesService implements OnModuleInit {
       },
       { $set: { status: PieceStatus.PENDIENTE } },
     );
+    await this.backfillWorkDates();
+  }
+
+  /** Piezas cargadas antes de existir `workDate`: se les calcula una vez. */
+  private async backfillWorkDates() {
+    const pending = await this.pieceModel
+      .find({ workDate: { $exists: false } })
+      .select('reservationId createdAt')
+      .lean<
+        Array<{ _id: Types.ObjectId; reservationId?: Types.ObjectId; createdAt: Date }>
+      >();
+    if (!pending.length) return;
+    const reservations = await this.reservationModel
+      .find({ _id: { $in: pending.map((p) => p.reservationId).filter(Boolean) } })
+      .select('startAt')
+      .lean();
+    const startOf = new Map(reservations.map((r) => [String(r._id), r.startAt]));
+    await this.pieceModel.bulkWrite(
+      pending.map((p) => ({
+        updateOne: {
+          filter: { _id: p._id },
+          update: {
+            $set: {
+              workDate: workDateOf(
+                startOf.get(String(p.reservationId)) ?? p.createdAt,
+              ),
+            },
+          },
+        },
+      })),
+      { timestamps: false },
+    );
+    this.logger.log(`workDate calculado en ${pending.length} piezas`);
   }
 
   // ── Estados configurables ────────────────────────────────────────────────
@@ -125,13 +164,15 @@ export class PiecesService implements OnModuleInit {
     let experienceName = dto.experienceName?.trim();
     let reservationCode: string | undefined;
     let studentName: string | undefined;
+    let workDate = workDateOf(now);
 
     if (dto.reservationId) {
       const r = await this.reservationModel
         .findOne({ _id: dto.reservationId, deletedAt: { $exists: false } })
-        .select('code customerName customerPhone experienceName')
+        .select('code customerName customerPhone experienceName startAt')
         .lean();
       if (!r) throw new BadRequestException('Reserva no encontrada');
+      if (r.startAt) workDate = workDateOf(r.startAt);
       customerPhone = r.customerPhone ?? customerPhone;
       customerName = customerName ?? r.customerName;
       experienceName = experienceName ?? r.experienceName;
@@ -158,6 +199,7 @@ export class PiecesService implements OnModuleInit {
       : undefined;
 
     return this.pieceModel.create({
+      workDate,
       customerPhone,
       customerName,
       experienceName,
@@ -237,6 +279,7 @@ export class PiecesService implements OnModuleInit {
     const documents = dto.entries.map((entry) => ({
       reservationId: reservation._id,
       reservationCode: reservation.code,
+      workDate: workDateOf(reservation.startAt ?? new Date()),
       customerName: reservation.customerName,
       customerPhone: reservation.customerPhone ?? '',
       experienceName: reservation.experienceName,
@@ -327,6 +370,7 @@ export class PiecesService implements OnModuleInit {
       return {
         studentId: new Types.ObjectId(entry.studentId),
         studentName: s?.name,
+        workDate: workDateOf(new Date()),
         customerName: s?.name,
         customerPhone: s?.phone ?? '',
         experienceName: group.name,
@@ -367,7 +411,7 @@ export class PiecesService implements OnModuleInit {
     const [items, total] = await Promise.all([
       this.pieceModel
         .find(filter)
-        .sort({ createdAt: -1 })
+        .sort({ workDate: -1, createdAt: 1, _id: 1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
@@ -407,6 +451,7 @@ export class PiecesService implements OnModuleInit {
     if (query.studentId) filter.studentId = new Types.ObjectId(query.studentId);
     if (query.reservationId)
       filter.reservationId = new Types.ObjectId(query.reservationId);
+    if (query.workDate) filter.workDate = query.workDate;
     const term = query.search?.trim();
     if (term) {
       const rx = new RegExp(escapeRegex(term), 'i');
@@ -502,6 +547,44 @@ export class PiecesService implements OnModuleInit {
     await piece.save();
 
     return piece;
+  }
+
+  /**
+   * Cambia el estado de varias piezas de una vez (la tanda que salió del
+   * horno). No manda avisos: el aviso de retiro sigue siendo manual.
+   */
+  async bulkStatus(
+    ids: string[],
+    status: string,
+    actor?: { id?: string; role?: string },
+  ): Promise<{ updated: number }> {
+    const statusCfg = await this.assertValidStatus(status);
+    if (!canManage(actor?.role) && status !== PieceStatus.LISTA) {
+      throw new BadRequestException(
+        'La profesora sólo puede marcar una pieza como lista para retirar.',
+      );
+    }
+    const base = {
+      _id: { $in: ids.map((id) => new Types.ObjectId(id)) },
+      deletedAt: { $exists: false },
+      status: { $ne: status },
+    };
+    const now = new Date();
+    // Las fechas de "lista"/"retirada" se conservan si ya estaban.
+    if (statusCfg.isReady) {
+      await this.pieceModel.updateMany(
+        { ...base, readyAt: { $exists: false } },
+        { $set: { readyAt: now } },
+      );
+    }
+    if (statusCfg.isFinal) {
+      await this.pieceModel.updateMany(
+        { ...base, pickedUpAt: { $exists: false } },
+        { $set: { pickedUpAt: now } },
+      );
+    }
+    const res = await this.pieceModel.updateMany(base, { $set: { status } });
+    return { updated: res.modifiedCount };
   }
 
   async notifyReadyByAdmin(id: string) {

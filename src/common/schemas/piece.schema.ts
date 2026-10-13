@@ -28,6 +28,12 @@ export class Piece {
   @Prop({ required: true, min: 1, default: 1 })
   quantity: number;
 
+  // Día de trabajo (YYYY-MM-DD, hora del negocio): el de la experiencia si la
+  // pieza sale de una reserva; si no, el día en que se cargó. La profe hornea
+  // por tanda de un día, así que la lista de piezas se agrupa por este campo.
+  @Prop({ trim: true })
+  workDate?: string;
+
   // Clave del estado. Los estados son CONFIGURABLES (app_settings
   // 'pieceStatuses'): sin enum acá para permitir estados propios del taller
   // (Fresco, En proceso, Horneado…). La validación vive en PiecesService.
@@ -117,3 +123,4 @@ PieceSchema.index({ customerPhone: 1 });
 PieceSchema.index({ status: 1 });
 PieceSchema.index({ reservationId: 1 });
 PieceSchema.index({ deletedAt: 1 });
+PieceSchema.index({ workDate: -1, createdAt: 1 });
