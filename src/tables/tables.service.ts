@@ -644,6 +644,17 @@ export class TablesService {
       // libres (un cumple de 25): se le dan todas las libres y el resto lo
       // acomoda el local.
       if (!plan.ok && req.takeAllIfShort && plan.reason !== 'INVALID_QTY') {
+        // Antes de darle TODO lo libre: si el grupo entra relajando las reglas
+        // (un grupo chico en una mesa grande entera), se le dan sólo esas
+        // mesas. Si no, 4 personas se quedaban con una grande y todas las
+        // chicas que hubiera, y el salón figuraba lleno con lugares vacíos.
+        const relaxed = planTables(req.qty, free, {
+          smallGroupCanTakeLarge: true,
+          sharedAccepted: true,
+        });
+        if (relaxed.ok) plan = relaxed;
+      }
+      if (!plan.ok && req.takeAllIfShort && plan.reason !== 'INVALID_QTY') {
         const all: TableRef[] = [
           ...free.large.map((code) => ({ code, kind: 'LARGE' as const })),
           ...free.small.map((code) => ({ code, kind: 'SMALL' as const })),
