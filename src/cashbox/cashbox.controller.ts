@@ -19,6 +19,7 @@ import type { Request } from 'express';
 import { CashboxService } from './cashbox.service';
 import {
   CloseCashSessionDto,
+  CorrectCashCountDto,
   CreateCashExpenseDto,
   CreateCashIncomeDto,
   EditCashSessionDto,
@@ -28,6 +29,9 @@ import {
   UpdateTransactionCheckedDto,
 } from '../common/dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
 import { Auditory, AllowedViews } from '../common/decorators';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
@@ -185,6 +189,21 @@ export class CashboxController {
     @Req() req: AuthRequest,
   ) {
     return this.cashboxService.editSession(id, dto, req.user?.id);
+  }
+
+  @Patch(':id/count')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Auditory({ entity: 'Cashbox', action: 'CORRECT_COUNT' })
+  @ApiOperation({
+    summary: 'Corregir el efectivo contado de una caja cerrada (arqueo mal cargado)',
+  })
+  async correctCount(
+    @Param('id') id: string,
+    @Body() dto: CorrectCashCountDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.cashboxService.correctCount(id, dto, req.user?.id);
   }
 
   @Patch(':id/resolve-auto')

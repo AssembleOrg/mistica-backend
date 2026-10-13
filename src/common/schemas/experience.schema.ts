@@ -278,6 +278,13 @@ export class Experience {
   @Prop({ required: true, min: 0, default: 0 })
   venueSeats: number;
 
+  // MESA COMPARTIDA: mesas (códigos, ej. ['G1']) donde se hace la experiencia.
+  // En cada horario PROPIO quedan apartadas para ella —nadie más las recibe— y
+  // todas sus reservas se sientan ahí juntas, en vez de en mesas individuales.
+  // Vacío = sin mesa fija. Sólo rige en horarios propios (ver ownSchedule).
+  @Prop({ type: [String], default: [] })
+  sharedTableCodes: string[];
+
   // ¿Incluye buffet/merienda? Para la vista de Cocina: cuenta a sus personas.
   // Sin valor, cocina lo deduce del nombre y la descripción (buffet, brunch…).
   @Prop({ type: Boolean })

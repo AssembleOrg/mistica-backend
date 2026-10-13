@@ -1386,9 +1386,22 @@ export class ReservationsService implements OnApplicationBootstrap {
     /** Si el grupo no entra, toma todas las mesas libres (alta del admin). */
     takeAllIfShort?: boolean,
   ): Promise<void> {
-    // Horario PROPIO: el lugar físico lo aparta un bloqueo semanal de mesas;
-    // la reserva cuenta contra el cupo de la experiencia y no toma mesas.
-    if (await this.isOwnScheduleSession(session)) return;
+    // Horario PROPIO: la reserva cuenta contra el cupo de la experiencia y no
+    // toma mesas individuales. Si la experiencia es de MESA COMPARTIDA, todas
+    // sus reservas quedan en esas mesas (TablesService las aparta para ella).
+    if (await this.isOwnScheduleSession(session)) {
+      const exp = await this.experienceModel
+        .findById(session.experienceId)
+        .select('sharedTableCodes')
+        .lean();
+      const codes = (exp?.sharedTableCodes ?? []).map((c) => c.toUpperCase());
+      if (codes.length) {
+        reservation.tableCodes = codes;
+        reservation.sharedTable = true;
+        await reservation.save();
+      }
+      return;
+    }
     const assignment = await this.tables.assign({
       reservationId: reservation._id as Types.ObjectId,
       qty: reservation.quantity,

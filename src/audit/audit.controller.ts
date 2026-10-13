@@ -1,3 +1,4 @@
+import { buildDateFilter } from '../common/utils';
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -45,9 +46,7 @@ export class AuditController {
     if (action) filter.action = action;
     if (userEmail) filter.userEmail = { $regex: userEmail, $options: 'i' };
     if (from || to) {
-      filter.timestamp = {};
-      if (from) filter.timestamp.$gte = new Date(from);
-      if (to) filter.timestamp.$lte = new Date(`${to}T23:59:59`);
+      Object.assign(filter, buildDateFilter(from, to, 'timestamp'));
     }
 
     const [logs, total] = await Promise.all([

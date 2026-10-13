@@ -415,6 +415,16 @@ export class CreateExperienceDto {
 
   @ApiPropertyOptional({
     description:
+      'Mesa compartida: códigos de las mesas donde se hace (ej. ["G1"]). En sus horarios propios quedan apartadas y sus reservas se sientan ahí. Vacío = sin mesa fija.',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  sharedTableCodes?: string[];
+
+  @ApiPropertyOptional({
+    description:
       '¿Incluye buffet/merienda? La vista de Cocina cuenta a sus personas.',
   })
   @IsOptional()

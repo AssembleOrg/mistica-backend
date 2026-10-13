@@ -15,6 +15,7 @@ import {
   TableSchema,
 } from '../common/schemas';
 import { TablesController } from './tables.controller';
+import { Experience, ExperienceSchema } from '../common/schemas/experience.schema';
 import { TablesService } from './tables.service';
 import { ShiftsService } from './shifts.service';
 import { RecurringBlocksService } from './recurring-blocks.service';
@@ -33,6 +34,7 @@ import {
       { name: ShiftTemplate.name, schema: ShiftTemplateSchema },
       { name: ExperienceSession.name, schema: ExperienceSessionSchema },
       { name: RecurringBlock.name, schema: RecurringBlockSchema },
+      { name: Experience.name, schema: ExperienceSchema },
       { name: AppSetting.name, schema: AppSettingSchema },
     ]),
   ],

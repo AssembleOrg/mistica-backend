@@ -12,6 +12,7 @@ import {
 import { EgressCategoryDocument } from '../common/schemas/egress-category.schema';
 import {
   CloseCashSessionDto,
+  CorrectCashCountDto,
   CreateCashExpenseDto,
   CreateCashIncomeDto,
   EditCashSessionDto,
@@ -1102,6 +1103,50 @@ export class CashboxService {
     await open.save();
     await this.confirmPendingSales(open.openedAt, closedAt);
     return this.mapToResponse(open);
+  }
+
+  /**
+   * Corrige el efectivo contado de una caja CERRADA cuando el arqueo se cargó
+   * mal (típico: se reabrió por error y se cerró en $0). Sólo cambia el
+   * contado y la diferencia; ventas, egresos y balance no se tocan. Sin tope
+   * de 72 hs: un arqueo mal cargado suele aparecer recién en el cierre de mes.
+   */
+  async correctCount(
+    id: string,
+    dto: CorrectCashCountDto,
+    userId?: string,
+  ): Promise<CashSessionResponse> {
+    const session = await this.cashSessionModel.findById(id).exec();
+    if (!session) throw new SesionDeCajaNoEncontradaException(id);
+    if (session.status !== 'CLOSED' || !session.closedAt) {
+      throw new BadRequestException('Sólo se puede corregir el arqueo de una caja cerrada.');
+    }
+    if ((session.withdrawnAmount ?? 0) > dto.countedClosingCash) {
+      throw new BadRequestException(
+        'El efectivo contado no puede ser menor al retiro registrado en ese cierre.',
+      );
+    }
+    const before = session.countedClosingCash ?? 0;
+    const expected =
+      session.expectedClosingCash ??
+      (await this.computeExpectedClosingCash(
+        session.openingCash,
+        session.openedAt,
+        session.closedAt,
+      ));
+    session.expectedClosingCash = expected;
+    session.countedClosingCash = dto.countedClosingCash;
+    session.discrepancy = Number((dto.countedClosingCash - expected).toFixed(2));
+    session.editHistory.push({
+      editedAt: new Date(),
+      editedByUserId: userId ? (userId as any) : undefined,
+      reason: `Arqueo corregido de $${before} a $${dto.countedClosingCash}: ${dto.reason.trim()}`,
+      addedEgresses: [],
+      addedIncomes: [],
+      removedEgresses: [],
+    });
+    await session.save();
+    return this.mapToResponse(session);
   }
 
   async resolveAutoClosure(id: string, dto: CloseCashSessionDto, userId?: string,): Promise<CashSessionResponse> {

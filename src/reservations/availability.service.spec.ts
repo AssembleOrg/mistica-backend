@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { DateTime } from 'luxon';
 import { DayOccupancy } from '../common/schemas/day-occupancy.schema';
 import { ExperienceSession } from '../common/schemas/experience-session.schema';
+import { Experience } from '../common/schemas/experience.schema';
 import { Reservation } from '../common/schemas/reservation.schema';
 import { Table } from '../common/schemas/table.schema';
 import { RecurringBlocksService } from '../tables/recurring-blocks.service';
@@ -67,6 +68,10 @@ async function build(
   const tablesRef = await Test.createTestingModule({
     providers: [
       TablesService,
+      {
+        provide: getModelToken(Experience.name),
+        useValue: { find: () => ({ select: () => ({ lean: async () => [] }) }) },
+      },
       {
         provide: getModelToken(Table.name),
         useValue: {

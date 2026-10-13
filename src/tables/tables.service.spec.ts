@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import { DateTime } from 'luxon';
 import { Types } from 'mongoose';
 import { DayOccupancy } from '../common/schemas/day-occupancy.schema';
+import { Experience } from '../common/schemas/experience.schema';
 import { ExperienceSession } from '../common/schemas/experience-session.schema';
 import { Reservation } from '../common/schemas/reservation.schema';
 import { Table } from '../common/schemas/table.schema';
@@ -131,10 +132,22 @@ function recurringMock(rules: Record<string, unknown>[] = []) {
   return { forDate: jest.fn().mockReturnValue(rules) };
 }
 
+/** Experiencias de mesa compartida: por defecto no hay ninguna. */
+function experienceModelMock(exps: Record<string, unknown>[] = []) {
+  return {
+    find: jest.fn().mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(exps),
+      }),
+    }),
+  };
+}
+
 async function build(
   dayModel: ReturnType<typeof dayModelMock>,
   reservations: Record<string, unknown>[] = [],
   recurring: Record<string, unknown>[] = [],
+  experiences: Record<string, unknown>[] = [],
 ) {
   const moduleRef = await Test.createTestingModule({
     providers: [
@@ -150,6 +163,7 @@ async function build(
         useValue: sessionModelMock(),
       },
       { provide: RecurringBlocksService, useValue: recurringMock(recurring) },
+      { provide: getModelToken(Experience.name), useValue: experienceModelMock(experiences) },
     ],
   }).compile();
   return moduleRef.get(TablesService);
@@ -165,6 +179,22 @@ describe('TablesService · disponibilidad por intervalos', () => {
     expect(free.small).toHaveLength(10);
     expect(free.large).toEqual(['G1', 'G2']);
     expect(free.shareableLarge).toEqual([]);
+  });
+
+  it('una experiencia de mesa compartida aparta su mesa en su horario propio', async () => {
+    // 2026-08-01 es sábado (weekday 6).
+    const taller = {
+      name: 'Arte botánico',
+      durationMinutes: 60,
+      ownSchedule: [{ weekday: 6, start: '15:00' }],
+      specials: [],
+      sharedTableCodes: ['G1'],
+    };
+    const service = await build(dayModelMock(), [], [], [taller]);
+    // Durante el taller G1 no se le da a nadie más; G2 sigue libre.
+    expect((await service.freeTablesFor(interval(service, '15:00'))).large).toEqual(['G2']);
+    // Terminado el taller (16:00), G1 vuelve a estar libre.
+    expect((await service.freeTablesFor(interval(service, '16:30'))).large).toEqual(['G1', 'G2']);
   });
 
   it('descuenta las mesas cuyo intervalo se pisa', async () => {
@@ -620,6 +650,7 @@ describe('TablesService · reasignación manual', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         TablesService,
+        { provide: getModelToken(Experience.name), useValue: experienceModelMock() },
         { provide: getModelToken(Table.name), useValue: tableModelMock() },
         { provide: getModelToken(DayOccupancy.name), useValue: day },
         {
@@ -862,6 +893,7 @@ describe('TablesService · bloqueos fijos semanales', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         TablesService,
+        { provide: getModelToken(Experience.name), useValue: experienceModelMock() },
         { provide: getModelToken(Table.name), useValue: tableModelMock() },
         { provide: getModelToken(DayOccupancy.name), useValue: dayModelMock(slots) },
         {

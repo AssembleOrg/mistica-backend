@@ -20,6 +20,8 @@ import {
   Reservation,
   ReservationDocument,
 } from '../common/schemas/reservation.schema';
+import { Experience, ExperienceDocument } from '../common/schemas/experience.schema';
+import { dayPlan } from '../experiences/specials';
 import { Table, TableDocument } from '../common/schemas/table.schema';
 import {
   FreeTables,
@@ -198,6 +200,8 @@ export class TablesService {
     @InjectModel(ExperienceSession.name)
     private readonly sessionModel: Model<ExperienceSessionDocument>,
     private readonly recurring: RecurringBlocksService,
+    @InjectModel(Experience.name)
+    private readonly experienceModel: Model<ExperienceDocument>,
   ) {}
 
   // ───────────────────────── Mesas (catálogo) ─────────────────────────
@@ -256,8 +260,8 @@ export class TablesService {
    * por (regla, mesa), sin escribir nada en la base. Bajan la disponibilidad
    * igual que un bloqueo manual; los bloqueos no suman limpieza.
    */
-  private virtualSlots(dateKey: string): RawSlot[] {
-    const out: RawSlot[] = [];
+  private async virtualSlots(dateKey: string): Promise<RawSlot[]> {
+    const out: RawSlot[] = await this.sharedTableSlots(dateKey);
     for (const rule of this.recurring.forDate(dateKey)) {
       const startAt = this.atTime(dateKey, rule.start);
       const endAt = this.atTime(dateKey, rule.end);
@@ -279,16 +283,54 @@ export class TablesService {
   }
 
   /**
+   * Mesas apartadas por las experiencias de MESA COMPARTIDA: en cada horario
+   * propio del día, sus `sharedTableCodes` quedan tomadas por la experiencia
+   * (haya o no anotados todavía), así nadie más las recibe.
+   */
+  private async sharedTableSlots(dateKey: string): Promise<RawSlot[]> {
+    const exps = await this.experienceModel
+      .find({
+        'sharedTableCodes.0': { $exists: true },
+        isActive: true,
+        deletedAt: { $exists: false },
+      })
+      .select('name durationMinutes ownSchedule specials sharedTableCodes')
+      .lean();
+    const out: RawSlot[] = [];
+    for (const exp of exps) {
+      const plan = dayPlan(exp, dateKey);
+      if (!plan.own) continue;
+      for (const start of plan.starts) {
+        const startAt = this.atTime(dateKey, start);
+        const endAt = new Date(startAt.getTime() + exp.durationMinutes * 60_000);
+        for (const table of exp.sharedTableCodes) {
+          out.push({
+            table: table.toUpperCase(),
+            qty: 0,
+            startAt,
+            endAt,
+            busyUntil: endAt,
+            shared: false,
+            label: plan.special?.name ? `${exp.name} · ${plan.special.name}` : exp.name,
+            recurring: true,
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
    * La guarda atómica de Mongo sólo ve los slots REALES del día: los bloqueos
    * fijos hay que chequearlos aparte antes de escribir. (assign no lo
    * necesita: planifica sobre freeTablesFor, que ya los excluye; esto cubre
    * las escrituras con mesas elegidas a mano.)
    */
-  private assertNoRecurringClash(
+  private async assertNoRecurringClash(
     interval: OccupancyInterval,
     codes: string[],
-  ): void {
-    const clash = this.virtualSlots(interval.dateKey).find(
+  ): Promise<void> {
+    const clash = (await this.virtualSlots(interval.dateKey)).find(
       (s) => codes.includes(s.table) && this.overlaps(s, interval),
     );
     if (clash) {
@@ -323,7 +365,7 @@ export class TablesService {
     ]);
     const slots = [
       ...((day?.slots ?? []) as RawSlot[]),
-      ...this.virtualSlots(interval.dateKey),
+      ...(await this.virtualSlots(interval.dateKey)),
     ].filter((s) => this.overlaps(s, interval));
     return this.buildFreeTables(tables, slots);
   }
@@ -400,7 +442,7 @@ export class TablesService {
     ]);
     const slots = [
       ...((day?.slots ?? []) as RawSlot[]),
-      ...this.virtualSlots(dateKey),
+      ...(await this.virtualSlots(dateKey)),
     ];
     const byReservation = await this.reservationsOf(slots);
     const bounds = businessBounds(dateKey);
@@ -855,7 +897,7 @@ export class TablesService {
     const toRemove = mine.filter((c) => !wanted.includes(c));
 
     if (toAdd.length) {
-      this.assertNoRecurringClash(interval, toAdd);
+      await this.assertNoRecurringClash(interval, toAdd);
       const ok = await this.pushSlots({
         interval,
         codes: toAdd,
@@ -979,7 +1021,7 @@ export class TablesService {
       endAt,
       busyUntil: endAt,
     };
-    this.assertNoRecurringClash(interval, codes);
+    await this.assertNoRecurringClash(interval, codes);
     const ok = await this.pushSlots({
       interval,
       codes,

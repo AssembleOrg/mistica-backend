@@ -9,6 +9,7 @@ import {
   IsString,
   MaxLength,
   Min,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -203,6 +204,23 @@ export class EditCashSessionDto {
   @ValidateNested({ each: true })
   @Type(() => RetroactiveIncomeDto)
   addIncomes?: RetroactiveIncomeDto[];
+}
+
+/**
+ * Corrige el efectivo contado de una caja ya cerrada (p. ej. se cerró en $0
+ * por error). El motivo es obligatorio: queda en el historial de la sesión.
+ */
+export class CorrectCashCountDto {
+  @ApiProperty({ description: 'Efectivo que realmente había al cerrar', minimum: 0 })
+  @IsNumber()
+  @Min(0)
+  countedClosingCash: number;
+
+  @ApiProperty({ description: 'Por qué se corrige el arqueo' })
+  @IsString()
+  @MinLength(3, { message: 'Contá brevemente por qué se corrige el arqueo' })
+  @MaxLength(300)
+  reason: string;
 }
 
 export class UpdateCashSessionLabelDto {

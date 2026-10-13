@@ -8,7 +8,10 @@ import {
   PrepaidDocument,
   SaleDocument,
 } from '../common/schemas';
+import { DateTime } from 'luxon';
 import { FinanceSummaryQueryDto } from '../common/dto';
+import { businessDayBound } from '../common/utils';
+import { envConfig } from '../config/env.config';
 
 export interface FinanceSummary {
   range: { from: string | null; to: string | null };
@@ -20,7 +23,10 @@ export interface FinanceSummary {
   averageTicket: number;
 
   // Distribución por método (suma de payments[].amount)
-  byPaymentMethod: {
+// Saldo que todavía se debe de las ventas del rango (ventas PARTIAL). Es la
+  // diferencia entre lo vendido (totalRevenue) y lo cobrado (byPaymentMethod).
+  pendingBalance: { count: number; total: number };
+    byPaymentMethod: {
     CASH: number;
     CARD: number;
     TRANSFER: number;
@@ -108,15 +114,12 @@ export class FinanceService {
   ) {}
 
   private parseDateRange(query: FinanceSummaryQueryDto): { from: Date; to: Date } {
-    const now = new Date();
-    const defaultFrom = new Date(now);
-    defaultFrom.setHours(0, 0, 0, 0);
-    const defaultTo = new Date(now);
-    defaultTo.setHours(23, 59, 59, 999);
-
-    const from = query.from ? new Date(`${query.from}T00:00:00`) : defaultFrom;
-    const to = query.to ? new Date(`${query.to}T23:59:59.999`) : defaultTo;
-    return { from, to };
+    // Los días se cortan en la zona del negocio, no en la del servidor (UTC).
+    const today = DateTime.now().setZone(envConfig.timezone).toISODate()!;
+    return {
+      from: businessDayBound(query.from || today, 'start'),
+      to: businessDayBound(query.to || today, 'end'),
+    };
   }
 
   async summary(query: FinanceSummaryQueryDto): Promise<FinanceSummary> {
@@ -139,6 +142,11 @@ export class FinanceService {
     const salesCount = sales.length;
     const totalRevenue = sales.reduce((s, x) => s + (x.total || 0), 0);
     const averageTicket = salesCount > 0 ? totalRevenue / salesCount : 0;
+    const owing = sales.filter((x) => x.status !== 'CANCELLED' && (x.balanceDue ?? 0) > 0);
+    const pendingBalance = {
+      count: owing.length,
+      total: owing.reduce((s, x) => s + (x.balanceDue ?? 0), 0),
+    };
 
     const byPaymentMethod: FinanceSummary['byPaymentMethod'] = {
       CASH: 0,
@@ -278,8 +286,8 @@ export class FinanceService {
 
     return {
       range: {
-        from: from.toISOString().slice(0, 10),
-        to: to.toISOString().slice(0, 10),
+        from: DateTime.fromJSDate(from).setZone(envConfig.timezone).toISODate(),
+        to: DateTime.fromJSDate(to).setZone(envConfig.timezone).toISODate(),
       },
       filters: {
         paymentMethod: query.paymentMethod,
@@ -290,6 +298,7 @@ export class FinanceService {
       salesCount,
       totalRevenue,
       averageTicket,
+      pendingBalance,
       byPaymentMethod,
       byStatus,
       byClient,
