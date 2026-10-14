@@ -442,6 +442,25 @@ export class TablesService {
   }
 
   /**
+   * Lugar que queda en un turno, para verlo sin cargar una reserva de prueba:
+   * el grupo más grande que todavía entra y las mesas libres. Con 32 personas
+   * sobre 40 puede no entrar nadie más (un grupo de 3 ocupa dos mesas de 2).
+   */
+  async shiftRoom(startAt: Date, durationMinutes: number) {
+    const free = await this.freeTablesFor(this.intervalFor(startAt, durationMinutes));
+    return {
+      maxPartySize: maxPartySize(free),
+      freeSmall: free.small.length,
+      freeLarge: free.large.length,
+      // Lugares vacíos en mesas grandes que se comparten.
+      sharedSeatsLeft: free.shareableLarge.reduce(
+        (sum, l) => sum + Math.max(0, SHARE_MAX_TOTAL - l.holderQty),
+        0,
+      ),
+    };
+  }
+
+  /**
    * Agenda completa de un día: cada mesa con su timeline de ocupaciones y las
    * reservas que las ocupan (una entrada por reserva, con todas sus mesas).
    * Es lo que dibuja la agenda del admin.

@@ -11,6 +11,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsIn,
   Matches,
   ArrayMaxSize,
   MaxLength,
@@ -379,6 +380,19 @@ export class ListPiecesQueryDto {
   @IsInt()
   @Min(1)
   limit?: number;
+}
+
+/** Conteo de piezas elegidas para producción. */
+export class PieceTallyQueryDto {
+  @ApiPropertyOptional({ enum: ['week', 'month'], default: 'week' })
+  @IsOptional()
+  @IsIn(['week', 'month'])
+  period?: 'week' | 'month';
+
+  @ApiPropertyOptional({ description: 'Un día del período (YYYY-MM-DD); por defecto hoy' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  date?: string;
 }
 
 /** Cambio de estado de varias piezas a la vez (la tanda de un día). */

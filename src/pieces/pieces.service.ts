@@ -689,6 +689,47 @@ export class PiecesService implements OnModuleInit {
       );
   }
 
+  /**
+   * Piezas elegidas en una semana o un mes, por tipo: para que producción sepa
+   * qué se está consumiendo y qué reponer. Sólo informativo (no hay stock).
+   * Cuenta por día de carga de la ficha; un 2x1 ("Taza + Plato") suma las dos.
+   */
+  async productionTally(period: 'week' | 'month', date?: string) {
+    const tz = envConfig.timezone;
+    const ref = date
+      ? DateTime.fromISO(date, { zone: tz })
+      : DateTime.now().setZone(tz);
+    const from = ref.startOf(period === 'week' ? 'week' : 'month');
+    const to = from.endOf(period === 'week' ? 'week' : 'month');
+    const rows = await this.pieceModel
+      .find({
+        deletedAt: { $exists: false },
+        createdAt: { $gte: from.toJSDate(), $lte: to.toJSDate() },
+      })
+      .select('pieceType quantity')
+      .lean();
+    const counts = new Map<string, { name: string; count: number }>();
+    for (const r of rows) {
+      for (const raw of String(r.pieceType ?? '').split(' + ')) {
+        const name = raw.trim() || 'Sin detalle';
+        const key = name.toLocaleLowerCase('es');
+        const cur = counts.get(key) ?? { name, count: 0 };
+        cur.count += r.quantity ?? 1;
+        counts.set(key, cur);
+      }
+    }
+    const items = [...counts.values()].sort(
+      (a, b) => b.count - a.count || a.name.localeCompare(b.name, 'es'),
+    );
+    return {
+      period,
+      from: from.toISODate(),
+      to: to.toISODate(),
+      total: items.reduce((n, i) => n + i.count, 0),
+      items,
+    };
+  }
+
   async notifyReadyByAdmin(id: string) {
     const piece = await this.pieceModel.findOne({
       _id: id,

@@ -25,6 +25,8 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { DateTime } from 'luxon';
+import { envConfig } from '../config/env.config';
 import { TablesService } from './tables.service';
 import { ShiftsService } from './shifts.service';
 import { RecurringBlocksService } from './recurring-blocks.service';
@@ -135,6 +137,33 @@ export class TablesController {
   @ApiOperation({ summary: 'Eliminar un bloqueo fijo semanal' })
   removeRecurring(@Param('id') id: string) {
     return this.recurring.remove(id);
+  }
+
+  @Get('room')
+  @ApiOperation({
+    summary:
+      'Lugar que queda en cada turno de un día: grupo máximo que entra y mesas libres',
+  })
+  async room(@Query() query: DayAgendaQueryDto) {
+    const shifts = this.shifts.forDate(query.date);
+    return Promise.all(
+      shifts.map(async (shift) => {
+        const startAt = DateTime.fromISO(`${query.date}T${shift.start}`, {
+          zone: envConfig.timezone,
+        });
+        const end = DateTime.fromISO(`${query.date}T${shift.end}`, {
+          zone: envConfig.timezone,
+        });
+        const minutes = Math.max(1, end.diff(startAt, 'minutes').minutes);
+        try {
+          const room = await this.service.shiftRoom(startAt.toJSDate(), minutes);
+          return { key: shift.key, name: shift.name, start: shift.start, end: shift.end, ...room };
+        } catch {
+          // Turno fuera del horario del salón: no se ofrece.
+          return null;
+        }
+      }),
+    ).then((rows) => rows.filter(Boolean));
   }
 
   @Get('agenda')

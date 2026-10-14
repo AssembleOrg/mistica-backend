@@ -26,6 +26,7 @@ import {
   SavePieceExtraDto,
   SavePieceTypeDto,
   BulkPieceStatusDto,
+  PieceTallyQueryDto,
   SetPieceStatusesDto,
 } from '../common/dto/piece.dto';
 import { PieceTypesService } from './piece-types.service';
@@ -218,6 +219,15 @@ export class PiecesController {
   })
   assembly() {
     return this.piecesService.assembly();
+  }
+
+  @Get('production-tally')
+  @AllowedViews('reservas:piezas', 'produccion')
+  @ApiOperation({
+    summary: 'Piezas elegidas por tipo en la semana o el mes (para reponer)',
+  })
+  productionTally(@Query() q: PieceTallyQueryDto) {
+    return this.piecesService.productionTally(q.period ?? 'week', q.date);
   }
 
   @Get('counts')

@@ -29,6 +29,7 @@ import { LeadsModule } from './leads/leads.module';
 import { ClosedDatesModule } from './closed-dates/closed-dates.module';
 import { PiecesModule } from './pieces/pieces.module';
 import { ProfessorsModule } from './professors/professors.module';
+import { KilnsModule } from './kilns/kilns.module';
 import { GroupsModule } from './groups/groups.module';
 import { StudentsModule } from './students/students.module';
 import { MakeupsModule } from './makeups/makeups.module';
@@ -67,6 +68,7 @@ import { InAppNotificationsModule } from './in-app-notifications/in-app-notifica
     ClosedDatesModule,
     PiecesModule,
     ProfessorsModule,
+    KilnsModule,
     GroupsModule,
     StudentsModule,
     MakeupsModule,

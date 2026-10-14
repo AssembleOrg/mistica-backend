@@ -355,6 +355,26 @@ describe('TablesService · mesa grande compartida entre varias reservas', () => 
     // Quedan 3 lugares en G1: es el grupo más grande que entra.
     expect(await service.remainingPartySize(at('2026-08-01', '15:00'), 120)).toBe(3);
   });
+
+  it('shiftRoom resume el lugar del turno: grupo máximo, mesas libres y lugares compartidos', async () => {
+    const service = await build(
+      dayModelMock([
+        slotAt('G1', '15:00', '17:00', { qty: 7, reservationId: new Types.ObjectId() }),
+        ...['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'G2'].map((t) =>
+          slotAt(t, '15:00', '17:00', {
+            reservationId: new Types.ObjectId(),
+            ...(t === 'G2' ? { qty: 10 } : {}),
+          }),
+        ),
+      ]),
+    );
+    expect(await service.shiftRoom(at('2026-08-01', '15:00'), 120)).toEqual({
+      maxPartySize: 6,
+      freeSmall: 3,
+      freeLarge: 0,
+      sharedSeatsLeft: 3,
+    });
+  });
 });
 
 describe('TablesService · asignación atómica', () => {

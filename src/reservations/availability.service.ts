@@ -132,8 +132,9 @@ export class AvailabilityService implements OnModuleInit {
   private async syncAllCapacitiesOnce() {
     const flags = this.sessionModel.db.collection('app_settings');
     // 2026-10-13: se saca el cupo cargado a mano; rige la mesa asignada o,
-    // sin mesa, el límite del local.
-    const key = 'capacitySync:2026-10-13';
+    // sin mesa, el límite del local. 2026-10-14: la grande unida pierde la
+    // punta (G + M = 11, no 12).
+    const key = 'capacitySync:2026-10-14';
     if (await flags.findOne({ key })) return;
     const exps = await this.experienceModel
       .find({ deletedAt: { $exists: false } })
