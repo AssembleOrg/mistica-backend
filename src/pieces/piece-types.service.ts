@@ -62,6 +62,35 @@ export class PieceTypesService {
     return rows.map((t) => this.view(t));
   }
 
+  /**
+   * Material (tela, bastidor, yeso…) de cada pieza del catálogo según su
+   * categoría, por nombre normalizado. Lo usa la carga de fichas: esas piezas
+   * se llevan en el día y no llevan firma ni colores, tengan o no adicional.
+   */
+  async materialsByName(names: string[]): Promise<Map<string, string>> {
+    const wanted = new Set(names.map(normName).filter(Boolean));
+    const out = new Map<string, string>();
+    if (!wanted.size) return out;
+    const types = await this.typeModel
+      .find({ deletedAt: { $exists: false }, extraId: { $exists: true, $ne: null } })
+      .select('name extraId')
+      .lean();
+    const hits = types.filter((t) => wanted.has(normName(t.name)));
+    if (!hits.length) return out;
+    const extras = await this.extraModel
+      .find({ _id: { $in: hits.map((t) => t.extraId) }, deletedAt: { $exists: false } })
+      .select('material')
+      .lean();
+    const materialOf = new Map(
+      extras.filter((x) => x.material).map((x) => [String(x._id), x.material as string]),
+    );
+    for (const t of hits) {
+      const m = materialOf.get(String(t.extraId));
+      if (m) out.set(normName(t.name), m);
+    }
+    return out;
+  }
+
   /** `extraId`: categoría ('' la quita; undefined no la toca). */
   async create(name: string, extraId?: string) {
     const clean = name.trim();
@@ -223,4 +252,14 @@ export class PieceTypesService {
       [...byKey.values()].map((name) => ({ name })),
     );
   }
+}
+
+/** Nombre comparable: sin acentos, minúsculas y sin espacios extra. */
+export function normName(s: string): string {
+  return (s ?? '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
 }

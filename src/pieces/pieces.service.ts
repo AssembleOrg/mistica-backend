@@ -14,6 +14,7 @@ import { User, UserDocument } from '../common/schemas/user.schema';
 import { ProfessorsService } from '../professors/professors.service';
 import { ReservationsService } from '../reservations/reservations.service';
 import { PieceExtrasService } from './piece-extras.service';
+import { PieceTypesService, normName } from './piece-types.service';
 import {
   PieceStatus,
   PieceStatusConfig,
@@ -75,6 +76,7 @@ export class PiecesService implements OnModuleInit {
     private readonly professors: ProfessorsService,
     private readonly reservations: ReservationsService,
     private readonly pieceExtras: PieceExtrasService,
+    private readonly pieceTypes: PieceTypesService,
   ) {}
 
   async onModuleInit() {
@@ -255,15 +257,21 @@ export class PiecesService implements OnModuleInit {
 
     // 2x1: las dos piezas van en la misma ficha (una paleta), con el
     // adicional cobrado una vez. Cerámica pide firma y colores; tela,
-    // bastidor, yeso… no (se los llevan en el día).
+    // bastidor, yeso… no (se los llevan en el día). El material sale del
+    // adicional elegido o, si va incluida sin adicional, de la categoría de
+    // la pieza en el catálogo (igual que en el formulario).
+    const materials = await this.pieceTypes.materialsByName(
+      dto.entries.map((e) => e.pieceType),
+    );
     for (const entry of dto.entries) {
       const extra = entry.extraId ? catalog.get(entry.extraId) : undefined;
+      const material = extra?.material ?? materials.get(normName(entry.pieceType));
       if (extra?.pair && !entry.pieceType2?.trim()) {
         throw new BadRequestException(
           `${extra.name}: elegí las dos piezas de ${entry.personName.trim()}.`,
         );
       }
-      if (!extra?.material && (!entry.signature?.trim() || !entry.colorsUsed?.trim())) {
+      if (!material && (!entry.signature?.trim() || !entry.colorsUsed?.trim())) {
         throw new BadRequestException(
           `Completá la firma y los colores de la pieza de ${entry.personName.trim()}.`,
         );
