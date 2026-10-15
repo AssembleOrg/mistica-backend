@@ -2313,9 +2313,13 @@ ${dto.notes}` : note,
     });
     if (!r.saleId) {
       r.saleId = new Types.ObjectId(sale.id);
-      r.depositAmount = plan.reservation.balanceDue;
       r.salePending = false;
     }
+    // Lo cobrado se suma a lo que ya había pagado (la seña): antes se pisaba
+    // y la reserva quedaba mostrando sólo el último cobro.
+    r.depositAmount = Number(
+      ((r.depositAmount ?? 0) + plan.reservation.balanceDue).toFixed(2),
+    );
     r.balanceDue = 0;
     await r.save();
     return sale;
