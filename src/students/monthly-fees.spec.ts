@@ -155,11 +155,20 @@ describe('Cuotas mensuales de alumnos', () => {
 
   it('quien se inscribe para arrancar el mes que viene no debe éste', async () => {
     const proximo = student({ joinedAt: new Date('2026-11-04T12:00:00-03:00') });
-    const este = student({ joinedAt: new Date('2026-10-14T12:00:00-03:00') });
+    const este = student({ joinedAt: new Date('2026-10-05T12:00:00-03:00') });
     const { service, paymentModel } = build({ students: [proximo, este] });
 
     expect(await service.ensureMonthlyFees(OCT_1)).toBe(1);
     expect(paymentModel.docs.map((p) => String(p.studentId))).toEqual([String(este._id)]);
+  });
+
+  it('quien entra pasado el día de pago no arranca con la cuota del mes vencida', async () => {
+    const tarde = student({ joinedAt: new Date('2026-10-13T15:00:00-03:00') });
+    const tardeDia20 = student({ joinedAt: new Date('2026-10-13T15:00:00-03:00'), paymentDay: 20 });
+    const { service, paymentModel } = build({ students: [tarde, tardeDia20] });
+
+    expect(await service.ensureMonthlyFees(new Date('2026-10-16T12:00:00-03:00'))).toBe(1);
+    expect(paymentModel.docs.map((p) => String(p.studentId))).toEqual([String(tardeDia20._id)]);
   });
 
   it('es idempotente y respeta una cuota paga cargada a mano en el mes', async () => {

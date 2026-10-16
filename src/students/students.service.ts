@@ -431,7 +431,12 @@ export class StudentsService implements OnApplicationBootstrap {
         : dto.status === 'PAID'
           ? new Date()
           : undefined,
-      dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+      dueDate: dto.dueDate
+        ? new Date(dto.dueDate)
+        : dto.period
+          ? dueDateOf(dto.period, student.paymentDay)
+          : undefined,
+      period: dto.period,
       method: dto.method,
       notes: dto.notes,
       createdById:
@@ -1071,8 +1076,11 @@ export class StudentsService implements OnApplicationBootstrap {
     const docs = students
       .filter((st) => !covered.has(String(st._id)))
       // Quien se inscribió para arrancar el mes que viene (después de su
-      // clase de prueba) todavía no debe éste.
+      // clase de prueba) todavía no debe éste. Y quien entró pasado el día de
+      // pago tampoco: ese mes se le cobra la parte que corresponda en caja
+      // (no tiene que aparecer con una cuota vencida desde el primer día).
       .filter((st) => !st.joinedAt || st.joinedAt < nextMonthStart)
+      .filter((st) => !st.joinedAt || st.joinedAt <= dueDateOf(period, st.paymentDay))
       .map((st) => ({
         studentId: st._id,
         concept: `Cuota ${monthLabelEs(period)}`,
@@ -1209,6 +1217,114 @@ export class StudentsService implements OnApplicationBootstrap {
         `Venta ${input.saleNumber}: no se pudo registrar la cuota del alumno: ${String(err)}`,
       );
       return 0;
+    }
+  }
+
+  /**
+   * Cobro de alumno en caja con el mes elegido (vale para ítems escritos a
+   * mano). MONTH paga la cuota de ese mes (menos = pago parcial, queda el
+   * saldo); PARTIAL (ingreso a mitad de mes) y CLASSES (clases sueltas)
+   * cierran ese mes: lo pendiente de ese mes deja de deberse. Nunca lanza.
+   */
+  async recordFeeFromSale(input: {
+    clientId: string;
+    saleId: string;
+    saleNumber: string;
+    method?: string;
+    kind: 'MONTH' | 'PARTIAL' | 'CLASSES';
+    period: string;
+    amount: number;
+  }): Promise<boolean> {
+    try {
+      if (!Types.ObjectId.isValid(input.clientId)) return false;
+      const student = await this.studentForFeeSale(
+        input.clientId,
+        input.saleNumber,
+        input.amount,
+      );
+      if (!student) return false;
+      const now = new Date();
+      const note = `Cobrada en caja · venta ${input.saleNumber}`;
+      const amount = round2(input.amount);
+      const { period } = input;
+      const label = monthLabelEs(period);
+      const dueDate = dueDateOf(period, student.paymentDay);
+      const pendingOfMonth = await this.paymentModel
+        .find({
+          studentId: student._id,
+          status: 'PENDING',
+          period,
+          deletedAt: { $exists: false },
+        })
+        .sort({ createdAt: 1 })
+        .exec();
+
+      if (input.kind === 'MONTH') {
+        if (pendingOfMonth[0]) {
+          await this.applyToPending(pendingOfMonth[0], amount, {
+            method: input.method,
+            notes: note,
+            saleId: input.saleId,
+            now,
+          });
+        } else {
+          const fee = round2(student.monthlyFee ?? 0);
+          const partial = fee > 0 && amount < fee - 0.01;
+          await this.paymentModel.create({
+            studentId: student._id,
+            concept: partial ? `Cuota ${label} · pago parcial` : `Cuota ${label}`,
+            amount,
+            status: 'PAID',
+            paidAt: now,
+            dueDate,
+            period,
+            method: input.method,
+            notes: note,
+            saleId: new Types.ObjectId(input.saleId),
+          });
+          if (partial) {
+            await this.paymentModel.create({
+              studentId: student._id,
+              concept: `Cuota ${label} · saldo`,
+              amount: round2(fee - amount),
+              status: 'PENDING',
+              dueDate,
+              period,
+            });
+          }
+        }
+      } else {
+        // El mes queda cerrado con lo que paga ahora.
+        for (const p of pendingOfMonth) {
+          p.deletedAt = now;
+          p.notes = [p.notes, `Reemplazada por la venta ${input.saleNumber}`]
+            .filter(Boolean)
+            .join(' · ');
+          await p.save();
+        }
+        await this.paymentModel.create({
+          studentId: student._id,
+          concept:
+            input.kind === 'PARTIAL'
+              ? `Cuota ${label} · parte del mes (ingreso a mitad de mes)`
+              : `Clases sueltas · ${label}`,
+          amount,
+          status: 'PAID',
+          paidAt: now,
+          dueDate,
+          period,
+          method: input.method,
+          notes: note,
+          saleId: new Types.ObjectId(input.saleId),
+        });
+      }
+      await this.recordRegularity(student._id as Types.ObjectId, 'PAYMENT_UPDATED');
+      return true;
+    } catch (err) {
+      this.logger.error(
+        `Venta ${input.saleNumber}: no se pudo registrar el cobro del alumno: ${String(err)}`,
+      );
+      return false;
     }
   }
 

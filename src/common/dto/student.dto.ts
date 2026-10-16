@@ -144,6 +144,11 @@ export class CreateStudentPaymentDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  @ApiPropertyOptional({ description: "Mes al que aplica ('YYYY-MM')" })
+  @IsOptional()
+  @Matches(/^\d{4}-(0[1-9]|1[0-2])$/, { message: 'El mes va en formato YYYY-MM.' })
+  period?: string;
 }
 
 export class UpdateStudentPaymentDto extends PartialType(

@@ -1,4 +1,6 @@
 import { 
+  IsIn,
+  Matches,
   IsString, 
   IsEmail, 
   IsOptional, 
@@ -18,6 +20,29 @@ import {
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentMethod, SaleStatus, InvoiceType, TaxCondition } from '../enums';
+
+/**
+ * Qué paga el alumno con esta venta:
+ * · MONTH: la cuota del mes (si cobra menos, queda el saldo pendiente).
+ * · PARTIAL: una parte del mes que cierra ese mes (ingreso a mitad de mes).
+ * · CLASSES: clases sueltas de ese mes (tampoco queda cuota pendiente).
+ */
+export class SaleStudentFeeDto {
+  @ApiProperty({ enum: ['MONTH', 'PARTIAL', 'CLASSES'] })
+  @IsIn(['MONTH', 'PARTIAL', 'CLASSES'])
+  kind: 'MONTH' | 'PARTIAL' | 'CLASSES';
+
+  @ApiProperty({ description: "Mes al que aplica ('YYYY-MM')" })
+  @Matches(/^\d{4}-(0[1-9]|1[0-2])$/, { message: 'El mes va en formato YYYY-MM.' })
+  period: string;
+
+  @ApiProperty({ description: 'Lo que paga de cuota con esta venta' })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.01)
+  amount: number;
+}
+
 
 export class CreateSaleItemDto {
   @ApiPropertyOptional({
@@ -259,6 +284,16 @@ export class CreateSaleDto {
   @IsArray()
   @IsMongoId({ each: true })
   studentFeeProductIds?: string[];
+
+  @ApiPropertyOptional({
+    type: () => SaleStudentFeeDto,
+    description:
+      'Cobro de alumno con el mes elegido en caja (reemplaza a studentFeeProductIds): vale también para ítems escritos a mano.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SaleStudentFeeDto)
+  studentFee?: SaleStudentFeeDto;
 }
 
 export class UpdateSaleDto {

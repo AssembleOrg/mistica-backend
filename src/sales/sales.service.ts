@@ -891,10 +891,28 @@ export class SalesService implements OnApplicationBootstrap {
         await this.prepaidModel.create(prepaidDocs);
       }
 
+      // Cobro de alumno con el mes elegido en caja (también para ítems
+      // escritos a mano): manda sobre lo marcado por producto.
+      const studentFee = createSaleDto.studentFee;
+      if (
+        studentFee &&
+        createSaleDto.clientId &&
+        !(onAccount && balanceDue > 0.01)
+      ) {
+        await this.studentsService.recordFeeFromSale({
+          clientId: String(createSaleDto.clientId),
+          saleId: sale._id.toString(),
+          saleNumber,
+          method: PAYMENT_METHOD_LABEL[payments[0]?.method ?? PaymentMethod.CASH],
+          kind: studentFee.kind,
+          period: studentFee.period,
+          amount: Math.min(studentFee.amount, sale.total),
+        });
+      }
       // Cuotas de alumno ("mes cerámica"): si el cliente es alumno, cada unidad
       // cobrada paga su cuota del mes. Nunca tumba la venta (ver el servicio).
       // Un fiado con saldo todavía no pagó la cuota: se marca a mano al cobrar.
-      if (
+      else if (
         createSaleDto.clientId &&
         itemsWithProduct.length > 0 &&
         !(onAccount && balanceDue > 0.01)
