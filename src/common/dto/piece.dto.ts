@@ -18,6 +18,9 @@ import {
   Min,
 } from 'class-validator';
 
+/** Claves de ficha del borrador: sin puntos ni $ (van como campo de Mongo). */
+export const DRAFT_KEY_RE = /^[A-Za-z0-9_-]{6,40}$/;
+
 export class ReservationPieceEntryDto {
   @ApiProperty({ description: 'Nombre y apellido de la persona' })
   @IsString()
@@ -90,6 +93,41 @@ export class CreateReservationPiecesDto {
   @IsString()
   @MaxLength(80)
   registeredBy?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Claves del borrador de las fichas que se registran: salen del borrador.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @Matches(DRAFT_KEY_RE, { each: true })
+  draftKeys?: string[];
+}
+
+/** Una ficha a medio cargar: todo opcional, se guarda mientras se escribe. */
+export class SavePieceDraftEntryDto {
+  @IsOptional() @IsString() @MaxLength(120) personName?: string;
+  @IsOptional() @IsString() @MaxLength(120) signature?: string;
+  @IsOptional() @IsString() @MaxLength(120) pieceType?: string;
+  @IsOptional() @IsString() @MaxLength(300) colorsUsed?: string;
+  @IsOptional() @IsBoolean() hasExtra?: boolean;
+  @IsOptional() @IsString() @MaxLength(40) extraId?: string;
+  @IsOptional() @IsString() @MaxLength(120) pieceType2?: string;
+  @IsOptional() @IsBoolean() additional?: boolean;
+
+  @ApiProperty({ description: 'Orden de la ficha en el formulario' })
+  @IsNumber()
+  order: number;
+
+  @IsOptional() @IsString() @MaxLength(80) updatedBy?: string;
+}
+
+export class PieceDraftsQueryDto {
+  @ApiProperty({ description: 'Reservas, separadas por coma' })
+  @IsString()
+  @MaxLength(5000)
+  reservationIds: string;
 }
 
 /** Una ficha de pieza para un alumno del grupo. */
@@ -319,6 +357,26 @@ export class PieceStatusConfigDto {
   @ApiPropertyOptional({ description: 'Cierra el ciclo (entregada/retirada)' })
   @IsOptional()
   isFinal?: boolean;
+}
+
+export class PieceColorDto {
+  @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(60) name: string;
+  @ApiProperty({ description: 'Tono del circulito (#rrggbb)' })
+  @Matches(/^#[0-9a-fA-F]{6}$/)
+  hex: string;
+  @ApiProperty({ description: 'Grupo de la paleta (0, 1, 2…)' })
+  @IsInt()
+  @Min(0)
+  group: number;
+}
+
+export class SetPieceColorsDto {
+  @ApiProperty({ type: [PieceColorDto] })
+  @IsArray()
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => PieceColorDto)
+  colors: PieceColorDto[];
 }
 
 export class SetPieceStatusesDto {

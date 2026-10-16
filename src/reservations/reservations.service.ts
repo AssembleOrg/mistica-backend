@@ -107,6 +107,16 @@ const KITCHEN_NOTICE_DAYS = 14;
 const KITCHEN_VIEWS = ['reservas:cocina', 'reservas:agenda'];
 const LOOKS_LIKE_FOOD = /buffet|brunch|merienda|degustaci|desayuno/i;
 
+/** " · Juana cumple 8" para los avisos a cocina. */
+function birthdayWho(r: { birthdayName?: string; birthdayAge?: number }) {
+  const name = r.birthdayName?.trim();
+  const age = r.birthdayAge != null ? `${r.birthdayAge}` : '';
+  if (name && age) return ` · ${name} cumple ${age}`;
+  if (name) return ` · cumple ${name}`;
+  if (age) return ` · cumple ${age}`;
+  return '';
+}
+
 type KitchenReservation = {
   experienceId?: Types.ObjectId | string;
   experienceName: string;
@@ -116,6 +126,8 @@ type KitchenReservation = {
   dietaryTags?: string[];
   dietaryNotes?: string;
   kitchenNotes?: string;
+  birthdayName?: string;
+  birthdayAge?: number;
   cakes?: Array<{ label: string; qty?: number }>;
 };
 
@@ -177,7 +189,7 @@ export class ReservationsService implements OnApplicationBootstrap {
       (c.qty ?? 1) > 1 ? `${c.label} x${c.qty}` : c.label,
     );
     return [
-      r.isBirthday ? 'Cumpleaños 🎉' : '',
+      r.isBirthday ? `Cumpleaños 🎉${birthdayWho(r)}` : '',
       cakes.length ? `Torta: ${cakes.join(', ')}` : '',
       diet.length ? `Restricciones: ${diet.join(' · ')}` : '',
       r.kitchenNotes?.trim() ? `Nota: ${r.kitchenNotes.trim()}` : '',
@@ -1026,6 +1038,8 @@ export class ReservationsService implements OnApplicationBootstrap {
         dietaryNotes: dto.dietaryNotes,
         isBirthday: dto.isBirthday ?? false,
         kitchenNotes: dto.kitchenNotes?.trim() || undefined,
+        birthdayName: dto.birthdayName?.trim() || undefined,
+        birthdayAge: dto.birthdayAge ?? undefined,
         notes: dto.notes,
         createdById: userId,
         confirmedAt: new Date(),
@@ -1154,6 +1168,8 @@ export class ReservationsService implements OnApplicationBootstrap {
         dietaryTags: dto.dietaryTags,
         dietaryNotes: dto.dietaryNotes,
         kitchenNotes: dto.kitchenNotes,
+        birthdayName: dto.birthdayName?.trim() || undefined,
+        birthdayAge: dto.birthdayAge ?? undefined,
         freeSpots: dto.freeSpots,
       },
       userId,
@@ -1200,6 +1216,8 @@ export class ReservationsService implements OnApplicationBootstrap {
       dietaryNotes: r.dietaryNotes,
       isBirthday: r.isBirthday ?? false,
       kitchenNotes: r.kitchenNotes,
+      birthdayName: r.birthdayName,
+      birthdayAge: r.birthdayAge,
       // Cocina ve qué torta preparar, no su precio.
       cakes: (r.cakes ?? []).map(
         (c: { _id?: unknown; label: string; qty: number; amount?: number; notes?: string }) => ({
@@ -1832,6 +1850,7 @@ export class ReservationsService implements OnApplicationBootstrap {
       quantity: r.quantity,
       diet: [...(r.dietaryTags ?? []), r.dietaryNotes ?? ''].join('|'),
       kitchen: r.kitchenNotes ?? '',
+      birthday: `${r.birthdayName ?? ''}|${r.birthdayAge ?? ''}`,
     };
     let creditDue = 0;
     if (
@@ -1851,6 +1870,8 @@ export class ReservationsService implements OnApplicationBootstrap {
     if (dto.dietaryNotes !== undefined) r.dietaryNotes = dto.dietaryNotes;
     if (dto.isBirthday !== undefined) r.isBirthday = dto.isBirthday;
     if (dto.kitchenNotes !== undefined) r.kitchenNotes = dto.kitchenNotes;
+    if (dto.birthdayName !== undefined) r.birthdayName = dto.birthdayName.trim() || undefined;
+    if (dto.birthdayAge !== undefined) r.birthdayAge = dto.birthdayAge ?? undefined;
     r.updatedAt = new Date();
     await r.save();
 
@@ -1859,8 +1880,19 @@ export class ReservationsService implements OnApplicationBootstrap {
       changes.push(`Ahora son ${r.quantity} (antes ${before.quantity})`);
     }
     const diet = [...(r.dietaryTags ?? []), r.dietaryNotes ?? ''].join('|');
-    if (diet !== before.diet || (r.kitchenNotes ?? '') !== before.kitchen) {
-      changes.push(this.kitchenDetail({ ...r.toObject(), isBirthday: false, cakes: [] }));
+    const birthday = `${r.birthdayName ?? ''}|${r.birthdayAge ?? ''}`;
+    if (
+      diet !== before.diet ||
+      (r.kitchenNotes ?? '') !== before.kitchen ||
+      (r.isBirthday && birthday !== before.birthday)
+    ) {
+      changes.push(
+        this.kitchenDetail({
+          ...r.toObject(),
+          isBirthday: r.isBirthday && birthday !== before.birthday,
+          cakes: [],
+        }),
+      );
     }
     if (changes.length) {
       await this.notifyKitchen(
@@ -2658,6 +2690,8 @@ ${dto.notes}` : note,
       sharedTable: r.sharedTable ?? false,
       notes: r.notes,
       kitchenNotes: r.kitchenNotes,
+      birthdayName: r.birthdayName,
+      birthdayAge: r.birthdayAge,
       cakes: (r.cakes ?? []).map((c) => ({
         _id: c._id ? String(c._id) : undefined,
         label: c.label,

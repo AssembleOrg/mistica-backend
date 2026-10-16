@@ -120,6 +120,13 @@ export class Reservation {
   @Prop({ trim: true })
   kitchenNotes?: string;
 
+  // Cumpleaños: quién cumple y cuántos años.
+  @Prop({ trim: true })
+  birthdayName?: string;
+
+  @Prop({ type: Number })
+  birthdayAge?: number;
+
   // Edición especial de la experiencia que regía el día de la reserva
   // (Halloween, Navidad…): con qué texto, precio y bonos se vendió.
   @Prop({ trim: true })

@@ -345,6 +345,19 @@ export class ScheduleSaleDto {
   @MaxLength(500)
   kitchenNotes?: string;
 
+  @ApiPropertyOptional({ description: 'Cumpleaños: quién cumple' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  birthdayName?: string;
+
+  @ApiPropertyOptional({ description: 'Cumpleaños: cuántos años cumple' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(120)
+  birthdayAge?: number | null;
+
   @ApiPropertyOptional({
     description: 'Personas bonificadas (entran pero no se cobran)',
     minimum: 0,
@@ -517,6 +530,19 @@ export class AdminCreateReservationDto {
   @IsString()
   @MaxLength(500)
   kitchenNotes?: string;
+
+  @ApiPropertyOptional({ description: 'Cumpleaños: quién cumple' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  birthdayName?: string;
+
+  @ApiPropertyOptional({ description: 'Cumpleaños: cuántos años cumple' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(120)
+  birthdayAge?: number | null;
 }
 
 /**
@@ -658,6 +684,19 @@ export class AdminUpdateReservationDto {
   @IsString()
   @MaxLength(500)
   kitchenNotes?: string;
+
+  @ApiPropertyOptional({ description: 'Cumpleaños: quién cumple' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  birthdayName?: string;
+
+  @ApiPropertyOptional({ description: 'Cumpleaños: cuántos años cumple' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(120)
+  birthdayAge?: number | null;
 }
 
 /** Adicional con precio sumado a mano a una reserva (sube el total y el saldo). */

@@ -4,6 +4,12 @@ import { PiecesController } from './pieces.controller';
 import { PiecesService } from './pieces.service';
 import { PieceTypesService } from './piece-types.service';
 import { PieceExtrasService } from './piece-extras.service';
+import { PieceDraftsService } from './piece-drafts.service';
+import { PieceColorsService } from './piece-colors.service';
+import {
+  PieceDraft,
+  PieceDraftSchema,
+} from '../common/schemas/piece-draft.schema';
 import { ReservationsModule } from '../reservations/reservations.module';
 import { Piece, PieceSchema } from '../common/schemas/piece.schema';
 import {
@@ -34,6 +40,7 @@ import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
       { name: Piece.name, schema: PieceSchema },
       { name: PieceType.name, schema: PieceTypeSchema },
       { name: PieceExtra.name, schema: PieceExtraSchema },
+      { name: PieceDraft.name, schema: PieceDraftSchema },
       { name: Reservation.name, schema: ReservationSchema },
       { name: Student.name, schema: StudentSchema },
       { name: Group.name, schema: GroupSchema },
@@ -48,6 +55,8 @@ import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
     PiecesService,
     PieceTypesService,
     PieceExtrasService,
+    PieceDraftsService,
+    PieceColorsService,
     AllowedViewsGuard,
   ],
   exports: [PiecesService],

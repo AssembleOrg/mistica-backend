@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UnauthorizedException,
@@ -27,10 +28,15 @@ import {
   SavePieceTypeDto,
   BulkPieceStatusDto,
   PieceTallyQueryDto,
+  PieceDraftsQueryDto,
+  SetPieceColorsDto,
+  SavePieceDraftEntryDto,
   SetPieceStatusesDto,
 } from '../common/dto/piece.dto';
 import { PieceTypesService } from './piece-types.service';
 import { PieceExtrasService } from './piece-extras.service';
+import { PieceDraftsService } from './piece-drafts.service';
+import { PieceColorsService } from './piece-colors.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -54,6 +60,8 @@ export class PiecesController {
     private readonly piecesService: PiecesService,
     private readonly pieceTypes: PieceTypesService,
     private readonly pieceExtras: PieceExtrasService,
+    private readonly drafts: PieceDraftsService,
+    private readonly pieceColors: PieceColorsService,
   ) {}
 
   // Uso INTERNO del bot: piezas del cliente por su propio teléfono. Mismo
@@ -82,6 +90,21 @@ export class PiecesController {
   })
   statuses() {
     return this.piecesService.statusConfig();
+  }
+
+  @Get('colors')
+  @AllowedViews('reservas:piezas', 'alumnos', 'produccion')
+  @ApiOperation({ summary: 'Paleta de colores de las fichas' })
+  colors() {
+    return this.pieceColors.get();
+  }
+
+  @Put('colors')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @ApiOperation({ summary: 'Editar la paleta de colores de las fichas' })
+  setColors(@Body() dto: SetPieceColorsDto) {
+    return this.pieceColors.set(dto.colors);
   }
 
   @Patch('statuses')
@@ -192,11 +215,45 @@ export class PiecesController {
 
   @Post('reservation-batch')
   @ApiOperation({ summary: 'Registrar las fichas de piezas de una reserva' })
-  createReservationBatch(
+  async createReservationBatch(
     @Body() dto: CreateReservationPiecesDto,
     @Req() req: AuthRequest,
   ) {
-    return this.piecesService.createReservationBatch(dto, req.user);
+    const pieces = await this.piecesService.createReservationBatch(dto, req.user);
+    // Las fichas registradas salen del borrador.
+    await this.drafts.remove(dto.reservationId, dto.draftKeys ?? []);
+    return pieces;
+  }
+
+  @Get('drafts')
+  @ApiOperation({ summary: 'Fichas sin terminar por reserva' })
+  draftsPending(@Query() query: PieceDraftsQueryDto) {
+    return this.drafts.pending(query.reservationIds.split(','));
+  }
+
+  @Get('drafts/:reservationId')
+  @ApiOperation({ summary: 'Borrador de las fichas de una reserva' })
+  draft(@Param('reservationId') reservationId: string) {
+    return this.drafts.get(reservationId);
+  }
+
+  @Put('drafts/:reservationId/:key')
+  @ApiOperation({ summary: 'Guardar una ficha del borrador (autoguardado)' })
+  saveDraftEntry(
+    @Param('reservationId') reservationId: string,
+    @Param('key') key: string,
+    @Body() dto: SavePieceDraftEntryDto,
+  ) {
+    return this.drafts.save(reservationId, key, dto);
+  }
+
+  @Delete('drafts/:reservationId/:key')
+  @ApiOperation({ summary: 'Quitar una ficha del borrador' })
+  removeDraftEntry(
+    @Param('reservationId') reservationId: string,
+    @Param('key') key: string,
+  ) {
+    return this.drafts.remove(reservationId, [key]);
   }
 
   @Post('group-batch')
