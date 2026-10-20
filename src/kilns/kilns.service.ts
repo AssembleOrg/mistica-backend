@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { canManage } from '../common/enums/user-role.enum';
 import { User, UserDocument } from '../common/schemas/user.schema';
 import { businessDayBound } from '../common/utils/date-filter.util';
 import {
@@ -33,7 +39,18 @@ export class KilnsService {
     };
   }
 
-  async create(dto: CreateKilnLogDto, actor?: { id?: string }) {
+  async create(dto: CreateKilnLogDto, actor?: { id?: string; role?: string }) {
+    // Un horno que se prendió y nadie marcó: admin/encargado lo cargan después.
+    let at = new Date();
+    if (dto.at) {
+      if (!canManage(actor?.role)) {
+        throw new ForbiddenException('Sólo admin o encargado cargan hornos pasados.');
+      }
+      at = new Date(dto.at);
+      if (at.getTime() > Date.now() + 60_000) {
+        throw new BadRequestException('La fecha del horno no puede ser futura.');
+      }
+    }
     let byName = dto.registeredBy?.trim();
     if (!byName && actor?.id && Types.ObjectId.isValid(actor.id)) {
       byName = (await this.userModel.findById(actor.id).select('name').lean())?.name;
@@ -41,7 +58,7 @@ export class KilnsService {
     const doc = await this.model.create({
       kiln: dto.kiln as KilnKey,
       action: dto.action as KilnAction,
-      at: new Date(),
+      at,
       userId:
         actor?.id && Types.ObjectId.isValid(actor.id)
           ? new Types.ObjectId(actor.id)

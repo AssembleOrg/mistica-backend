@@ -527,6 +527,9 @@ export class AvailabilityService implements OnModuleInit {
     }
     if (plan.own) {
       if (plan.starts.includes(startTime)) return;
+      // Edición especial con horarios fijos: desde el panel se puede cargar
+      // igual a otra hora (queda como reserva común, con mesas).
+      if (plan.special?.schedule?.length && opts.acrossShifts) return;
       if (plan.special?.schedule?.length) {
         const nombres = plan.specials.map((sp) => sp.name).join(' y ');
         throw new BadRequestException(

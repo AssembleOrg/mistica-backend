@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsDateString, IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { KILNS, KILN_ACTIONS } from './kiln-log.schema';
 
 export class CreateKilnLogDto {
@@ -22,6 +22,14 @@ export class CreateKilnLogDto {
   @IsString()
   @MaxLength(200)
   note?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Cuándo pasó (ISO). Sin esto es ahora; sólo admin/encargado cargan hornos pasados.',
+  })
+  @IsOptional()
+  @IsDateString()
+  at?: string;
 }
 
 export class ListKilnLogsDto {

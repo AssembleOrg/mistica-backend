@@ -338,6 +338,13 @@ describe('AvailabilityService · ediciones especiales', () => {
     );
   });
 
+  it('desde el panel se puede cargar a otra hora el día de la edición', async () => {
+    const service = await build([], 120, edicion({ schedule: [{ start: '16:00' }] }));
+    await expect(
+      service.slotOrThrow(EXP_ID, DAY, '15:00', { acrossShifts: true }),
+    ).resolves.toMatchObject({ startKey: '15:00' });
+  });
+
   it('antes de abrir reservas esos días no se ofrecen, salvo desde el panel', async () => {
     const service = await build([], 120, edicion({ announceFrom: dia(2) }));
 

@@ -94,6 +94,55 @@ export class PiecesService implements OnModuleInit {
       { $set: { status: PieceStatus.PENDIENTE } },
     );
     await this.backfillWorkDates();
+    await this.backfillMaterials();
+  }
+
+  /**
+   * Fichas de tela, yeso… cargadas antes de existir `material`: quedaban "en
+   * preparación" para siempre y el pedido de la reserva nunca se completaba.
+   * Se marcan una vez como retiradas el día del taller.
+   */
+  private async backfillMaterials() {
+    const pending = await this.pieceModel
+      .find({
+        deletedAt: { $exists: false },
+        reservationId: { $exists: true },
+        material: { $exists: false },
+        status: { $ne: PieceStatus.RETIRADA },
+      })
+      .select('pieceType extraName workDate createdAt')
+      .lean();
+    if (!pending.length) return;
+    const extraMaterial = new Map(
+      (await this.pieceExtras.list())
+        .filter((x) => x.material)
+        .map((x) => [normName(x.name), x.material as string]),
+    );
+    const typeMaterial = await this.pieceTypes.materialsByName(
+      pending.map((p) => p.pieceType ?? ''),
+    );
+    const ops = pending.flatMap((p) => {
+      const material =
+        (p.extraName ? extraMaterial.get(normName(p.extraName)) : undefined) ??
+        typeMaterial.get(normName(p.pieceType ?? ''));
+      if (!material) return [];
+      const day = p.workDate
+        ? new Date(`${p.workDate}T15:00:00Z`)
+        : (p as { createdAt?: Date }).createdAt ?? new Date();
+      return [
+        {
+          updateOne: {
+            filter: { _id: p._id },
+            update: {
+              $set: { material, status: PieceStatus.RETIRADA, pickedUpAt: day },
+            },
+          },
+        },
+      ];
+    });
+    if (!ops.length) return;
+    await this.pieceModel.bulkWrite(ops, { timestamps: false });
+    this.logger.log(`${ops.length} piezas de tela/yeso… marcadas como retiradas`);
   }
 
   /** Piezas cargadas antes de existir `workDate`: se les calcula una vez. */
@@ -291,8 +340,13 @@ export class PiecesService implements OnModuleInit {
         : entry.pieceType.trim();
     };
 
+    const materialOf = (entry: { extraId?: string; pieceType: string }) =>
+      (entry.extraId ? catalog.get(entry.extraId)?.material : undefined) ??
+      materials.get(normName(entry.pieceType));
+
     const professor = await this.professors.ofUser(actor?.id);
     const registeredByName = await this.registrant(dto.registeredBy, actor);
+    const now = new Date();
     const documents = dto.entries.map((entry) => ({
       reservationId: reservation._id,
       reservationCode: reservation.code,
@@ -303,7 +357,10 @@ export class PiecesService implements OnModuleInit {
       professorId: professor?._id,
       professorName: professor?.name,
       quantity: 1,
-      status: PieceStatus.PENDIENTE,
+      // Tela, yeso…: se la llevan en el día, no hay nada que entregar después.
+      ...(materialOf(entry)
+        ? { status: PieceStatus.RETIRADA, material: materialOf(entry), pickedUpAt: now }
+        : { status: PieceStatus.PENDIENTE }),
       personName: entry.personName.trim(),
       signature: (entry.signature ?? '').trim(),
       pieceType: pieceName(entry),
@@ -428,7 +485,8 @@ export class PiecesService implements OnModuleInit {
     const [items, total] = await Promise.all([
       this.pieceModel
         .find(filter)
-        .sort({ workDate: -1, createdAt: 1, _id: 1 })
+        // Las de una misma reserva juntas: el panel las agrupa por titular.
+        .sort({ workDate: -1, reservationId: 1, createdAt: 1, _id: 1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
@@ -657,6 +715,8 @@ export class PiecesService implements OnModuleInit {
           },
           { _id: { $in: loose } },
         ],
+        // Tela, yeso…: se las llevaron en el día, no van en el cajón.
+        material: { $exists: false },
       })
       .sort({ workDate: 1, createdAt: 1, _id: 1 })
       .lean();

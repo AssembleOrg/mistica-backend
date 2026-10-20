@@ -93,6 +93,11 @@ export class Piece {
   @Prop({ min: 0 })
   extraAmount?: number;
 
+  // Tela, bastidor, yeso…: no pasa por el horno, se la llevan en el día.
+  // Queda registrada (seguimiento) pero ya retirada: no se entrega después.
+  @Prop({ trim: true })
+  material?: string;
+
   // Pieza sumada además de la incluida en la entrada (se cobra entera, no
   // como upgrade).
   @Prop({ type: Boolean })
