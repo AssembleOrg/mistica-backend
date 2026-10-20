@@ -30,6 +30,7 @@ import { ClosedDatesModule } from './closed-dates/closed-dates.module';
 import { PiecesModule } from './pieces/pieces.module';
 import { ProfessorsModule } from './professors/professors.module';
 import { KilnsModule } from './kilns/kilns.module';
+import { KitchenProductionModule } from './kitchen-production/kitchen-production.module';
 import { GroupsModule } from './groups/groups.module';
 import { StudentsModule } from './students/students.module';
 import { MakeupsModule } from './makeups/makeups.module';
@@ -69,6 +70,7 @@ import { InAppNotificationsModule } from './in-app-notifications/in-app-notifica
     PiecesModule,
     ProfessorsModule,
     KilnsModule,
+    KitchenProductionModule,
     GroupsModule,
     StudentsModule,
     MakeupsModule,
