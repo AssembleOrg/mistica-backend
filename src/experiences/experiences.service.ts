@@ -326,7 +326,15 @@ export class ExperiencesService {
     from?: string;
     to?: string;
     includePast?: boolean;
+    /** Al reprogramar: las mesas de esta reserva no restan lugar. */
+    ignoreReservationId?: string;
   }) {
+    if (
+      params.ignoreReservationId &&
+      !Types.ObjectId.isValid(params.ignoreReservationId)
+    ) {
+      throw new BadRequestException('ignoreReservationId inválido');
+    }
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (params.experienceId) {
       if (!Types.ObjectId.isValid(params.experienceId))
@@ -405,7 +413,11 @@ export class ExperiencesService {
         }
         view.seatsAvailable = Math.min(
           view.seatsAvailable,
-          await this.tables.remainingPartySize(s.startAt, s.durationMinutes),
+          await this.tables.remainingPartySize(
+            s.startAt,
+            s.durationMinutes,
+            params.ignoreReservationId,
+          ),
         );
         return view;
       }),

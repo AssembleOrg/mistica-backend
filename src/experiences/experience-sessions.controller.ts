@@ -73,12 +73,14 @@ export class ExperienceSessionsController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('includePast') includePast?: string,
+    @Query('ignoreReservationId') ignoreReservationId?: string,
   ) {
     return this.experiencesService.listSessions({
       experienceId,
       status,
       from,
       to,
+      ignoreReservationId: ignoreReservationId || undefined,
       includePast: includePast === 'true',
     });
   }

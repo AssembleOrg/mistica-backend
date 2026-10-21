@@ -60,6 +60,11 @@ export interface AssignRequest {
   sharedAccepted?: boolean;
   /** Si no entra, tomar todas las mesas libres (alta del admin sin tope). */
   takeAllIfShort?: boolean;
+  /**
+   * Reserva cuyas mesas NO cuentan como ocupadas (reprogramación: la reserva
+   * se mueve al mismo día a otra hora y sus propias mesas la bloqueaban).
+   */
+  ignoreReservationId?: Types.ObjectId | string;
 }
 
 export interface Assignment {
@@ -364,15 +369,24 @@ export class TablesService {
    * planificador. Una mesa grande con UNA sola reserva chica pisando el
    * intervalo no cuenta como libre pero sí como compartible.
    */
-  async freeTablesFor(interval: OccupancyInterval): Promise<FreeTables> {
+  async freeTablesFor(
+    interval: OccupancyInterval,
+    /** Reserva cuyas mesas se consideran libres (se está reprogramando). */
+    ignoreReservationId?: Types.ObjectId | string,
+  ): Promise<FreeTables> {
     const [tables, day] = await Promise.all([
       this.listTables(),
       this.dayModel.findOne({ date: interval.dateKey }).lean(),
     ]);
+    const ignore = ignoreReservationId ? String(ignoreReservationId) : null;
     const slots = [
       ...((day?.slots ?? []) as RawSlot[]),
       ...(await this.virtualSlots(interval.dateKey)),
-    ].filter((s) => this.overlaps(s, interval));
+    ].filter(
+      (s) =>
+        this.overlaps(s, interval) &&
+        !(ignore && s.reservationId && String(s.reservationId) === ignore),
+    );
     return this.buildFreeTables(tables, slots);
   }
 
@@ -435,9 +449,13 @@ export class TablesService {
   async remainingPartySize(
     startAt: Date,
     durationMinutes: number,
+    ignoreReservationId?: Types.ObjectId | string,
   ): Promise<number> {
     return maxPartySize(
-      await this.freeTablesFor(this.intervalFor(startAt, durationMinutes)),
+      await this.freeTablesFor(
+        this.intervalFor(startAt, durationMinutes),
+        ignoreReservationId,
+      ),
     );
   }
 
@@ -660,7 +678,7 @@ export class TablesService {
     const reservationId = new Types.ObjectId(String(req.reservationId));
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      const free = await this.freeTablesFor(interval);
+      const free = await this.freeTablesFor(interval, req.ignoreReservationId);
       let plan = planTables(req.qty, free, {
         smallGroupCanTakeLarge: envConfig.smallGroupCanTakeLarge,
         sharedAccepted: req.sharedAccepted,
@@ -708,6 +726,7 @@ export class TablesService {
         codes,
         slots,
         shared: plan.shared ? plan.sharedWithReservationIds : undefined,
+        ignoreReservationId: req.ignoreReservationId,
       });
 
       if (won) {
@@ -746,14 +765,24 @@ export class TablesService {
     slots: Record<string, unknown>[];
     /** Reservas con las que se comparte la mesa grande, si aplica. */
     shared?: string[];
+    /** Reserva cuyos slots viejos no cuentan como choque (reprogramación). */
+    ignoreReservationId?: Types.ObjectId | string;
   }): Promise<boolean> {
-    const { interval, codes, slots, shared } = params;
+    const { interval, codes, slots, shared, ignoreReservationId } = params;
 
-    const clash = {
+    const clash: Record<string, unknown> = {
       table: { $in: codes },
       startAt: { $lt: interval.busyUntil },
       busyUntil: { $gt: interval.startAt },
     };
+    // Al reprogramar al mismo día, los slots de la propia reserva se pisan con
+    // el horario nuevo: no son un choque (se sueltan después de asignar).
+    const ignored = ignoreReservationId
+      ? [new Types.ObjectId(String(ignoreReservationId))]
+      : [];
+    if (ignored.length && !shared?.length) {
+      clash.reservationId = { $nin: ignored };
+    }
 
     // Caso normal: ninguna de las mesas puede tener un slot que pise el
     // intervalo. Caso compartido: en la mesa grande sólo pueden estar las
@@ -767,7 +796,7 @@ export class TablesService {
               $elemMatch: {
                 ...clash,
                 reservationId: {
-                  $nin: shared.map((id) => new Types.ObjectId(id)),
+                  $nin: [...shared.map((id) => new Types.ObjectId(id)), ...ignored],
                 },
               },
             },

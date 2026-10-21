@@ -1061,3 +1061,66 @@ describe('TablesService · bloqueos manuales', () => {
     ).rejects.toThrow(/ya está ocupada/);
   });
 });
+
+describe('TablesService · reprogramar al mismo día (ignoreReservationId)', () => {
+  const own = new Types.ObjectId();
+  const other = new Types.ObjectId();
+  /** Salón lleno 15:00–17:00: la propia reserva en M1+M2, el resto de otros. */
+  const fullDay = () =>
+    dayModelMock([
+      slotAt('M1', '15:00', '17:00', { reservationId: own, qty: 4 }),
+      slotAt('M2', '15:00', '17:00', { reservationId: own, qty: 4 }),
+      ...['M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10'].map((t) =>
+        slotAt(t, '15:00', '17:00', { reservationId: other }),
+      ),
+      slotAt('G1', '15:00', '17:00', { reservationId: other, qty: 10 }),
+      slotAt('G2', '15:00', '17:00', { reservationId: other, qty: 10 }),
+    ]);
+
+  it('sin ignorar, las mesas propias cuentan como ocupadas y no hay lugar', async () => {
+    const service = await build(fullDay());
+    const free = await service.freeTablesFor(
+      service.intervalFor(at('2026-08-01', '16:00'), 120),
+    );
+    expect(free.small).toEqual([]);
+    expect(free.large).toEqual([]);
+    await expect(
+      service.assign({
+        reservationId: own,
+        qty: 4,
+        startAt: at('2026-08-01', '16:00'),
+        durationMinutes: 120,
+      }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('ignorando la propia reserva, sus mesas quedan libres para el horario nuevo', async () => {
+    const day = fullDay();
+    const service = await build(day);
+    const free = await service.freeTablesFor(
+      service.intervalFor(at('2026-08-01', '16:00'), 120),
+      own,
+    );
+    expect(free.small).toEqual(['M1', 'M2']);
+
+    const assignment = await service.assign({
+      reservationId: own,
+      qty: 4,
+      startAt: at('2026-08-01', '16:00'),
+      durationMinutes: 120,
+      ignoreReservationId: own,
+    });
+    expect(assignment.tables.map((t) => t.code)).toEqual(['M1', 'M2']);
+
+    // La guarda atómica tampoco toma los slots viejos de la reserva como choque.
+    const [filter] = callArgs(day);
+    const clash = filter.slots?.$not.$elemMatch as { reservationId?: { $nin: Types.ObjectId[] } };
+    expect(clash.reservationId?.$nin.map(String)).toEqual([String(own)]);
+  });
+
+  it('remainingPartySize también descuenta la propia reserva', async () => {
+    const service = await build(fullDay());
+    expect(await service.remainingPartySize(at('2026-08-01', '16:00'), 120)).toBe(0);
+    expect(await service.remainingPartySize(at('2026-08-01', '16:00'), 120, own)).toBe(4);
+  });
+});

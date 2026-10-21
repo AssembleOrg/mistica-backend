@@ -1403,6 +1403,11 @@ export class ReservationsService implements OnApplicationBootstrap {
     sharedAccepted?: boolean,
     /** Si el grupo no entra, toma todas las mesas libres (alta del admin). */
     takeAllIfShort?: boolean,
+    /**
+     * Reprogramación: las mesas que la reserva ya tiene no cuentan como
+     * ocupadas (si no, moverla al mismo día más tarde decía "sin lugar").
+     */
+    ignoreOwnTables?: boolean,
   ): Promise<void> {
     // Horario PROPIO: la reserva cuenta contra el cupo de la experiencia y no
     // toma mesas individuales. Si la experiencia es de MESA COMPARTIDA, todas
@@ -1428,6 +1433,9 @@ export class ReservationsService implements OnApplicationBootstrap {
       durationMinutes: session.durationMinutes + (reservation.extraMinutes ?? 0),
       sharedAccepted,
       takeAllIfShort,
+      ...(ignoreOwnTables
+        ? { ignoreReservationId: reservation._id as Types.ObjectId }
+        : {}),
     });
     reservation.tableCodes = assignment.tables.map((t) => t.code);
     reservation.sharedTable = assignment.shared;
@@ -2064,7 +2072,7 @@ export class ReservationsService implements OnApplicationBootstrap {
 
     if (!sameSlot) {
       try {
-        await this.attachTables(r, target, true);
+        await this.attachTables(r, target, true, undefined, true);
       } catch (err) {
         await this.releaseSeats(target._id as Types.ObjectId, r.quantity);
         throw err;
