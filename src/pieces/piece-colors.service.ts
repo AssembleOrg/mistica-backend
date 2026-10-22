@@ -27,6 +27,7 @@ export const DEFAULT_PIECE_COLORS: PieceColor[][] = [
     { name: 'Verde Lima', hex: '#b5d33d' },
     { name: 'Violeta', hex: '#8a5cb8' },
     { name: 'Marrón Oscuro', hex: '#5a3825' },
+    { name: 'Chocorojizo', hex: '#7a3b2e' },
   ],
   [
     { name: 'Agua', hex: '#5ec4c0' },
