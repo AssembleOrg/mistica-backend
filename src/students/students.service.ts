@@ -144,11 +144,50 @@ export class StudentsService implements OnApplicationBootstrap {
     }
     if (birthDate !== undefined)
       student.birthDate = birthDate ? new Date(birthDate) : undefined;
+    const previousJoin = student.joinedAt;
     if (joinedAt !== undefined && joinedAt)
       student.joinedAt = new Date(joinedAt);
     student.updatedAt = new Date();
     await student.save();
+    if (joinedAt && (!previousJoin || student.joinedAt > previousJoin))
+      await this.skipFeesBeforeJoin(student);
     return student;
+  }
+
+  /**
+   * Se reincorpora más adelante (o se corrigió la fecha de alta): las cuotas
+   * impagas de meses que con la nueva fecha no se le habrían cobrado (ver
+   * ensureMonthlyFees) quedan salteadas, no vencidas.
+   */
+  private async skipFeesBeforeJoin(student: StudentDocument) {
+    const joinedAt = student.joinedAt;
+    const pending = await this.paymentModel
+      .find({
+        studentId: student._id,
+        status: 'PENDING',
+        period: { $exists: true },
+        deletedAt: { $exists: false },
+      })
+      .exec();
+    const notOwed = pending.filter(
+      (p) =>
+        p.period! < periodOf(joinedAt) ||
+        (p.period === periodOf(joinedAt) &&
+          joinedAt > dueDateOf(p.period, student.paymentDay)),
+    );
+    if (notOwed.length === 0) return;
+    const day = DateTime.fromJSDate(joinedAt, {
+      zone: envConfig.timezone,
+    }).toFormat('dd/MM');
+    for (const p of notOwed) {
+      p.status = 'SKIPPED';
+      p.notes = [p.notes, `Salteada: se incorpora el ${day}`]
+        .filter(Boolean)
+        .join(' · ');
+      p.updatedAt = new Date();
+      await p.save();
+    }
+    await this.recordRegularity(student._id as Types.ObjectId, 'PAYMENT_UPDATED');
   }
 
   /**
@@ -485,7 +524,11 @@ export class StudentsService implements OnApplicationBootstrap {
     if (!payment || payment.deletedAt)
       throw new NotFoundException('Pago no encontrado');
     if (payment.status !== 'PENDING')
-      throw new BadRequestException('Esta cuota ya está paga.');
+      throw new BadRequestException(
+        payment.status === 'SKIPPED'
+          ? 'Esta cuota está salteada.'
+          : 'Esta cuota ya está paga.',
+      );
     const remaining = await this.applyToPending(payment, dto.amount, {
       method: dto.method,
       notes: dto.notes,

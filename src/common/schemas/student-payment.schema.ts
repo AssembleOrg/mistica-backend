@@ -20,8 +20,14 @@ export class StudentPayment {
   @Prop({ required: true, min: 0 })
   amount: number;
 
-  @Prop({ required: true, enum: ['PAID', 'PENDING'], default: 'PENDING' })
-  status: 'PAID' | 'PENDING';
+  // SKIPPED = mes salteado (no viene / se reincorpora después / lo cubre otro
+  // mes): no se cobra ni cuenta como vencida, y el mes no se vuelve a generar.
+  @Prop({
+    required: true,
+    enum: ['PAID', 'PENDING', 'SKIPPED'],
+    default: 'PENDING',
+  })
+  status: 'PAID' | 'PENDING' | 'SKIPPED';
 
   // Cuándo se abonó (sólo PAID).
   @Prop({ type: Date })

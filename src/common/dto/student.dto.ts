@@ -115,13 +115,14 @@ export class CreateStudentPaymentDto {
   amount: number;
 
   @ApiPropertyOptional({
-    enum: ['PAID', 'PENDING'],
-    description: 'PAID = abonado; PENDING = cuota a cobrar',
+    enum: ['PAID', 'PENDING', 'SKIPPED'],
+    description:
+      'PAID = abonado; PENDING = cuota a cobrar; SKIPPED = mes salteado (no se cobra)',
     default: 'PENDING',
   })
   @IsOptional()
-  @IsIn(['PAID', 'PENDING'])
-  status?: 'PAID' | 'PENDING';
+  @IsIn(['PAID', 'PENDING', 'SKIPPED'])
+  status?: 'PAID' | 'PENDING' | 'SKIPPED';
 
   @ApiPropertyOptional({ description: 'Fecha de pago (ISO, sólo PAID)' })
   @IsOptional()

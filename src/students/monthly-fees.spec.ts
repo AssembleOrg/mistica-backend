@@ -37,6 +37,7 @@ function fakeModel(initial: Doc[] = []) {
   const query = (rows: () => Doc[]) => {
     const q: any = {
       select: () => q,
+      limit: () => q,
       sort: (s: Record<string, 1 | -1>) => {
         const [[k, dir]] = Object.entries(s);
         const prev = rows;
@@ -45,7 +46,7 @@ function fakeModel(initial: Doc[] = []) {
         return q;
       },
       lean: async () => rows(),
-      exec: async () => rows(),
+      exec: async () => rows().map(withSave),
     };
     return q;
   };
@@ -413,5 +414,27 @@ describe('Cuotas mensuales de alumnos', () => {
     });
     expect(paid).toBe(0);
     expect(paymentModel.docs).toHaveLength(0);
+  });
+
+  it('se reincorpora más adelante: la cuota impaga de ese mes queda salteada y no se regenera', async () => {
+    const kami = student({ joinedAt: new Date('2026-08-01T12:00:00-03:00') });
+    const { service, paymentModel } = build({ students: [kami] });
+    await service.ensureMonthlyFees(OCT_1);
+    expect(paymentModel.docs[0]).toMatchObject({ period: '2026-10', status: 'PENDING' });
+
+    await service.update(String(kami._id), { joinedAt: '2026-10-28T12:00:00-03:00' });
+    expect(paymentModel.docs[0]).toMatchObject({ status: 'SKIPPED', notes: 'Salteada: se incorpora el 28/10' });
+    // Sin cuotas PENDING no figura como vencida (la regularidad se deriva de ellas).
+    expect(paymentModel.docs.filter((p) => p.status === 'PENDING')).toHaveLength(0);
+
+    expect(await service.ensureMonthlyFees(new Date('2026-10-20T12:00:00-03:00'))).toBe(0);
+  });
+
+  it('reincorporarse dentro del plazo de pago no saltea la cuota del mes', async () => {
+    const a = student({ joinedAt: new Date('2026-08-01T12:00:00-03:00') });
+    const { service, paymentModel } = build({ students: [a] });
+    await service.ensureMonthlyFees(OCT_1);
+    await service.update(String(a._id), { joinedAt: '2026-10-05T12:00:00-03:00' });
+    expect(paymentModel.docs[0].status).toBe('PENDING');
   });
 });
