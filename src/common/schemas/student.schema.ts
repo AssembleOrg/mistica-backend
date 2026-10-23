@@ -61,6 +61,11 @@ export class Student {
   @Prop({ trim: true })
   practicalNotes?: string;
 
+  // Cómo firma sus piezas (la primera es la habitual; las demás, variantes).
+  // Sirve para saber de quién es una pieza sin registrar del taller.
+  @Prop({ type: [String], default: [] })
+  signatures: string[];
+
   // Clase de prueba gratuita que ya usó (vino): grupo y día. Sin valor = la
   // tiene disponible. Se fija/limpia al guardar la asistencia.
   @Prop({ type: SchemaTypes.ObjectId, ref: 'Group' })

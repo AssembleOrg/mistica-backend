@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -150,6 +151,16 @@ export class CreateStudentPaymentDto {
   @IsOptional()
   @Matches(/^\d{4}-(0[1-9]|1[0-2])$/, { message: 'El mes va en formato YYYY-MM.' })
   period?: string;
+}
+
+/** Firmas con que el alumno marca sus piezas (la primera es la habitual). */
+export class SetStudentSignaturesDto {
+  @ApiProperty({ type: [String], example: ['EMA', 'Emita'] })
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  @MaxLength(60, { each: true })
+  signatures: string[];
 }
 
 export class UpdateStudentPaymentDto extends PartialType(

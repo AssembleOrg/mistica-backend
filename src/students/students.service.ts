@@ -69,6 +69,30 @@ import {
  * · ADMINISTRATIVO: datos + pagos + regularidad + vencimientos (perfil admin).
  * · PRÁCTICO: grupos, asistencia y piezas (perfil profesor) — sin plata.
  */
+/** Firma para comparar: sin mayúsculas, tildes, espacios ni signos. */
+export function signatureKey(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/** Regex que encuentra la firma en texto con tildes, espacios o signos en el medio. */
+function looseRegex(key: string): string {
+  const accents: Record<string, string> = {
+    a: '[aáàä]',
+    e: '[eéèë]',
+    i: '[iíìï]',
+    o: '[oóòö]',
+    u: '[uúùü]',
+    n: '[nñ]',
+  };
+  return [...key]
+    .map((c) => accents[c] ?? c)
+    .join('[^a-z0-9ñáéíóú]*');
+}
+
 @Injectable()
 export class StudentsService implements OnApplicationBootstrap {
   private readonly logger = new Logger(StudentsService.name);
@@ -113,9 +137,81 @@ export class StudentsService implements OnApplicationBootstrap {
     // alumnos para saber quién va a cada clase, sin datos administrativos.
     return this.studentModel
       .find(filter)
-      .select('name isActive createdAt updatedAt')
+      .select('name isActive signatures createdAt updatedAt')
       .sort({ name: 1 })
       .lean();
+  }
+
+  // ── Firmas ───────────────────────────────────────────────────────────────
+
+  async setSignatures(id: string, signatures: string[]) {
+    const student = await this.findOrThrow(id);
+    const seen = new Set<string>();
+    student.signatures = signatures
+      .map((s) => s.trim().replace(/\s+/g, ' '))
+      .filter((s) => {
+        const k = signatureKey(s);
+        if (!k || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    student.updatedAt = new Date();
+    await student.save();
+    return { id: String(student._id), signatures: student.signatures };
+  }
+
+  /**
+   * Una pieza sin registrar del taller: con lo que dice la firma, los alumnos
+   * que firman así (o parecido) y las piezas registradas con esa firma. Sin
+   * mayúsculas, tildes, espacios ni puntos: «Emi.» encuentra a «EMI».
+   */
+  async searchSignature(q: string) {
+    const k = signatureKey(q);
+    if (k.length < 2) return { students: [], pieces: [] };
+    const [students, pieces] = await Promise.all([
+      this.studentModel
+        .find({
+          deletedAt: { $exists: false },
+          'signatures.0': { $exists: true },
+        })
+        .select('name isActive signatures')
+        .lean(),
+      this.pieceModel
+        .find({
+          deletedAt: { $exists: false },
+          signature: { $regex: looseRegex(k), $options: 'i' },
+        })
+        .select(
+          'signature personName customerName studentName pieceType status workDate reservationCode createdAt',
+        )
+        .sort({ createdAt: -1 })
+        .limit(30)
+        .lean(),
+    ]);
+    const matches = students
+      .map((s) => {
+        const keys = (s.signatures ?? []).map(signatureKey);
+        const exact = keys.includes(k);
+        return exact || keys.some((x) => x.includes(k) || k.includes(x))
+          ? { s, exact }
+          : null;
+      })
+      .filter((m): m is NonNullable<typeof m> => !!m)
+      .sort(
+        (a, b) =>
+          Number(b.exact) - Number(a.exact) ||
+          Number(b.s.isActive) - Number(a.s.isActive) ||
+          a.s.name.localeCompare(b.s.name, 'es'),
+      )
+      .slice(0, 20)
+      .map(({ s, exact }) => ({
+        id: String(s._id),
+        name: s.name,
+        isActive: s.isActive,
+        signatures: s.signatures,
+        exact,
+      }));
+    return { students: matches, pieces };
   }
 
   async create(dto: CreateStudentDto) {
@@ -397,6 +493,7 @@ export class StudentsService implements OnApplicationBootstrap {
         id: String(sid),
         name: student.name,
         practicalNotes: student.practicalNotes,
+        signatures: student.signatures ?? [],
         isActive: student.isActive,
       },
       groups,

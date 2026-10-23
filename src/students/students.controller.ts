@@ -17,6 +17,7 @@ import {
   CreateStudentDto,
   CreateStudentPaymentDto,
   SaveAttendanceDto,
+  SetStudentSignaturesDto,
   ScheduleTrialDto,
   EnrollTrialDto,
   UpdateStudentDto,
@@ -177,6 +178,26 @@ export class StudentsController {
   @ApiOperation({ summary: 'Borrar una pieza del mes (sin adicional cobrado)' })
   removeMonthlyPiece(@Param('pieceId') pieceId: string) {
     return this.service.removeMonthlyPieceById(pieceId);
+  }
+
+  @Get('signatures/search')
+  @ApiOperation({
+    summary:
+      '¿De quién es esta firma? Alumnos con esa firma y piezas registradas que la llevan',
+  })
+  searchSignature(@Query('q') q: string | undefined) {
+    return this.service.searchSignature(q ?? '');
+  }
+
+  @Put(':id/signatures')
+  @ApiOperation({
+    summary: 'Firmas del alumno (abierto a profesores: son datos del taller)',
+  })
+  setSignatures(
+    @Param('id') id: string,
+    @Body() dto: SetStudentSignaturesDto,
+  ) {
+    return this.service.setSignatures(id, dto.signatures);
   }
 
   @Get(':id/practical')
