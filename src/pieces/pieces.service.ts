@@ -836,6 +836,9 @@ export class PiecesService implements OnModuleInit {
       { $set: { deletedAt: new Date() } },
     );
     if (!res.matchedCount) throw new NotFoundException('Pieza no encontrada');
+    // Si la pieza tenía adicional, su monto se había sumado al saldo de la
+    // reserva: al borrarla hay que devolverlo (ficha cargada de más).
+    await this.reservations.removeExtrasByPiece(id);
     return { success: true };
   }
 

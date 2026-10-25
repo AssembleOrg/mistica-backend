@@ -1112,6 +1112,29 @@ export class ReservationsService implements OnApplicationBootstrap {
     return this.publicView(r);
   }
 
+  /**
+   * Deshace el/los adicional(es) de una pieza: la quita de `r.extras` y
+   * descuenta su monto del total y del saldo. Espejo de `addExtras`; se llama
+   * al borrar una ficha cargada de más. El saldo no baja de 0.
+   */
+  async removeExtrasByPiece(pieceId: string) {
+    const r = await this.reservationModel.findOne({
+      'extras.pieceId': new Types.ObjectId(pieceId),
+    });
+    if (!r) return;
+    const removed = (r.extras ?? []).filter(
+      (x) => x.pieceId && String(x.pieceId) === pieceId,
+    );
+    if (removed.length === 0) return;
+    const sum = removed.reduce((acc, x) => acc + x.amount, 0);
+    r.extras = (r.extras ?? []).filter(
+      (x) => !(x.pieceId && String(x.pieceId) === pieceId),
+    );
+    r.totalAmount = Number(Math.max(0, (r.totalAmount ?? 0) - sum).toFixed(2));
+    r.balanceDue = Number(Math.max(0, (r.balanceDue ?? 0) - sum).toFixed(2));
+    await r.save();
+  }
+
   /** Suma UN adicional a mano desde el panel (p. ej. un extra de la edición especial). */
   async adminAddExtra(id: string, dto: AddReservationExtraDto) {
     const qty = dto.qty ?? 1;
