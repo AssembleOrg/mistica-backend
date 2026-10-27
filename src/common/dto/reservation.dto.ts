@@ -312,6 +312,18 @@ export class ScheduleSaleDto {
   @Min(1)
   quantity: number;
 
+  @ApiPropertyOptional({
+    description: 'Hora extra: minutos que se suman a la duración. Su precio va como renglón de la venta.',
+    minimum: 0,
+    maximum: 360,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(360)
+  extraMinutes?: number;
+
   @ApiPropertyOptional({ description: 'Es un cumpleaños' })
   @IsOptional()
   @IsBoolean()

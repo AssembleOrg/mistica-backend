@@ -1181,6 +1181,7 @@ export class ReservationsService implements OnApplicationBootstrap {
         date: dto.date,
         startTime: dto.startTime,
         quantity: dto.quantity,
+        extraMinutes: dto.extraMinutes,
         customerName: sale.customerName || sale.name || 'Cliente',
         customerEmail: sale.customerEmail || undefined,
         customerPhone: sale.customerPhone || undefined,
@@ -2301,10 +2302,24 @@ export class ReservationsService implements OnApplicationBootstrap {
       if (sale && amount > 0.01) {
         settle = { saleId: String(sale._id), saleNumber: sale.saleNumber, amount };
       }
-      const rest = Number((balance - (settle?.amount ?? 0)).toFixed(2));
+      let rest = Number((balance - (settle?.amount ?? 0)).toFixed(2));
+      // Los adicionales de piezas nunca están en la venta de la seña (una
+      // reserva que viene de una venta arranca sin extras): van uno por renglón
+      // para que el ticket los desglose. Si no entran en el saldo, se agrupan.
+      const pieceExtras = (r.extras ?? []).filter((x) => x.pieceId && x.amount > 0);
+      const piecesTotal = pieceExtras.reduce((acc, x) => acc + x.amount, 0);
+      const split = pieceExtras.length > 0 && piecesTotal <= rest + 0.01;
+      if (split) {
+        for (const x of pieceExtras) {
+          items.push({ productName: x.label, quantity: 1, unitPrice: x.amount });
+        }
+        rest = Number((rest - piecesTotal).toFixed(2));
+      }
       if (rest > 0.01) {
         items.push({
-          productName: `Adicionales reserva ${r.code}`,
+          productName: split
+            ? `Otros adicionales reserva ${r.code}`
+            : `Adicionales reserva ${r.code}`,
           quantity: 1,
           unitPrice: rest,
         });
