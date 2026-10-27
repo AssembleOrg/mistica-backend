@@ -71,6 +71,7 @@ export class EgressesService {
       notes: egressObj.notes,
       paymentMethod: egressObj.paymentMethod,
       affectsCashbox: egressObj.affectsCashbox,
+      extraordinary: egressObj.extraordinary ?? false,
       categoryId: egressObj.categoryId?.toString(),
       categoryName: egressObj.categoryName,
       authorizedBy: egressObj.authorizedBy,

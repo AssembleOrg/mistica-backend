@@ -60,6 +60,15 @@ export class CreateEgressDto {
   affectsCashbox?: boolean;
 
   @ApiPropertyOptional({
+    description:
+      'Gasto extraordinario (inversión): se registra pero no suma al cierre de mes.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  extraordinary?: boolean;
+
+  @ApiPropertyOptional({
     description: 'Notas adicionales sobre el egreso',
     example: 'Autorizado por gerencia para mantenimiento de equipos'
   })

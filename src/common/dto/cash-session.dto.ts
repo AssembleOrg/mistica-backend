@@ -64,6 +64,15 @@ export class RetroactiveEgressDto {
   @IsBoolean()
   affectsCashbox?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Gasto extraordinario (inversión): se registra pero no suma al cierre de mes.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  extraordinary?: boolean;
+
   @ApiPropertyOptional({ description: 'Notas adicionales del egreso' })
   @IsOptional()
   @IsString()
@@ -160,6 +169,15 @@ export class CreateCashExpenseDto {
   @IsOptional()
   @IsBoolean()
   affectsCashbox?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Gasto extraordinario (inversión): se registra pero no suma al cierre de mes.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  extraordinary?: boolean;
 
   @ApiProperty({ description: 'Monto del egreso', minimum: 0 })
   @IsNumber({}, { message: 'El monto debe ser un número' })

@@ -40,6 +40,15 @@ export class Egress {
   @Prop({ type: Boolean, default: true })
   affectsCashbox: boolean;
 
+  /**
+   * Gasto EXTRAORDINARIO (inversión: un horno, una máquina…). Queda registrado
+   * pero NO suma a los egresos del mes ni al balance del cierre: el resumen de
+   * finanzas lo devuelve aparte. No toca la caja: si salió del cajón, el arqueo
+   * lo sigue descontando (eso lo decide `affectsCashbox`).
+   */
+  @Prop({ type: Boolean, default: false })
+  extraordinary: boolean;
+
   // Categoría del gasto (Sueldos, Servicios, Impuestos…) + snapshot del
   // nombre para listar sin join y conservar la historia ante renombres.
   @Prop({ type: SchemaTypes.ObjectId, ref: 'EgressCategory' })

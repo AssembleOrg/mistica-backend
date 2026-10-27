@@ -55,8 +55,15 @@ export interface FinanceSummary {
     revenue: number;
   }>;
 
-  // Egresos en el rango
+  // Egresos en el rango (sin los extraordinarios)
   expenses: {
+    count: number;
+    total: number;
+    byPaymentMethod: { CASH: number; CARD: number; TRANSFER: number; MERCADOPAGO: number };
+  };
+
+  // Gastos extraordinarios (inversiones): registrados, fuera del balance.
+  extraordinaryExpenses: {
     count: number;
     total: number;
     byPaymentMethod: { CASH: number; CARD: number; TRANSFER: number; MERCADOPAGO: number };
@@ -221,18 +228,34 @@ export class FinanceService {
     }
 
     // === Egresos en el rango ===
+    // Los anulados no cuentan (igual que el arqueo y el desglose por
+    // categoría). Los EXTRAORDINARIOS (inversiones) van aparte: quedan
+    // registrados pero no bajan el balance del mes.
     const egressMatch: Record<string, unknown> = {
       createdAt: { $gte: from, $lte: to },
       deletedAt: { $exists: false },
+      status: { $ne: 'CANCELLED' },
     };
     if (query.paymentMethod) egressMatch.paymentMethod = query.paymentMethod;
     const egresses = await this.egressModel.find(egressMatch).lean().exec();
     const expensesByPm = { CASH: 0, CARD: 0, TRANSFER: 0, MERCADOPAGO: 0 };
+    const extraordinaryByPm = { CASH: 0, CARD: 0, TRANSFER: 0, MERCADOPAGO: 0 };
     let expensesTotal = 0;
+    let expensesCount = 0;
+    let extraordinaryTotal = 0;
+    let extraordinaryCount = 0;
     for (const e of egresses) {
-      expensesTotal += e.amount || 0;
-      if (e.paymentMethod && expensesByPm[e.paymentMethod as keyof typeof expensesByPm] !== undefined) {
-        expensesByPm[e.paymentMethod as keyof typeof expensesByPm] += e.amount || 0;
+      const amount = e.amount || 0;
+      const byPm = e.extraordinary ? extraordinaryByPm : expensesByPm;
+      if (e.extraordinary) {
+        extraordinaryTotal += amount;
+        extraordinaryCount++;
+      } else {
+        expensesTotal += amount;
+        expensesCount++;
+      }
+      if (e.paymentMethod && byPm[e.paymentMethod as keyof typeof byPm] !== undefined) {
+        byPm[e.paymentMethod as keyof typeof byPm] += amount;
       }
     }
 
@@ -304,9 +327,14 @@ export class FinanceService {
       byClient,
       topProducts,
       expenses: {
-        count: egresses.length,
+        count: expensesCount,
         total: expensesTotal,
         byPaymentMethod: expensesByPm,
+      },
+      extraordinaryExpenses: {
+        count: extraordinaryCount,
+        total: extraordinaryTotal,
+        byPaymentMethod: extraordinaryByPm,
       },
       incomes: {
         count: incomes.length,

@@ -78,6 +78,8 @@ export class EgressesController {
   }
 
   @Post('categories')
+  // Desde el egreso de caja (Ventas) se puede sumar una categoría nueva.
+  @AllowedViews('finances', 'sales')
   @Auditory({ entity: 'EgressCategory', action: 'CREATE' })
   @ApiOperation({ summary: 'Crear categoría de egreso' })
   async createCategory(@Body() dto: CreateEgressCategoryDto) {

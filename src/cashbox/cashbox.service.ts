@@ -278,6 +278,7 @@ export class CashboxService {
       paymentMethod,
       type: EgressType.EXPENSE,
       affectsCashbox: dto.affectsCashbox ?? true,
+      extraordinary: dto.extraordinary ?? false,
       ...(await this.categorySnap(dto.categoryId)),
       notes: dto.notes,
       currency: Currency.ARS,
@@ -629,6 +630,7 @@ export class CashboxService {
         paymentMethod: e.paymentMethod,
         type: e.type,
         affectsCashbox: e.affectsCashbox ?? true,
+        extraordinary: e.extraordinary ?? false,
         ...(await this.categorySnap(e.categoryId)),
         notes: e.notes,
         currency: Currency.ARS,
@@ -868,6 +870,8 @@ export class CashboxService {
       reference?: string;
       afipCae?: string;
       affectsCashbox?: boolean;
+      extraordinary?: boolean;
+      categoryName?: string;
       isSena?: boolean;
       checked: boolean;
     }>;
@@ -958,6 +962,8 @@ export class CashboxService {
       afipCae?: string;
       // Sólo egresos. false = gasto externo: se lista pero no tocó caja.
       affectsCashbox?: boolean;
+      extraordinary?: boolean;
+      categoryName?: string;
       // true cuando el movimiento es una seña: prepaid (saldo a favor) o
       // venta con saldo pendiente (status PARTIAL). El front lo usa para el
       // chip "Seña" unificado en el detalle de sesión.
@@ -1038,6 +1044,8 @@ export class CashboxService {
         reference: e.egressNumber,
         // false = gasto externo: se lista pero no bajó el efectivo esperado.
         affectsCashbox: e.affectsCashbox,
+        extraordinary: e.extraordinary ?? false,
+        categoryName: e.categoryName,
         checked: e.checked ?? false,
       });
     }

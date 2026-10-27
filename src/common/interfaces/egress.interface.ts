@@ -9,6 +9,7 @@ export interface IEgress {
   currency: Currency;
   type: EgressType;
   affectsCashbox?: boolean;
+  extraordinary?: boolean;
   categoryId?: string;
   categoryName?: string;
   paymentMethod: PaymentMethod;
