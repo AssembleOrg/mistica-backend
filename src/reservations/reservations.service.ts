@@ -1135,6 +1135,52 @@ export class ReservationsService implements OnApplicationBootstrap {
     await r.save();
   }
 
+  /**
+   * Corrige el adicional de una ficha ya registrada: saca el que tenía (si
+   * tenía) y suma el nuevo (null = sin adicional), todo en un solo guardado.
+   * El total y el saldo se ajustan por la diferencia; el saldo no baja de 0.
+   */
+  async replacePieceExtra(
+    reservationId: string,
+    pieceId: string,
+    extra: { label: string; amount: number } | null,
+  ) {
+    const r = await this.findByIdOrThrow(reservationId);
+    const isPiece = (x: { pieceId?: Types.ObjectId }) =>
+      !!x.pieceId && String(x.pieceId) === pieceId;
+    const before = (r.extras ?? [])
+      .filter(isPiece)
+      .reduce((acc, x) => acc + x.amount, 0);
+    const after = extra && extra.amount > 0 ? extra.amount : 0;
+    if (
+      after > 0 &&
+      (r.status === ReservationStatus.CANCELLED ||
+        r.status === ReservationStatus.EXPIRED)
+    ) {
+      throw new BadRequestException(
+        'La reserva está cancelada: no se le pueden sumar adicionales.',
+      );
+    }
+    r.extras = [
+      ...(r.extras ?? []).filter((x) => !isPiece(x)),
+      ...(after > 0
+        ? [
+            {
+              label: extra!.label,
+              amount: after,
+              pieceId: new Types.ObjectId(pieceId),
+              createdAt: new Date(),
+            },
+          ]
+        : []),
+    ];
+    const diff = after - before;
+    r.totalAmount = Number(Math.max(0, (r.totalAmount ?? 0) + diff).toFixed(2));
+    r.balanceDue = Number(Math.max(0, (r.balanceDue ?? 0) + diff).toFixed(2));
+    await r.save();
+    return this.publicView(r);
+  }
+
   /** Suma UN adicional a mano desde el panel (p. ej. un extra de la edición especial). */
   async adminAddExtra(id: string, dto: AddReservationExtraDto) {
     const qty = dto.qty ?? 1;

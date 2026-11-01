@@ -327,6 +327,22 @@ export class UpdatePieceDto {
   studentId?: string;
 
   @ApiPropertyOptional({
+    description:
+      "Corregir el adicional de una ficha de reserva (admin/encargado): id del catálogo, '' = sin adicional. Ajusta total y saldo de la reserva.",
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^([a-f0-9]{24})?$/i)
+  extraId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Pieza sumada además de la incluida (precio de pieza adicional).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  additional?: boolean;
+
+  @ApiPropertyOptional({
     type: [String],
     description: 'URLs de fotos de la pieza (reemplaza la lista)',
   })

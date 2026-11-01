@@ -367,6 +367,7 @@ export class PiecesService implements OnModuleInit {
       colorsUsed: (entry.colorsUsed ?? '').trim(),
       registeredByName,
       ...(entry.extraId && {
+        extraId: new Types.ObjectId(entry.extraId),
         extraName: catalog.get(entry.extraId)!.name,
         extraAmount: chargeOf(entry),
       }),
@@ -628,9 +629,81 @@ export class PiecesService implements OnModuleInit {
       }
     }
 
+    // El adicional nuevo reemplaza al anterior en el total y el saldo (antes
+    // de guardar la ficha: si la reserva no lo acepta, la ficha no cambia).
+    if (await this.applyExtraChange(piece, dto)) {
+      await this.reservations.replacePieceExtra(
+        String(piece.reservationId),
+        String(piece._id),
+        piece.extraName && (piece.extraAmount ?? 0) > 0
+          ? {
+              label: piece.additional
+                ? `Pieza adicional ${piece.extraName} (${piece.pieceType})`
+                : `Adicional pieza ${piece.extraName} (${piece.pieceType})`,
+              amount: piece.extraAmount!,
+            }
+          : null,
+      );
+    }
+
     await piece.save();
 
     return piece;
+  }
+
+  /**
+   * Corrige el adicional de una ficha de reserva (se cargó sin adicional, o
+   * con otro). El monto sale del catálogo. Devuelve si cambió algo.
+   */
+  private async applyExtraChange(
+    piece: PieceDocument,
+    dto: UpdatePieceDto,
+  ): Promise<boolean> {
+    if (dto.extraId === undefined && dto.additional === undefined) return false;
+    if (!piece.reservationId) {
+      throw new BadRequestException(
+        'El adicional sólo se corrige en fichas de una reserva.',
+      );
+    }
+    const additional = dto.additional ?? !!piece.additional;
+    let extraId = dto.extraId;
+    if (extraId === undefined) {
+      extraId = piece.extraId ? String(piece.extraId) : '';
+    }
+    const extra = extraId
+      ? (await this.pieceExtras.byIds([extraId])).get(extraId)
+      : undefined;
+    if (extraId && !extra) {
+      throw new BadRequestException(
+        'El adicional elegido ya no existe. Volvé a elegirlo.',
+      );
+    }
+    const amount = extra
+      ? additional
+        ? (extra.addAmount ?? extra.amount)
+        : extra.amount
+      : 0;
+    const same =
+      (piece.extraName ?? '') === (extra?.name ?? '') &&
+      (piece.extraAmount ?? 0) === amount &&
+      !!piece.additional === additional;
+    if (same) {
+      if (extra && !piece.extraId) piece.extraId = new Types.ObjectId(extraId);
+      return false;
+    }
+    if (extra) {
+      piece.extraId = new Types.ObjectId(extraId);
+      piece.extraName = extra.name;
+      piece.extraAmount = amount;
+      // Tela, yeso…: si la categoría trae material y la ficha no lo tenía.
+      if (extra.material && !piece.material) piece.material = extra.material;
+    } else {
+      piece.extraId = undefined;
+      piece.extraName = undefined;
+      piece.extraAmount = undefined;
+    }
+    piece.additional = additional || undefined;
+    return true;
   }
 
   /**

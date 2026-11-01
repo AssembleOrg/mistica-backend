@@ -90,6 +90,10 @@ export class Piece {
   @Prop({ trim: true })
   extraName?: string;
 
+  // Id del adicional en el catálogo (las fichas viejas sólo tienen el nombre).
+  @Prop({ type: SchemaTypes.ObjectId })
+  extraId?: Types.ObjectId;
+
   @Prop({ min: 0 })
   extraAmount?: number;
 
