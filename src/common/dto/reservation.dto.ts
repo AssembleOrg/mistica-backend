@@ -131,6 +131,14 @@ export class PreviewTablesDto {
   extraMinutes?: number;
 
   @ApiPropertyOptional({
+    description:
+      'Sólo desde el panel. Reserva que se está reprogramando: sus mesas cuentan como libres.',
+  })
+  @IsOptional()
+  @IsMongoId()
+  ignoreReservationId?: string;
+
+  @ApiPropertyOptional({
     description: 'El cliente ya aceptó compartir mesa grande.',
     default: false,
   })

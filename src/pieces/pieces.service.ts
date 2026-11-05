@@ -27,6 +27,11 @@ import {
   UpdatePieceDto,
   ListPiecesQueryDto,
 } from '../common/dto';
+import { PieceDaysQueryDto } from '../common/dto/piece.dto';
+import {
+  pageBoundsByGroup,
+  summarizeReservationPieces,
+} from './pieces-list.helpers';
 import { NotificationsService } from '../notifications/notifications.service';
 import { envConfig } from '../config/env.config';
 import { canManage } from '../common/enums/user-role.enum';
@@ -45,6 +50,14 @@ const STAFF_STATUS_ERROR =
 export function workDateOf(date: Date): string {
   return DateTime.fromJSDate(date, { zone: envConfig.timezone }).toISODate()!;
 }
+
+/** Orden del listado: las piezas de una misma reserva quedan juntas. */
+const PIECE_LIST_SORT = {
+  workDate: -1,
+  reservationId: 1,
+  createdAt: 1,
+  _id: 1,
+} as const;
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -483,11 +496,12 @@ export class PiecesService implements OnModuleInit {
     const limit = query.limit ?? 20;
     const filter = this.buildListFilter(query);
     if (query.status) filter.status = query.status;
+    if (query.wholeGroups) return this.listWholeGroups(filter, page, limit);
     const [items, total] = await Promise.all([
       this.pieceModel
         .find(filter)
         // Las de una misma reserva juntas: el panel las agrupa por titular.
-        .sort({ workDate: -1, reservationId: 1, createdAt: 1, _id: 1 })
+        .sort(PIECE_LIST_SORT)
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
@@ -500,6 +514,103 @@ export class PiecesService implements OnModuleInit {
       limit,
       totalPages: Math.ceil(total / limit) || 1,
     };
+  }
+
+  /**
+   * Listado del panel: una reserva nunca queda partida entre dos páginas, y
+   * cada reserva trae sus totales reales. Con un filtro de estado o de página,
+   * lo que se ve en pantalla es sólo una parte del pedido: contar eso daba
+   * "4/4" o "11/11" en reservas incompletas y se avisaba al cliente antes de
+   * tiempo.
+   */
+  private async listWholeGroups(
+    filter: Record<string, any>,
+    page: number,
+    limit: number,
+  ) {
+    const rows = await this.pieceModel
+      .find(filter)
+      .select('reservationId')
+      .sort(PIECE_LIST_SORT)
+      .lean();
+    const pages = pageBoundsByGroup(
+      rows.map((r) => String(r.reservationId ?? r._id)),
+      limit,
+    );
+    const current = Math.min(page, pages.length || 1);
+    const bounds = pages[current - 1] ?? { start: 0, end: 0 };
+    const ids = rows.slice(bounds.start, bounds.end).map((r) => r._id);
+    const items = ids.length
+      ? await this.pieceModel
+          .find({ _id: { $in: ids } })
+          .sort(PIECE_LIST_SORT)
+          .lean()
+      : [];
+    return {
+      items,
+      total: rows.length,
+      page: current,
+      limit,
+      totalPages: pages.length || 1,
+      from: ids.length ? bounds.start + 1 : 0,
+      to: bounds.end,
+      reservationTotals: await this.reservationTotals(items),
+    };
+  }
+
+  private async reservationTotals(items: { reservationId?: unknown }[]) {
+    const ids = [
+      ...new Set(items.map((p) => p.reservationId).filter(Boolean).map(String)),
+    ];
+    if (!ids.length) return {};
+    const [pieces, cfg] = await Promise.all([
+      this.pieceModel
+        .find({
+          reservationId: { $in: ids.map((id) => new Types.ObjectId(id)) },
+          deletedAt: { $exists: false },
+        })
+        .select('reservationId status material notifiedReadyAt')
+        .sort({ createdAt: 1, _id: 1 })
+        .lean(),
+      this.statusConfig(),
+    ]);
+    return summarizeReservationPieces(pieces, cfg);
+  }
+
+  /** Días del mes con piezas (respeta los filtros en pantalla), para el calendario. */
+  async days(query: PieceDaysQueryDto) {
+    const filter = this.buildListFilter(query);
+    if (query.status) filter.status = query.status;
+    filter.workDate = { $regex: `^${query.month}-` };
+    const [rows, cfg] = await Promise.all([
+      this.pieceModel.aggregate<{
+        _id: { date: string; status: string };
+        count: number;
+      }>([
+        { $match: filter },
+        {
+          $group: {
+            _id: { date: '$workDate', status: '$status' },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+      this.statusConfig(),
+    ]);
+    const byKey = new Map(cfg.map((c) => [c.key, c]));
+    const byDay = new Map<string, { date: string; count: number; pending: number }>();
+    for (const row of rows) {
+      const day = byDay.get(row._id.date) ?? {
+        date: row._id.date,
+        count: 0,
+        pending: 0,
+      };
+      day.count += row.count;
+      const status = byKey.get(row._id.status);
+      if (!status?.isReady && !status?.isFinal) day.pending += row.count;
+      byDay.set(row._id.date, day);
+    }
+    return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
   }
 
   async counts(query: ListPiecesQueryDto) {

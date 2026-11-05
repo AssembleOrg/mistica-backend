@@ -27,6 +27,7 @@ import {
   SavePieceExtraDto,
   SavePieceTypeDto,
   BulkPieceStatusDto,
+  PieceDaysQueryDto,
   PieceTallyQueryDto,
   PieceDraftsQueryDto,
   SetPieceColorsDto,
@@ -291,6 +292,12 @@ export class PiecesController {
   @ApiOperation({ summary: 'Contar piezas por estado' })
   counts(@Query() query: ListPiecesQueryDto) {
     return this.piecesService.counts(query);
+  }
+
+  @Get('days')
+  @ApiOperation({ summary: 'Días de un mes con piezas (calendario del listado)' })
+  days(@Query() query: PieceDaysQueryDto) {
+    return this.piecesService.days(query);
   }
 
   // Va ANTES de ':id' para que no lo capture.

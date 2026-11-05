@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
@@ -454,6 +454,22 @@ export class ListPiecesQueryDto {
   @IsInt()
   @Min(1)
   limit?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Paginar sin cortar una reserva al medio y sumar los totales reales de cada reserva',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  wholeGroups?: boolean;
+}
+
+/** Días con piezas de un mes, para el calendario del listado. */
+export class PieceDaysQueryDto extends ListPiecesQueryDto {
+  @ApiProperty({ description: 'Mes (YYYY-MM)' })
+  @Matches(/^\d{4}-\d{2}$/)
+  month: string;
 }
 
 /** Conteo de piezas elegidas para producción. */

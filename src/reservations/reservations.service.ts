@@ -528,6 +528,7 @@ export class ReservationsService implements OnApplicationBootstrap {
       acceptSharedTable?: boolean;
       isBirthday?: boolean;
       extraMinutes?: number;
+      ignoreReservationId?: string;
     },
     /** Desde el panel: puede cruzar turnos y sumar hora extra. */
     opts: { admin?: boolean } = {},
@@ -541,6 +542,8 @@ export class ReservationsService implements OnApplicationBootstrap {
     const extra = opts.admin ? (dto.extraMinutes ?? 0) : 0;
     if (extra > 0) this.assertEndsBeforeClose(base.startAt, base.durationMinutes + extra);
     const session = { ...base, durationMinutes: base.durationMinutes + extra };
+    // Al reprogramar, las mesas que la reserva ya tiene cuentan como libres.
+    const ignoreReservationId = opts.admin ? dto.ignoreReservationId : undefined;
 
     // Horario PROPIO de la experiencia: el lugar es el cupo, no las mesas.
     if (await this.isOwnScheduleSession(session)) {
@@ -553,10 +556,12 @@ export class ReservationsService implements OnApplicationBootstrap {
         startAt: session.startAt,
         durationMinutes: session.durationMinutes,
         sharedAccepted: acceptShared,
+        ignoreReservationId,
       }),
       this.tables.remainingPartySize(
         session.startAt,
         session.durationMinutes,
+        ignoreReservationId,
       ),
       this.tables.venueMaxParty(),
     ]);
@@ -2124,7 +2129,12 @@ export class ReservationsService implements OnApplicationBootstrap {
       SessionStatus.DRAFT,
     ]);
 
-    if (target.price !== r.unitPrice) {
+    // Hora libre de la misma experiencia: la reserva conserva su precio. Un
+    // turno recién creado toma el precio de hoy, y eso no puede frenar un
+    // cambio de horario del admin.
+    const sameExperienceFreeTime =
+      !dto.sessionId && String(target.experienceId) === String(r.experienceId);
+    if (!sameExperienceFreeTime && target.price !== r.unitPrice) {
       await this.releaseSeats(target._id as Types.ObjectId, r.quantity);
       throw new ConflictException(
         'El nuevo turno tiene otro precio. Cancelá la reserva y creá una nueva.',

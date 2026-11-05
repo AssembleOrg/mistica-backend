@@ -638,6 +638,7 @@ export class TablesService {
     startAt: Date;
     durationMinutes: number;
     sharedAccepted?: boolean;
+    ignoreReservationId?: Types.ObjectId | string;
   }): Promise<
     | {
         fits: true;
@@ -647,7 +648,7 @@ export class TablesService {
     | { fits: false; reason: string; offer?: { tables: TableRef[] } }
   > {
     const interval = this.intervalFor(params.startAt, params.durationMinutes);
-    const free = await this.freeTablesFor(interval);
+    const free = await this.freeTablesFor(interval, params.ignoreReservationId);
     const plan = planTables(params.qty, free, {
       smallGroupCanTakeLarge: envConfig.smallGroupCanTakeLarge,
       sharedAccepted: params.sharedAccepted,
