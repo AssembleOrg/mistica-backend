@@ -8,6 +8,15 @@ export const KILNS = {
 } as const;
 export type KilnKey = keyof typeof KILNS;
 
+/**
+ * Cuánto queda prendido cada horno desde que se marca. Mientras corre no se
+ * puede volver a prender; ya no se anota cuándo se apagó.
+ */
+export const KILN_DURATION_MS: Record<KilnKey, number> = {
+  FRONTAL: 13 * 3_600_000,
+  SUPERIOR: 26 * 3_600_000,
+};
+
 /** Prender el horno, o apagarlo y descargarlo. */
 export const KILN_ACTIONS = {
   ON: 'Prendido',

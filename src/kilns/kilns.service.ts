@@ -12,6 +12,7 @@ import { businessDayBound } from '../common/utils/date-filter.util';
 import {
   KILNS,
   KILN_ACTIONS,
+  KILN_DURATION_MS,
   KilnAction,
   KilnKey,
   KilnLog,
@@ -51,6 +52,23 @@ export class KilnsService {
         throw new BadRequestException('La fecha del horno no puede ser futura.');
       }
     }
+    // Prendido ahora: no se vuelve a prender hasta que termine su tiempo.
+    if (!dto.at && dto.action === 'ON') {
+      const st = await this.kilnStatus(dto.kiln as KilnKey);
+      if (st.running && st.endsAt) {
+        const hora = st.endsAt.toLocaleString('es-AR', {
+          timeZone: 'America/Argentina/Buenos_Aires',
+          weekday: 'short',
+          day: '2-digit',
+          month: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        throw new BadRequestException(
+          `El horno de ${KILNS[dto.kiln as KilnKey].toLowerCase()} sigue prendido hasta ${hora}.`,
+        );
+      }
+    }
     let byName = dto.registeredBy?.trim();
     if (!byName && actor?.id && Types.ObjectId.isValid(actor.id)) {
       byName = (await this.userModel.findById(actor.id).select('name').lean())?.name;
@@ -81,22 +99,33 @@ export class KilnsService {
     return rows.map((r) => this.view(r));
   }
 
-  /** Último movimiento de cada horno: si está prendido y desde cuándo. */
+  /**
+   * Estado de un horno: el último prendido corre su tiempo (13 h frontal,
+   * 26 h superior). Un apagado viejo, de cuando se anotaba, lo corta.
+   */
+  private async kilnStatus(kiln: KilnKey) {
+    const last = await this.model
+      .findOne({ kiln, deletedAt: { $exists: false } })
+      .sort({ at: -1 })
+      .lean();
+    const durationMs = KILN_DURATION_MS[kiln];
+    const endsAt =
+      last?.action === 'ON' ? new Date(new Date(last.at).getTime() + durationMs) : null;
+    const running = !!endsAt && endsAt.getTime() > Date.now();
+    return {
+      kiln,
+      kilnName: KILNS[kiln],
+      on: running,
+      running,
+      durationMs,
+      endsAt,
+      last: last ? this.view(last) : null,
+    };
+  }
+
+  /** Cada horno: si está prendido y hasta cuándo. */
   async status() {
-    return Promise.all(
-      (Object.keys(KILNS) as KilnKey[]).map(async (kiln) => {
-        const last = await this.model
-          .findOne({ kiln, deletedAt: { $exists: false } })
-          .sort({ at: -1 })
-          .lean();
-        return {
-          kiln,
-          kilnName: KILNS[kiln],
-          on: last?.action === 'ON',
-          last: last ? this.view(last) : null,
-        };
-      }),
-    );
+    return Promise.all((Object.keys(KILNS) as KilnKey[]).map((k) => this.kilnStatus(k)));
   }
 
   /** Un registro cargado por error (sólo admin/encargado). */
