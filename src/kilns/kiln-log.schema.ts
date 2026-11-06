@@ -13,8 +13,8 @@ export type KilnKey = keyof typeof KILNS;
  * puede volver a prender; ya no se anota cuándo se apagó.
  */
 export const KILN_DURATION_MS: Record<KilnKey, number> = {
-  FRONTAL: 13 * 3_600_000,
-  SUPERIOR: 26 * 3_600_000,
+  FRONTAL: 26 * 3_600_000,
+  SUPERIOR: 13 * 3_600_000,
 };
 
 /** Prender el horno, o apagarlo y descargarlo. */

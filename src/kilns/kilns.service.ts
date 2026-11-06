@@ -102,8 +102,8 @@ export class KilnsService {
   }
 
   /**
-   * Estado de un horno: el último prendido corre su tiempo (13 h frontal,
-   * 26 h superior). Un apagado viejo, de cuando se anotaba, lo corta.
+   * Estado de un horno: el último prendido corre su tiempo (26 h frontal,
+   * 13 h superior). Un apagado viejo, de cuando se anotaba, lo corta.
    */
   private async kilnStatus(kiln: KilnKey) {
     const last = await this.model

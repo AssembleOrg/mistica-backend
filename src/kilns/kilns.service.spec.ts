@@ -66,17 +66,17 @@ describe('Hornos · timer', () => {
     expect(model.create).not.toHaveBeenCalled();
   });
 
-  it('frontal se libera a las 13 h', async () => {
-    const { service, model } = build({ _id: 'a', kiln: 'FRONTAL', action: 'ON', at: hoursAgo(13.1) });
-    await service.create({ kiln: 'FRONTAL', action: 'ON' }, { role: 'user' });
+  it('superior se libera a las 13 h', async () => {
+    const { service, model } = build({ _id: 'a', kiln: 'SUPERIOR', action: 'ON', at: hoursAgo(13.1) });
+    await service.create({ kiln: 'SUPERIOR', action: 'ON' }, { role: 'user' });
     expect(model.create).toHaveBeenCalled();
   });
 
-  it('superior corre 26 h', async () => {
-    const { service } = build({ _id: 'a', kiln: 'SUPERIOR', action: 'ON', at: hoursAgo(25) });
-    const [superior] = await service.status();
-    expect(superior.running).toBe(true);
-    expect(superior.durationMs).toBe(26 * 3_600_000);
+  it('frontal corre 26 h', async () => {
+    const { service } = build({ _id: 'a', kiln: 'FRONTAL', action: 'ON', at: hoursAgo(25) });
+    const [, frontal] = await service.status();
+    expect(frontal.running).toBe(true);
+    expect(frontal.durationMs).toBe(26 * 3_600_000);
   });
 
   it('un prendido reiniciado no corre', async () => {
