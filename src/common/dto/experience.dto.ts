@@ -4,6 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsMongoId,
   IsNotEmpty,
@@ -16,6 +17,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { FOOD_KINDS, type FoodKind } from '../food';
 
 /**
  * Variante de precio: modalidad alternativa (escuelita mensual) o tier por
@@ -430,6 +432,15 @@ export class CreateExperienceDto {
   @IsOptional()
   @IsBoolean()
   hasBuffet?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Qué come la gente: BUFFET (buffet libre), MERIENDA (porción en la mesa) o NONE. Cocina cuenta cada una por separado.',
+    enum: FOOD_KINDS,
+  })
+  @IsOptional()
+  @IsIn(FOOD_KINDS)
+  food?: FoodKind;
 
   @ApiPropertyOptional({
     description:

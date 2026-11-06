@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { DEFAULT_EXPERIENCE_CAPACITY } from '../../experiences/capacity';
+import { FOOD_KINDS, type FoodKind } from '../food';
 
 export type ExperienceDocument = Experience & Document;
 
@@ -287,8 +288,15 @@ export class Experience {
 
   // ¿Incluye buffet/merienda? Para la vista de Cocina: cuenta a sus personas.
   // Sin valor, cocina lo deduce del nombre y la descripción (buffet, brunch…).
+  // Viejo: ahora manda `food`, que separa buffet libre de merienda.
   @Prop({ type: Boolean })
   hasBuffet?: boolean;
+
+  // Qué come la gente: buffet libre, merienda (porción en la mesa) o nada.
+  // Cocina cuenta por separado las personas de cada una. Sin valor, se
+  // deduce de hasBuffet y del nombre (ver common/food.ts).
+  @Prop({ type: String, enum: FOOD_KINDS })
+  food?: FoodKind;
 
   @Prop({ type: Boolean, default: true })
   isActive: boolean;

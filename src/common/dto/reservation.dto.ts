@@ -22,6 +22,7 @@ import {
   ReservationPaymentMethod,
   ReservationStatus,
 } from '../enums/reservation.enum';
+import { FOOD_KINDS, type FoodKind } from '../food';
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const HHMM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -365,6 +366,16 @@ export class ScheduleSaleDto {
   @MaxLength(500)
   kitchenNotes?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Comida de esta reserva si no es la de la experiencia: BUFFET, MERIENDA o NONE. null = vuelve a la de la experiencia.',
+    enum: FOOD_KINDS,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsIn(FOOD_KINDS)
+  food?: FoodKind | null;
+
   @ApiPropertyOptional({ description: 'Cumpleaños: quién cumple' })
   @IsOptional()
   @IsString()
@@ -551,6 +562,16 @@ export class AdminCreateReservationDto {
   @MaxLength(500)
   kitchenNotes?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Comida de esta reserva si no es la de la experiencia: BUFFET, MERIENDA o NONE. null = vuelve a la de la experiencia.',
+    enum: FOOD_KINDS,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsIn(FOOD_KINDS)
+  food?: FoodKind | null;
+
   @ApiPropertyOptional({ description: 'Cumpleaños: quién cumple' })
   @IsOptional()
   @IsString()
@@ -704,6 +725,16 @@ export class AdminUpdateReservationDto {
   @IsString()
   @MaxLength(500)
   kitchenNotes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Comida de esta reserva si no es la de la experiencia: BUFFET, MERIENDA o NONE. null = vuelve a la de la experiencia.',
+    enum: FOOD_KINDS,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsIn(FOOD_KINDS)
+  food?: FoodKind | null;
 
   @ApiPropertyOptional({ description: 'Cumpleaños: quién cumple' })
   @IsOptional()

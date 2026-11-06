@@ -5,6 +5,7 @@ import {
   ReservationSource,
   ReservationStatus,
 } from '../enums/reservation.enum';
+import { FOOD_KINDS, type FoodKind } from '../food';
 
 export type ReservationDocument = Reservation & Document;
 
@@ -119,6 +120,11 @@ export class Reservation {
   // edad del cumpleañero, sabor de la torta, horario de la torta…).
   @Prop({ trim: true })
   kitchenNotes?: string;
+
+  // Comida de esta reserva cuando no es la de la experiencia (una promo con
+  // merienda que paga el buffet aparte). Sin valor = la de la experiencia.
+  @Prop({ type: String, enum: FOOD_KINDS })
+  food?: FoodKind;
 
   // Cumpleaños: quién cumple y cuántos años.
   @Prop({ trim: true })

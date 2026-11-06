@@ -72,6 +72,7 @@ import {
   type SpecialLike,
 } from '../experiences/specials';
 import { UserRole } from '../common/enums/user-role.enum';
+import { FOOD_LABELS, reservationFood, type FoodKind } from '../common/food';
 
 // Minutos que vive un hold esperando el comprobante de transferencia antes de
 // liberar el cupo y las mesas (el cliente transfiere y manda la captura por
@@ -105,7 +106,6 @@ interface Actor {
 const KITCHEN_NOTICE_DAYS = 14;
 /** Cuentas de cocina: las que tienen la pestaña Cocina (o la agenda vieja). */
 const KITCHEN_VIEWS = ['reservas:cocina', 'reservas:agenda'];
-const LOOKS_LIKE_FOOD = /buffet|brunch|merienda|degustaci|desayuno/i;
 
 /** " · Juana cumple 8" para los avisos a cocina. */
 function birthdayWho(r: { birthdayName?: string; birthdayAge?: number }) {
@@ -129,6 +129,7 @@ type KitchenReservation = {
   birthdayName?: string;
   birthdayAge?: number;
   cakes?: Array<{ label: string; qty?: number }>;
+  food?: FoodKind;
 };
 
 /** "1 h", "1 h 30", "30 min". */
@@ -214,13 +215,11 @@ export class ReservationsService implements OnApplicationBootstrap {
       }
       const exp = await this.experienceModel
         .findById(r.experienceId)
-        .select('name description hasBuffet')
+        .select('name description hasBuffet food')
         .lean();
-      const food =
-        exp?.hasBuffet ??
-        LOOKS_LIKE_FOOD.test(`${exp?.name ?? r.experienceName} ${exp?.description ?? ''}`);
+      const food = reservationFood(r, exp ?? { name: r.experienceName });
       const matters =
-        food ||
+        food !== 'NONE' ||
         (r.cakes?.length ?? 0) > 0 ||
         (r.dietaryTags?.length ?? 0) > 0 ||
         !!r.dietaryNotes?.trim() ||
@@ -240,7 +239,9 @@ export class ReservationsService implements OnApplicationBootstrap {
         title,
         body: [
           `${r.experienceName} · ${this.fmtWhen(r.startAt)}`,
-          `${r.quantity} ${r.quantity === 1 ? 'persona' : 'personas'}`,
+          `${r.quantity} ${r.quantity === 1 ? 'persona' : 'personas'}${
+            food !== 'NONE' ? ` · ${FOOD_LABELS[food]}` : ''
+          }`,
           detail,
         ]
           .filter(Boolean)
@@ -1043,6 +1044,7 @@ export class ReservationsService implements OnApplicationBootstrap {
         dietaryNotes: dto.dietaryNotes,
         isBirthday: dto.isBirthday ?? false,
         kitchenNotes: dto.kitchenNotes?.trim() || undefined,
+        food: dto.food ?? undefined,
         birthdayName: dto.birthdayName?.trim() || undefined,
         birthdayAge: dto.birthdayAge ?? undefined,
         notes: dto.notes,
@@ -1243,6 +1245,7 @@ export class ReservationsService implements OnApplicationBootstrap {
         dietaryTags: dto.dietaryTags,
         dietaryNotes: dto.dietaryNotes,
         kitchenNotes: dto.kitchenNotes,
+        food: dto.food,
         birthdayName: dto.birthdayName?.trim() || undefined,
         birthdayAge: dto.birthdayAge ?? undefined,
         freeSpots: dto.freeSpots,
@@ -1291,6 +1294,7 @@ export class ReservationsService implements OnApplicationBootstrap {
       dietaryNotes: r.dietaryNotes,
       isBirthday: r.isBirthday ?? false,
       kitchenNotes: r.kitchenNotes,
+      food: r.food,
       birthdayName: r.birthdayName,
       birthdayAge: r.birthdayAge,
       // Cocina ve qué torta preparar, no su precio.
@@ -1934,6 +1938,7 @@ export class ReservationsService implements OnApplicationBootstrap {
       diet: [...(r.dietaryTags ?? []), r.dietaryNotes ?? ''].join('|'),
       kitchen: r.kitchenNotes ?? '',
       birthday: `${r.birthdayName ?? ''}|${r.birthdayAge ?? ''}`,
+      food: r.food ?? '',
     };
     let creditDue = 0;
     if (
@@ -1953,6 +1958,7 @@ export class ReservationsService implements OnApplicationBootstrap {
     if (dto.dietaryNotes !== undefined) r.dietaryNotes = dto.dietaryNotes;
     if (dto.isBirthday !== undefined) r.isBirthday = dto.isBirthday;
     if (dto.kitchenNotes !== undefined) r.kitchenNotes = dto.kitchenNotes;
+    if (dto.food !== undefined) r.food = dto.food ?? undefined;
     if (dto.birthdayName !== undefined) r.birthdayName = dto.birthdayName.trim() || undefined;
     if (dto.birthdayAge !== undefined) r.birthdayAge = dto.birthdayAge ?? undefined;
     r.updatedAt = new Date();
@@ -1961,6 +1967,9 @@ export class ReservationsService implements OnApplicationBootstrap {
     const changes: string[] = [];
     if (r.quantity !== before.quantity) {
       changes.push(`Ahora son ${r.quantity} (antes ${before.quantity})`);
+    }
+    if ((r.food ?? '') !== before.food) {
+      changes.push(`Comida: ${r.food ? FOOD_LABELS[r.food] : 'la de la experiencia'}`);
     }
     const diet = [...(r.dietaryTags ?? []), r.dietaryNotes ?? ''].join('|');
     const birthday = `${r.birthdayName ?? ''}|${r.birthdayAge ?? ''}`;
@@ -2792,6 +2801,7 @@ ${dto.notes}` : note,
       sharedTable: r.sharedTable ?? false,
       notes: r.notes,
       kitchenNotes: r.kitchenNotes,
+      food: r.food,
       birthdayName: r.birthdayName,
       birthdayAge: r.birthdayAge,
       cakes: (r.cakes ?? []).map((c) => ({
