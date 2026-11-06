@@ -32,6 +32,14 @@ export class CreateKilnLogDto {
   at?: string;
 }
 
+export class ResetKilnDto {
+  @ApiPropertyOptional({ description: 'Quién lo reinicia (cuentas compartidas)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  registeredBy?: string;
+}
+
 export class ListKilnLogsDto {
   @ApiProperty({ description: 'Desde (YYYY-MM-DD, hora de Argentina)' })
   @Matches(/^\d{4}-\d{2}-\d{2}$/)

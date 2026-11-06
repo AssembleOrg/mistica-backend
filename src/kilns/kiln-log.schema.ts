@@ -52,6 +52,16 @@ export class KilnLog {
   @Prop({ trim: true })
   note?: string;
 
+  /**
+   * Prendido cuyo timer se reinició (se marcó por error o se empezó de nuevo):
+   * libera el horno y no cuenta en el resumen de la semana.
+   */
+  @Prop({ type: Date })
+  resetAt?: Date;
+
+  @Prop({ trim: true })
+  resetBy?: string;
+
   @Prop({ type: Date })
   deletedAt?: Date;
 }

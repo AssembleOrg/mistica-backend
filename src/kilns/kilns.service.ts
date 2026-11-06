@@ -18,7 +18,7 @@ import {
   KilnLog,
   KilnLogDocument,
 } from './kiln-log.schema';
-import { CreateKilnLogDto } from './kilns.dto';
+import { CreateKilnLogDto, ResetKilnDto } from './kilns.dto';
 
 @Injectable()
 export class KilnsService {
@@ -37,6 +37,8 @@ export class KilnsService {
       at: l.at,
       byName: l.byName,
       note: l.note,
+      resetAt: l.resetAt,
+      resetBy: l.resetBy,
     };
   }
 
@@ -110,7 +112,7 @@ export class KilnsService {
       .lean();
     const durationMs = KILN_DURATION_MS[kiln];
     const endsAt =
-      last?.action === 'ON' ? new Date(new Date(last.at).getTime() + durationMs) : null;
+      last?.action === 'ON' && !last.resetAt ? new Date(new Date(last.at).getTime() + durationMs) : null;
     const running = !!endsAt && endsAt.getTime() > Date.now();
     return {
       kiln,
@@ -126,6 +128,27 @@ export class KilnsService {
   /** Cada horno: si está prendido y hasta cuándo. */
   async status() {
     return Promise.all((Object.keys(KILNS) as KilnKey[]).map((k) => this.kilnStatus(k)));
+  }
+
+  /**
+   * Reinicia el timer del horno prendido: queda libre para volver a prenderlo
+   * y ese prendido deja de contar en la semana.
+   */
+  async reset(kiln: string, dto: ResetKilnDto, actor?: { id?: string }) {
+    if (!(kiln in KILNS)) throw new BadRequestException('Horno inválido');
+    const st = await this.kilnStatus(kiln as KilnKey);
+    if (!st.running || !st.last) {
+      throw new BadRequestException('Ese horno no tiene el timer corriendo.');
+    }
+    let resetBy = dto.registeredBy?.trim();
+    if (!resetBy && actor?.id && Types.ObjectId.isValid(actor.id)) {
+      resetBy = (await this.userModel.findById(actor.id).select('name').lean())?.name;
+    }
+    await this.model.updateOne(
+      { _id: st.last.id },
+      { $set: { resetAt: new Date(), ...(resetBy ? { resetBy } : {}) } },
+    );
+    return this.kilnStatus(kiln as KilnKey);
   }
 
   /** Un registro cargado por error (sólo admin/encargado). */

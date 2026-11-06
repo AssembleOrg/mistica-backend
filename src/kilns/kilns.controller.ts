@@ -17,7 +17,7 @@ import { UserRole } from '../common/enums/user-role.enum';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { CreateKilnLogDto, ListKilnLogsDto } from './kilns.dto';
+import { CreateKilnLogDto, ListKilnLogsDto, ResetKilnDto } from './kilns.dto';
 import { KilnsService } from './kilns.service';
 
 interface AuthRequest extends Request {
@@ -48,6 +48,12 @@ export class KilnsController {
   @ApiOperation({ summary: 'Registrar que se prendió o se apagó y descargó un horno' })
   create(@Body() dto: CreateKilnLogDto, @Req() req: AuthRequest) {
     return this.service.create(dto, req.user);
+  }
+
+  @Post(':kiln/reset')
+  @ApiOperation({ summary: 'Reiniciar el timer de un horno prendido (no cuenta en la semana)' })
+  reset(@Param('kiln') kiln: string, @Body() dto: ResetKilnDto, @Req() req: AuthRequest) {
+    return this.service.reset(kiln, dto, req.user);
   }
 
   @Delete('logs/:id')

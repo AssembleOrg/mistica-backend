@@ -79,6 +79,32 @@ describe('Hornos · timer', () => {
     expect(superior.durationMs).toBe(26 * 3_600_000);
   });
 
+  it('un prendido reiniciado no corre', async () => {
+    const { service } = build({
+      _id: 'a', kiln: 'FRONTAL', action: 'ON', at: hoursAgo(1), resetAt: new Date(),
+    });
+    const [, frontal] = await service.status();
+    expect(frontal.running).toBe(false);
+  });
+
+  it('reiniciar marca el prendido y libera el horno', async () => {
+    const last = { _id: 'a', kiln: 'SUPERIOR', action: 'ON', at: hoursAgo(2) } as Record<string, unknown>;
+    const { service, model } = build(last);
+    (model as unknown as { updateOne: jest.Mock }).updateOne = jest.fn(async (_q, u) => {
+      Object.assign(last, u.$set);
+      return { matchedCount: 1 };
+    });
+    const st = await service.reset('SUPERIOR', { registeredBy: 'Sofi' });
+    expect(last.resetBy).toBe('Sofi');
+    expect(last.resetAt).toBeInstanceOf(Date);
+    expect(st.running).toBe(false);
+  });
+
+  it('no se reinicia un horno libre', async () => {
+    const { service } = build(null);
+    await expect(service.reset('FRONTAL', {})).rejects.toThrow(/no tiene el timer/);
+  });
+
   it('un apagado viejo corta el timer', async () => {
     const { service } = build({ _id: 'a', kiln: 'SUPERIOR', action: 'OFF', at: hoursAgo(1) });
     const [superior] = await service.status();
