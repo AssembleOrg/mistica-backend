@@ -406,6 +406,14 @@ export class CreateExperienceDto {
 
   @ApiPropertyOptional({
     description:
+      'Se agenda solo desde el panel: la web y el bot la muestran como servicio coordinado (consulta con el equipo) y no toman seña online.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  panelOnly?: boolean;
+
+  @ApiPropertyOptional({
+    description:
       'Lugares FIJOS del salón que ocupa un turno abierto (ej. mesa de taller = 10). 0 = usa los anotados.',
     minimum: 0,
     default: 0,

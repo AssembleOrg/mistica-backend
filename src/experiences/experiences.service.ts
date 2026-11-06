@@ -94,7 +94,13 @@ export class ExperiencesService {
    */
   async listPublicExperiences() {
     const list = await this.listExperiences(false);
-    return list.map((e) => ({ ...e, specials: publicSpecials(e.specials) }));
+    // "Solo desde el panel": para la web y el bot es un servicio coordinado
+    // (dan la info y derivan a una persona); el panel la agenda normal.
+    return list.map((e) => ({
+      ...e,
+      specials: publicSpecials(e.specials),
+      ...(e.panelOnly && { bookableOnline: false }),
+    }));
   }
 
   async getExperience(id: string) {

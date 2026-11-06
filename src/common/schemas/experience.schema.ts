@@ -261,6 +261,12 @@ export class Experience {
   @Prop({ type: Boolean, default: true })
   bookableOnline: boolean;
 
+  // Se agenda SOLO desde el panel (promos con requisitos, casos especiales):
+  // la web y el bot la ven como servicio coordinado (info + consulta, la
+  // atiende una persona) y no toman seña online. El panel la agenda normal.
+  @Prop({ type: Boolean })
+  panelOnly?: boolean;
+
   /**
    * Marca el doc "Cumpleaños": una OCASIÓN, no una experiencia reservable.
    * No tiene precio ni duración propios — el cumpleañero elige una de las

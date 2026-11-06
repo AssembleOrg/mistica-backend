@@ -280,6 +280,7 @@ export class ReservationsService implements OnApplicationBootstrap {
       return this.holdResponse(existing);
     }
 
+    await this.assertBookableOnline(dto);
     const qty = dto.quantity;
     // El turno se resuelve del trío (experiencia, día, bloque) y se crea solo
     // si todavía no existe: el equipo ya no carga turnos a mano.
@@ -486,6 +487,28 @@ export class ReservationsService implements OnApplicationBootstrap {
    * admin cargó a mano), o el trío (experiencia, día, bloque), en cuyo caso el
    * turno se crea solo la primera vez que alguien reserva ahí.
    */
+  /**
+   * Reserva online (web/bot): una experiencia "solo desde el panel" no toma
+   * seña online; la agenda el equipo.
+   */
+  private async assertBookableOnline(dto: { sessionId?: string; experienceId?: string }) {
+    let experienceId: unknown = dto.experienceId;
+    if (!experienceId && dto.sessionId && Types.ObjectId.isValid(dto.sessionId)) {
+      const s = await this.sessionModel.findById(dto.sessionId).select('experienceId').lean();
+      experienceId = s?.experienceId;
+    }
+    if (!experienceId || !Types.ObjectId.isValid(String(experienceId))) return;
+    const exp = await this.experienceModel
+      .findById(experienceId)
+      .select('name panelOnly')
+      .lean();
+    if (exp?.panelOnly) {
+      throw new BadRequestException(
+        `${exp.name} se agenda con el equipo: escribinos y lo coordinamos.`,
+      );
+    }
+  }
+
   private async resolveSessionId(
     dto: {
       sessionId?: string;
