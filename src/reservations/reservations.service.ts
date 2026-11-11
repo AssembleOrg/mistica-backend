@@ -56,7 +56,7 @@ import {
 import { CreateSaleDto } from '../common/dto/sale.dto';
 import { MercadopagoService } from '../mercadopago/mercadopago.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { computeReservationAmounts } from './reservation-amounts';
+import { checkoutAmounts, computeReservationAmounts } from './reservation-amounts';
 import { SalesService } from '../sales/sales.service';
 import { ClosedDatesService } from '../closed-dates/closed-dates.service';
 import { TablesService } from '../tables/tables.service';
@@ -2481,11 +2481,19 @@ ${dto.notes}` : note,
       r.saleId = new Types.ObjectId(sale.id);
       r.salePending = false;
     }
-    // Lo cobrado se suma a lo que ya había pagado (la seña): antes se pisaba
-    // y la reserva quedaba mostrando sólo el último cobro.
-    r.depositAmount = Number(
-      ((r.depositAmount ?? 0) + plan.reservation.balanceDue).toFixed(2),
+    // Lo cobrado se suma a lo que ya había pagado (la seña). Un descuento
+    // hecho al cobrar baja el total: no es plata que entró.
+    const { discount, paid } = checkoutAmounts(
+      plan.reservation.balanceDue,
+      sale.discount ?? 0,
+      plan.discount,
     );
+    if (discount > 0) {
+      r.totalAmount = Number(
+        Math.max(0, (r.totalAmount ?? 0) - discount).toFixed(2),
+      );
+    }
+    r.depositAmount = Number(((r.depositAmount ?? 0) + paid).toFixed(2));
     r.balanceDue = 0;
     await r.save();
     return sale;

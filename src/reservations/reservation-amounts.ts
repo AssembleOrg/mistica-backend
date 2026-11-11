@@ -23,3 +23,24 @@ export function computeReservationAmounts(
   const balanceDue = Math.max(0, total - deposit);
   return { total, deposit, balanceDue };
 }
+
+/**
+ * Cómo queda la reserva al cobrarle el saldo con una venta del POS. Si la
+ * venta descontó algo nuevo (promo cargada a mano, redondeo), ese descuento
+ * baja el total de la reserva: no es plata cobrada. `planDiscount` es el que
+ * ya traía el plan de cobro (ya estaba fuera del saldo) y no se resta dos veces.
+ */
+export function checkoutAmounts(
+  balance: number,
+  saleDiscount: number,
+  planDiscount: number,
+): { discount: number; paid: number } {
+  const discount = Math.min(
+    balance,
+    Math.max(0, (saleDiscount ?? 0) - (planDiscount ?? 0)),
+  );
+  return {
+    discount: Number(discount.toFixed(2)),
+    paid: Number((balance - discount).toFixed(2)),
+  };
+}
