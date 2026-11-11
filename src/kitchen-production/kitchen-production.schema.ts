@@ -3,6 +3,9 @@ import { Document, SchemaTypes, Types } from 'mongoose';
 
 export type KitchenProductionDocument = KitchenProduction & Document;
 
+export const KITCHEN_PRODUCTION_AREAS = ['cocina', 'taller'] as const;
+export type KitchenProductionArea = (typeof KITCHEN_PRODUCTION_AREAS)[number];
+
 /**
  * Producción de cocina: lo que cocina va preparando (tortas, cookies, el
  * buffet, lo que sea) con su cantidad. Por día y, si corresponde, ligado a
@@ -41,10 +44,15 @@ export class KitchenProduction {
   @Prop({ trim: true })
   byName?: string;
 
+  /** Quién produjo: cocina o el taller de cerámica. Sin valor = cocina (registros viejos). */
+  @Prop({ type: String, enum: KITCHEN_PRODUCTION_AREAS })
+  area?: KitchenProductionArea;
+
   @Prop({ type: Date })
   deletedAt?: Date;
 }
 
-export const KitchenProductionSchema = SchemaFactory.createForClass(KitchenProduction);
+export const KitchenProductionSchema =
+  SchemaFactory.createForClass(KitchenProduction);
 KitchenProductionSchema.index({ day: -1, createdAt: 1 });
 KitchenProductionSchema.index({ reservationId: 1 });

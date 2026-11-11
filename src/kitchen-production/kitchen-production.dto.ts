@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsIn,
   IsMongoId,
   IsNotEmpty,
   IsNumber,
@@ -10,6 +11,10 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import {
+  KITCHEN_PRODUCTION_AREAS,
+  type KitchenProductionArea,
+} from './kitchen-production.schema';
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -52,6 +57,14 @@ export class CreateKitchenProductionDto {
   @IsString()
   @MaxLength(80)
   registeredBy?: string;
+
+  @ApiPropertyOptional({
+    enum: KITCHEN_PRODUCTION_AREAS,
+    description: 'cocina (default) o taller',
+  })
+  @IsOptional()
+  @IsIn(KITCHEN_PRODUCTION_AREAS)
+  area?: KitchenProductionArea;
 }
 
 /** Editar: todo opcional; reservationId '' la desvincula. */
@@ -111,4 +124,12 @@ export class ListKitchenProductionDto {
   @IsOptional()
   @IsMongoId()
   reservationId?: string;
+
+  @ApiPropertyOptional({
+    enum: KITCHEN_PRODUCTION_AREAS,
+    description: 'cocina (default) o taller',
+  })
+  @IsOptional()
+  @IsIn(KITCHEN_PRODUCTION_AREAS)
+  area?: KitchenProductionArea;
 }

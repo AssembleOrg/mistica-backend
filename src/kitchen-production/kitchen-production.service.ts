@@ -1,12 +1,20 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { DateTime } from 'luxon';
 import { Model, Types } from 'mongoose';
 import { envConfig } from '../config/env.config';
-import { Reservation, ReservationDocument } from '../common/schemas/reservation.schema';
+import {
+  Reservation,
+  ReservationDocument,
+} from '../common/schemas/reservation.schema';
 import { User, UserDocument } from '../common/schemas/user.schema';
 import {
   KitchenProduction,
+  KitchenProductionArea,
   KitchenProductionDocument,
 } from './kitchen-production.schema';
 import {
@@ -15,6 +23,11 @@ import {
 } from './kitchen-production.dto';
 
 type Actor = { id?: string; role?: string };
+
+/** Los registros sin área son de cocina (anteriores al taller). */
+function areaFilter(area: KitchenProductionArea = 'cocina') {
+  return area === 'taller' ? { area: 'taller' } : { area: { $ne: 'taller' } };
+}
 
 @Injectable()
 export class KitchenProductionService {
@@ -37,19 +50,23 @@ export class KitchenProductionService {
       reservationLabel: p.reservationLabel,
       note: p.note,
       byName: p.byName,
+      area: p.area ?? 'cocina',
       createdAt: p.createdAt,
     };
   }
 
   /** "Stefanie · 15:30" para mostrar la reserva sin volver a buscarla. */
   private async reservationLabel(id: string): Promise<string> {
-    if (!Types.ObjectId.isValid(id)) throw new BadRequestException('Reserva inválida');
+    if (!Types.ObjectId.isValid(id))
+      throw new BadRequestException('Reserva inválida');
     const r = await this.reservationModel
       .findOne({ _id: id, deletedAt: { $exists: false } })
       .select('customerName startAt')
       .lean();
     if (!r) throw new BadRequestException('Esa reserva no existe');
-    const time = DateTime.fromJSDate(r.startAt).setZone(envConfig.timezone).toFormat('HH:mm');
+    const time = DateTime.fromJSDate(r.startAt)
+      .setZone(envConfig.timezone)
+      .toFormat('HH:mm');
     return [r.customerName?.trim(), time].filter(Boolean).join(' · ');
   }
 
@@ -57,7 +74,8 @@ export class KitchenProductionService {
     const typed = registeredBy?.trim();
     if (typed) return typed;
     if (actor?.id && Types.ObjectId.isValid(actor.id)) {
-      return (await this.userModel.findById(actor.id).select('name').lean())?.name;
+      return (await this.userModel.findById(actor.id).select('name').lean())
+        ?.name;
     }
     return undefined;
   }
@@ -78,22 +96,28 @@ export class KitchenProductionService {
           ? new Types.ObjectId(actor.id)
           : undefined,
       byName: await this.actorName(dto.registeredBy, actor),
+      area: dto.area ?? 'cocina',
     });
     return this.view(doc.toObject());
   }
 
   async update(id: string, dto: UpdateKitchenProductionDto) {
-    const doc = await this.model.findOne({ _id: id, deletedAt: { $exists: false } });
+    const doc = await this.model.findOne({
+      _id: id,
+      deletedAt: { $exists: false },
+    });
     if (!doc) throw new NotFoundException('Registro no encontrado');
     if (dto.day != null) doc.day = dto.day;
     if (dto.item != null) {
-      if (!dto.item.trim()) throw new BadRequestException('Poné qué se preparó');
+      if (!dto.item.trim())
+        throw new BadRequestException('Poné qué se preparó');
       doc.item = dto.item.trim();
     }
     if (dto.quantity != null) doc.quantity = dto.quantity;
     if (dto.unit !== undefined) doc.unit = dto.unit.trim() || undefined;
     if (dto.note !== undefined) doc.note = dto.note.trim() || undefined;
-    if (dto.registeredBy !== undefined) doc.byName = dto.registeredBy.trim() || doc.byName;
+    if (dto.registeredBy !== undefined)
+      doc.byName = dto.registeredBy.trim() || doc.byName;
     if (dto.reservationId !== undefined) {
       if (dto.reservationId) {
         doc.reservationLabel = await this.reservationLabel(dto.reservationId);
@@ -108,12 +132,20 @@ export class KitchenProductionService {
   }
 
   /** Lo producido entre dos días (inclusive), por día y en orden de carga. */
-  async list(from: string, to: string, reservationId?: string) {
+  async list(
+    from: string,
+    to: string,
+    reservationId?: string,
+    area?: KitchenProductionArea,
+  ) {
     const rows = await this.model
       .find({
         deletedAt: { $exists: false },
+        ...areaFilter(area),
         day: { $gte: from, $lte: to },
-        ...(reservationId && { reservationId: new Types.ObjectId(reservationId) }),
+        ...(reservationId && {
+          reservationId: new Types.ObjectId(reservationId),
+        }),
       })
       .sort({ day: -1, createdAt: 1, _id: 1 })
       .lean();
@@ -124,7 +156,7 @@ export class KitchenProductionService {
   async suggestions() {
     const rows = await this.model
       .aggregate<{ _id: string; item: string; unit?: string; count: number }>([
-        { $match: { deletedAt: { $exists: false } } },
+        { $match: { deletedAt: { $exists: false }, ...areaFilter('cocina') } },
         { $sort: { createdAt: -1 } },
         {
           $group: {
@@ -146,7 +178,8 @@ export class KitchenProductionService {
       { _id: id, deletedAt: { $exists: false } },
       { $set: { deletedAt: new Date() } },
     );
-    if (!res.matchedCount) throw new NotFoundException('Registro no encontrado');
+    if (!res.matchedCount)
+      throw new NotFoundException('Registro no encontrado');
     return { success: true };
   }
 }

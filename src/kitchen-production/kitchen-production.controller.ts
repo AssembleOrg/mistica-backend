@@ -31,14 +31,14 @@ interface AuthRequest extends Request {
 @Controller('kitchen-production')
 @UseGuards(JwtAuthGuard, RolesGuard, AllowedViewsGuard)
 @ApiBearerAuth()
-@AllowedViews('reservas:cocina')
+@AllowedViews('reservas:cocina', 'produccion')
 export class KitchenProductionController {
   constructor(private readonly service: KitchenProductionService) {}
 
   @Get()
   @ApiOperation({ summary: 'Producción de cocina entre dos días' })
   list(@Query() q: ListKitchenProductionDto) {
-    return this.service.list(q.from, q.to, q.reservationId);
+    return this.service.list(q.from, q.to, q.reservationId, q.area);
   }
 
   @Get('suggestions')
