@@ -71,6 +71,15 @@ export class Egress {
   @Prop({ type: Boolean, default: false })
   checked: boolean;
 
+  /**
+   * Cuándo se cargó de verdad, sólo en egresos FECHADOS (cargados para otro
+   * día: un gasto olvidado del mes pasado o uno del mes que viene). En esos
+   * `createdAt` es el día del gasto, que es por donde filtran finanzas y el
+   * cierre de mes.
+   */
+  @Prop({ type: Date })
+  recordedAt?: Date;
+
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
 

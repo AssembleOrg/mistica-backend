@@ -76,6 +76,7 @@ export class EgressesService {
       categoryName: egressObj.categoryName,
       authorizedBy: egressObj.authorizedBy,
       userId: egressObj.userId,
+      recordedAt: egressObj.recordedAt,
       createdAt: egressObj.createdAt,
       updatedAt: egressObj.updatedAt,
       deletedAt: egressObj.deletedAt,

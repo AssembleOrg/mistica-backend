@@ -36,7 +36,7 @@ import { Auditory, AllowedViews } from '../common/decorators';
 import { AllowedViewsGuard } from '../common/guards/allowed-views.guard';
 
 interface AuthRequest extends Request {
-  user?: { id: string };
+  user?: { id: string; role?: string };
 }
 
 @ApiTags('Caja')
@@ -98,7 +98,7 @@ export class CashboxController {
     @Body() dto: CreateCashExpenseDto,
     @Req() req: AuthRequest,
   ) {
-    return this.cashboxService.createExpense(dto, req.user?.id);
+    return this.cashboxService.createExpense(dto, req.user?.id, req.user?.role);
   }
 
   @Post('close')

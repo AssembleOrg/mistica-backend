@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   Min,
   MinLength,
@@ -198,6 +199,15 @@ export class CreateCashExpenseDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Día del gasto YYYY-MM-DD (hora Argentina). Hoy con caja abierta → va a la caja. Otro día (o hoy sin caja) → sólo admin: cuenta en finanzas y en el cierre del mes de ese día, sin tocar ningún arqueo.',
+    example: '2026-10-28',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'La fecha debe tener formato AAAA-MM-DD' })
+  date?: string;
 }
 
 export class EditCashSessionDto {

@@ -26,6 +26,9 @@ import {
 } from '../common/exceptions';
 import { Currency, EgressStatus, EgressType, PaymentMethod, SaleStatus } from '../common/enums';
 import { PaginatedResponse } from '../common/interfaces';
+import { UserRole } from '../common/enums/user-role.enum';
+import { envConfig } from '../config/env.config';
+import { planExpenseDate } from './expense-date';
 import { DateTime } from 'luxon';
 
 export interface CashSessionEditEntry {
@@ -255,6 +258,7 @@ export class CashboxService {
   async createExpense(
     dto: CreateCashExpenseDto,
     userId?: string,
+    userRole?: string,
   ): Promise<{
     id: string;
     egressNumber: string;
@@ -263,13 +267,24 @@ export class CashboxService {
     paymentMethod: PaymentMethod;
     notes?: string;
     createdAt: Date;
+    /** true = quedó en la caja abierta; false = registro con fecha, sin caja. */
+    inCashbox: boolean;
   }> {
     const open = await this.findOpenSession();
-    if (!open) throw new CajaNoAbiertaException();
-
     const now = new Date();
+    const plan = planExpenseDate(dto.date, now, !!open, envConfig.timezone);
+
+    if (plan.kind === 'cashbox' && !open) throw new CajaNoAbiertaException();
+    // Fechar un egreso mueve el balance de otro día/mes: sólo el admin.
+    if (plan.kind === 'dated' && userRole !== UserRole.ADMIN) {
+      throw new ForbiddenException(
+        'Solo el admin puede cargar egresos de otro día o sin caja abierta.',
+      );
+    }
+
+    const occurredAt = plan.kind === 'dated' ? plan.occurredAt : now;
     const paymentMethod = dto.paymentMethod ?? PaymentMethod.CASH;
-    const egressNumber = await this.generateEgressNumberForDate(now);
+    const egressNumber = await this.generateEgressNumberForDate(occurredAt);
 
     const doc = await this.egressModel.create({
       egressNumber,
@@ -277,14 +292,19 @@ export class CashboxService {
       amount: dto.amount,
       paymentMethod,
       type: EgressType.EXPENSE,
-      affectsCashbox: dto.affectsCashbox ?? true,
+      // Con fecha propia nunca toca un arqueo: la caja de ese día ya se contó
+      // (o todavía no existe). Para corregir el arqueo está «Editar caja».
+      affectsCashbox: plan.kind === 'dated' ? false : (dto.affectsCashbox ?? true),
       extraordinary: dto.extraordinary ?? false,
       ...(await this.categorySnap(dto.categoryId)),
       notes: dto.notes,
       currency: Currency.ARS,
       status: EgressStatus.PENDING,
       userId: userId ? (userId as any) : undefined,
-      createdAt: now,
+      // createdAt = día del gasto (todo filtra por ahí); recordedAt = cuándo
+      // se cargó de verdad, para que se vea que fue cargado después/antes.
+      ...(plan.kind === 'dated' ? { recordedAt: now } : {}),
+      createdAt: occurredAt,
       updatedAt: now,
     });
 
@@ -296,6 +316,7 @@ export class CashboxService {
       paymentMethod: doc.paymentMethod,
       notes: doc.notes,
       createdAt: doc.createdAt,
+      inCashbox: plan.kind === 'cashbox',
     };
   }
 

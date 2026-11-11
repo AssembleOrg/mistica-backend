@@ -17,6 +17,8 @@ export interface IEgress {
   notes?: string;
   authorizedBy?: string;
   userId?: Types.ObjectId;
+  /** Cuándo se cargó, si es un egreso fechado (createdAt = día del gasto). */
+  recordedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date;
